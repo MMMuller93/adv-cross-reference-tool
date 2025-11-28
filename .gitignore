@@ -1,0 +1,12 @@
+node_modules/
+.DS_Store
+.env
+*.log
+npm-debug.log*
+.vscode/
+.idea/
+claude best practices/
+project_state.md
+features.json
+init.sh
+FUTURE_FEATURES.md

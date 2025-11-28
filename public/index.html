@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en" class="antialiased">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cross-Reference Intelligence Platform</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'system-ui', 'sans-serif'],
+            serif: ['"Source Serif 4"', 'Georgia', 'serif'],
+            mono: ['"JetBrains Mono"', 'Menlo', 'monospace'],
+          },
+          colors: {
+            slate: {
+              50: '#f8fafc',
+              100: '#f1f5f9',
+              200: '#e2e8f0',
+              300: '#cbd5e1',
+              400: '#94a3b8',
+              500: '#64748b',
+              600: '#475569',
+              700: '#334155',
+              800: '#1e293b',
+              900: '#0f172a',
+              950: '#020617',
+            },
+            gray: {
+              25: '#FCFCFC',
+              50: '#FAFAFA',
+              100: '#F4F4F5',
+              200: '#E4E4E7',
+              300: '#D4D4D8',
+              400: '#A1A1AA',
+              500: '#71717A',
+              600: '#52525B',
+              700: '#3F3F46',
+              800: '#27272A',
+              900: '#18181B',
+              950: '#09090B',
+            },
+            primary: {
+              50: '#EEF2FF',
+              100: '#E0E7FF',
+              200: '#C7D2FE',
+              300: '#A5B4FC',
+              400: '#818CF8',
+              500: '#6366F1',
+              600: '#4F46E5',
+              700: '#4338CA',
+              800: '#3730A3',
+              900: '#312E81',
+            }
+          },
+          letterSpacing: {
+            tighter: '-0.04em',
+            tight: '-0.02em',
+            normal: '-0.01em',
+            wide: '0.02em',
+            wider: '0.05em',
+          },
+          fontSize: {
+            '3xs': '0.55rem',
+            '2xs': '0.625rem',
+            'xs': ['0.8125rem', { lineHeight: '1.25rem' }],
+            'sm': ['0.875rem', { lineHeight: '1.5rem' }],
+          },
+          boxShadow: {
+            'xs': '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+            'glow': '0 0 0 1px rgba(79, 70, 229, 0.1), 0 2px 8px rgba(79, 70, 229, 0.1)',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #FAFAFA;
+      color: #18181B;
+      font-feature-settings: "cv11", "ss01", "tnum";
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #E4E4E7; border-radius: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #A1A1AA; }
+    .tabular-nums { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+    input[type="search"]::-webkit-search-decoration,
+    input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" src="app.js?t=1732700000"></script>
+</body>
+</html>
