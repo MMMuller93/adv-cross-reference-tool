@@ -419,20 +419,14 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
             </div>
           </div>
 
-          {/* Pricing Callout */}
-          <div className="bg-gradient-to-r from-amber-50 to-amber-100/50 rounded-lg p-4 mb-4 border border-amber-200/50">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs font-semibold text-amber-800 uppercase tracking-wide">Professional Plan</div>
-                <div className="mt-1">
-                  <span className="text-2xl font-bold text-gray-900">$99</span>
-                  <span className="text-sm text-gray-500">/month</span>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-[10px] text-amber-700 font-medium">or save 20%</div>
-                <div className="text-sm font-semibold text-gray-700">$79/mo <span className="text-gray-400 font-normal">annual</span></div>
-              </div>
+          {/* Contact for Access */}
+          <div className="bg-slate-50 rounded-lg p-4 mb-4 border border-slate-200">
+            <div className="text-center">
+              <div className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Professional Access</div>
+              <p className="text-sm text-gray-600">Contact us for pricing and enterprise options</p>
+              <a href="mailto:contact@strategicfundpartners.com" className="text-sm font-medium text-slate-800 hover:text-slate-600 mt-1 inline-block">
+                contact@strategicfundpartners.com
+              </a>
             </div>
           </div>
 
@@ -461,29 +455,27 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
             <div className="space-y-2">
               <button
                 onClick={() => { onClose(); onOpenAuth('signup'); }}
-                className="w-full py-3 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors text-sm flex items-center justify-center gap-2"
+                className="w-full py-3 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors text-sm"
               >
-                <span>Start Free Trial</span>
-                <span className="text-xs text-slate-400">then $99/mo</span>
+                Create Free Account
               </button>
               <button
                 onClick={() => { onClose(); onOpenAuth('login'); }}
                 className="w-full py-2.5 border border-gray-200 text-gray-600 rounded-lg font-medium hover:bg-gray-50 transition-colors text-sm"
               >
-                Already subscribed? Sign In
+                Already have access? Sign In
               </button>
             </div>
           ) : (
             <div className="space-y-3">
-              <button
-                onClick={() => { window.open('mailto:contact@example.com?subject=Professional Subscription - $99/mo', '_blank'); }}
+              <a
+                href="mailto:contact@strategicfundpartners.com?subject=Professional Access Request"
                 className="w-full py-3 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors text-sm flex items-center justify-center gap-2"
               >
-                <span>Subscribe Now</span>
-                <span className="text-xs text-slate-400">$99/mo</span>
-              </button>
+                Request Access
+              </a>
               <p className="text-center text-xs text-gray-500">
-                Secure checkout. Cancel anytime. 14-day money-back guarantee.
+                Our team will respond within 24 hours
               </p>
             </div>
           )}
@@ -492,7 +484,7 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
         {/* Footer */}
         <div className="px-6 py-3 bg-gray-50 border-t border-gray-100">
           <p className="text-center text-[11px] text-gray-400">
-            Questions? Contact us at <span className="text-gray-600">support@example.com</span>
+            Questions? <a href="mailto:contact@strategicfundpartners.com" className="text-gray-600 hover:text-gray-800">contact@strategicfundpartners.com</a>
           </p>
         </div>
       </div>
@@ -808,15 +800,9 @@ const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters,
                     : 'text-gray-400 group-hover:text-gray-600'
               }`} />
               {item.label}
-              {/* Premium badge and lock */}
+              {/* Premium badge */}
               {item.premium && !hasPremiumAccess && (
-                <div className="ml-auto flex items-center gap-1.5">
-                  <span className="px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider bg-gradient-to-r from-amber-100 to-amber-50 text-amber-700 rounded border border-amber-200/50">Pro</span>
-                  <LockIcon className="w-3 h-3 text-amber-500/70" />
-                </div>
-              )}
-              {item.premium && hasPremiumAccess && (
-                <span className="ml-auto px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-600 rounded">Active</span>
+                <LockIcon className="ml-auto w-3.5 h-3.5 text-slate-400" />
               )}
               {activeTab === item.id && !item.premium && <span className="absolute right-2.5 top-2.5 w-1.5 h-1.5 rounded-full bg-slate-500"></span>}
             </button>
@@ -1001,70 +987,28 @@ const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters,
       {/* Footer - User Section + Reset Filters */}
       <div className="border-t border-gray-200 bg-gray-50/50">
         {/* User Section */}
-        <div className="p-4 border-b border-gray-100">
-          {user ? (
-            // Logged-in user
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-8 h-8 bg-slate-700 rounded-full flex items-center justify-center text-white text-xs font-medium flex-shrink-0">
-                    {user.email?.charAt(0).toUpperCase() || 'U'}
-                  </div>
-                  <div className="min-w-0">
-                    <span className="text-xs text-gray-700 truncate block">{user.email}</span>
-                    {hasPremiumAccess ? (
-                      <span className="text-[10px] text-emerald-600 font-medium">Professional</span>
-                    ) : (
-                      <span className="text-[10px] text-gray-400">Free Plan</span>
-                    )}
-                  </div>
-                </div>
-                <button
-                  onClick={onLogout}
-                  className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
-                  title="Sign out"
-                >
-                  <LogOutIcon className="w-4 h-4" />
-                </button>
-              </div>
-              {/* Show search limit for non-premium users */}
-              {!hasPremiumAccess && (
-                <>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-500">Searches today</span>
-                    <span className={`font-medium ${searchCount >= SEARCH_LIMIT ? 'text-red-600' : 'text-gray-700'}`}>
-                      {Math.max(0, SEARCH_LIMIT - searchCount)} / {SEARCH_LIMIT}
-                    </span>
-                  </div>
-                  <button
-                    onClick={onShowPaywall}
-                    className="w-full py-1.5 px-3 bg-gradient-to-r from-amber-50 to-amber-100/50 border border-amber-200 text-amber-900 text-[11px] font-medium rounded-md hover:from-amber-100 hover:to-amber-100 transition-colors flex items-center justify-center gap-1.5"
-                  >
-                    <LockIcon className="w-3 h-3 text-amber-600" />
-                    Upgrade for $99/mo
-                  </button>
-                </>
-              )}
-            </div>
-          ) : (
-            // Anonymous user
+        {/* Search limit - only for non-premium users */}
+        {!hasPremiumAccess && (
+          <div className="p-4 border-b border-gray-100">
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-gray-500">Searches today</span>
                 <span className={`font-medium ${searchCount >= SEARCH_LIMIT ? 'text-red-600' : 'text-gray-700'}`}>
-                  {Math.max(0, SEARCH_LIMIT - searchCount)} / {SEARCH_LIMIT} remaining
+                  {Math.max(0, SEARCH_LIMIT - searchCount)} / {SEARCH_LIMIT}
                 </span>
               </div>
-              <button
-                onClick={() => onOpenAuth('login')}
-                className="w-full py-2 px-3 bg-slate-800 text-white text-[11px] font-medium rounded-md hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
-              >
-                <UserIcon className="w-3.5 h-3.5" />
-                Sign In
-              </button>
+              {!user && (
+                <button
+                  onClick={() => onOpenAuth('login')}
+                  className="w-full py-2 px-3 bg-slate-800 text-white text-[11px] font-medium rounded-md hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  <UserIcon className="w-3.5 h-3.5" />
+                  Sign In
+                </button>
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Reset Filters Button */}
         <div className="p-4">
@@ -2032,6 +1976,8 @@ function App() {
   const [searchCount, setSearchCount] = useState(getSearchCount());
 
   // Premium access state (requires sign-in AND payment)
+  // Whitelisted premium users (for testing/admin)
+  const PREMIUM_USERS = ['mmmuller93@gmail.com', 'contact@strategicfundpartners.com'];
   const [hasPremiumAccess, setHasPremiumAccess] = useState(false);
   const [showPaywallModal, setShowPaywallModal] = useState(false);
 
@@ -2107,6 +2053,15 @@ function App() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Check premium access when user changes
+  useEffect(() => {
+    if (user?.email && PREMIUM_USERS.includes(user.email.toLowerCase())) {
+      setHasPremiumAccess(true);
+    } else {
+      setHasPremiumAccess(false);
+    }
+  }, [user]);
 
   // Auth handlers
   const handleOpenAuth = (mode) => {
