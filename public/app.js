@@ -27,6 +27,37 @@ const YEARS = ['2011','2012','2013','2014','2015','2016','2017','2018','2019','2
 const US_STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
 
 // ============================================================================
+// SUPABASE AUTH CLIENT
+// ============================================================================
+const supabase = window.supabase.createClient(SUPABASE_ADV_URL, SUPABASE_ADV_KEY);
+
+// ============================================================================
+// RATE LIMITING (localStorage-based for anonymous users)
+// ============================================================================
+const SEARCH_LIMIT = 10;
+const STORAGE_KEY = 'pmip_search_count';
+const STORAGE_DATE_KEY = 'pmip_search_date';
+
+const getSearchCount = () => {
+  const today = new Date().toDateString();
+  const storedDate = localStorage.getItem(STORAGE_DATE_KEY);
+  if (storedDate !== today) {
+    localStorage.setItem(STORAGE_DATE_KEY, today);
+    localStorage.setItem(STORAGE_KEY, '0');
+    return 0;
+  }
+  return parseInt(localStorage.getItem(STORAGE_KEY) || '0');
+};
+
+const incrementSearchCount = () => {
+  const count = getSearchCount() + 1;
+  localStorage.setItem(STORAGE_KEY, count.toString());
+  return count;
+};
+
+const getRemainingSearches = () => SEARCH_LIMIT - getSearchCount();
+
+// ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
 // Get effective AUM - use total_aum if available, otherwise find latest yearly value
@@ -48,6 +79,34 @@ const parseCurrency = (value) => {
   return isNaN(parsed) ? null : parsed;
 };
 
+// Normalize related party names - only remove N/A values and prefixes
+const normalizeRelatedPartyName = (name) => {
+  if (!name || name.trim().toUpperCase() === 'N/A') return null;
+
+  let normalized = name;
+
+  // Remove N/A prefix
+  normalized = normalized.replace(/^N\/A\s+/i, '');
+
+  // Remove entity type prefixes (LLC, Ltd., etc. at the beginning only)
+  normalized = normalized.replace(/^LLC\s+/i, '');
+  normalized = normalized.replace(/^Ltd\.?\s+/i, '');
+  normalized = normalized.replace(/^Limited\s+/i, '');
+  normalized = normalized.replace(/^L\.L\.C\.?\s+/i, '');
+  normalized = normalized.replace(/^L\.P\.?\s+/i, '');
+  normalized = normalized.replace(/^Inc\.?\s+/i, '');
+
+  // DO NOT REMOVE SUFFIXES - keep "Sydecar LLC", "Belltower Fund Group Ltd.", etc. as-is
+
+  // Remove trailing commas and spaces only
+  normalized = normalized.replace(/[,\s]+$/, '').trim();
+
+  // If after normalization we're left with nothing or just N/A, return null
+  if (!normalized || normalized.toUpperCase() === 'N/A') return null;
+
+  return normalized;
+};
+
 const formatCurrency = (value) => {
   const num = parseCurrency(value);
   if (num === null || num === 0) return 'N/A';
@@ -64,9 +123,132 @@ const formatFullCurrency = (value) => {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(num);
 };
 
+const parseFilingDate = (dateStr) => {
+  if (!dateStr) return new Date(0);
+
+  // Check if it's YYYY-MM-DD format
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return new Date(dateStr);
+  }
+
+  // Check if it's DD-MMM-YYYY format
+  const monthMap = {
+    'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3, 'MAY': 4, 'JUN': 5,
+    'JUL': 6, 'AUG': 7, 'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11
+  };
+
+  const match = dateStr.match(/^(\d{1,2})-([A-Z]{3})-(\d{4})$/i);
+  if (match) {
+    const day = parseInt(match[1], 10);
+    const month = monthMap[match[2].toUpperCase()];
+    const year = parseInt(match[3], 10);
+    if (month !== undefined) {
+      return new Date(year, month, day);
+    }
+  }
+
+  // Fallback: try native parsing
+  return new Date(dateStr);
+};
+
+const formatExemptions = (exemptionsStr) => {
+  if (!exemptionsStr) return '';
+
+  // Only show 506(b) and 506(c) - don't show 3(c)(1) or 3(c)(7) since badges already show those
+  let result = exemptionsStr
+    // 506(b) and 506(c) patterns
+    .replace(/\b0?6B\b/gi, '506(b)')
+    .replace(/\b0?6C\b/gi, '506(c)')
+    // Remove 3(c) patterns entirely (they're shown as badges)
+    .replace(/\b3C\.7\b/gi, '')
+    .replace(/\b3\.C\.7\b/gi, '')
+    .replace(/\b3\.c\.7\b/gi, '')
+    .replace(/\b3c7\b/gi, '')
+    .replace(/\b3C\.1\b/gi, '')
+    .replace(/\b3\.C\.1\b/gi, '')
+    .replace(/\b3\.c\.1\b/gi, '')
+    .replace(/\b3c1\b/gi, '')
+    .replace(/\b3C\b/gi, '');
+
+  // Clean up extra commas and whitespace
+  result = result
+    .replace(/,\s*,/g, ',')  // Remove double commas
+    .replace(/^[,\s]+|[,\s]+$/g, '')  // Trim leading/trailing commas and spaces
+    .replace(/\s+,/g, ',')  // Remove space before comma
+    .replace(/,\s+/g, ', ');  // Ensure single space after comma
+
+  return result;
+};
+
 const formatCompactNumber = (value) => {
   if (!value) return '0';
   return new Intl.NumberFormat('en-US', { notation: 'compact', compactDisplay: 'short' }).format(value);
+};
+
+// Parse search query to extract include/exclude terms
+// Supports: "anthropic -philanthropic" to include anthropic but exclude philanthropic
+// Supports: "exact phrase" for exact phrase matching
+const parseSearchQuery = (query) => {
+  if (!query || !query.trim()) {
+    return { includeTerms: [], excludeTerms: [], exactPhrases: [], apiQuery: '' };
+  }
+
+  const includeTerms = [];
+  const excludeTerms = [];
+  const exactPhrases = [];
+
+  // First extract exact phrases (quoted strings)
+  let remaining = query;
+  const phraseRegex = /"([^"]+)"/g;
+  let match;
+  while ((match = phraseRegex.exec(query)) !== null) {
+    exactPhrases.push(match[1].toLowerCase());
+    remaining = remaining.replace(match[0], ' ');
+  }
+
+  // Split remaining into tokens
+  const tokens = remaining.split(/\s+/).filter(t => t);
+
+  for (const token of tokens) {
+    if (token.startsWith('-') && token.length > 1) {
+      // Exclude term
+      excludeTerms.push(token.slice(1).toLowerCase());
+    } else if (token.startsWith('+') && token.length > 1) {
+      // Explicit include (treat same as regular term)
+      includeTerms.push(token.slice(1).toLowerCase());
+    } else if (token.length > 0) {
+      // Regular include term
+      includeTerms.push(token.toLowerCase());
+    }
+  }
+
+  // Build API query from include terms only (backend doesn't support exclusions)
+  const apiQuery = includeTerms.join(' ');
+
+  return { includeTerms, excludeTerms, exactPhrases, apiQuery };
+};
+
+// Filter results based on parsed search (apply exclusions client-side)
+const applySearchFilters = (results, parsedQuery, getSearchableText) => {
+  if (!parsedQuery.excludeTerms.length && !parsedQuery.exactPhrases.length) {
+    return results;
+  }
+
+  return results.filter(item => {
+    const text = getSearchableText(item).toLowerCase();
+
+    // Check exact phrases (must contain all)
+    for (const phrase of parsedQuery.exactPhrases) {
+      if (!text.includes(phrase)) return false;
+    }
+
+    // Check exclusions (must not contain any)
+    for (const exclude of parsedQuery.excludeTerms) {
+      if (text.includes(exclude)) return false;
+    }
+
+    return true;
+  });
 };
 
 const formatDate = (dateStr) => {
@@ -184,6 +366,215 @@ const ChevronRightIcon = (p) => <Icon {...p}><path d="m9 18 6-6-6-6"/></Icon>;
 const CalendarIcon = (p) => <Icon {...p}><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></Icon>;
 const TrendingUpIcon = (p) => <Icon {...p}><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></Icon>;
 const TrendingDownIcon = (p) => <Icon {...p}><polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/></Icon>;
+const UserIcon = (p) => <Icon {...p}><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></Icon>;
+const LogOutIcon = (p) => <Icon {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></Icon>;
+const LockIcon = (p) => <Icon {...p}><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></Icon>;
+
+// ============================================================================
+// PAYWALL MODAL COMPONENT
+// ============================================================================
+const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100]" onClick={onClose}>
+      <div
+        className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center">
+              <LockIcon className="w-6 h-6 text-slate-600" />
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <XIcon className="w-5 h-5" />
+            </button>
+          </div>
+
+          <h2 className="text-xl font-semibold text-gray-900 font-serif mb-2">
+            Premium Feature
+          </h2>
+          <p className="text-gray-600 text-sm mb-6">
+            New Managers Discovery and Intelligence Radar are premium features.
+            {!user ? ' Sign in and upgrade to access these powerful tools.' : ' Upgrade your account to access these powerful tools.'}
+          </p>
+
+          <div className="bg-slate-50 rounded-lg p-4 mb-6">
+            <h3 className="text-sm font-semibold text-gray-900 mb-2">Premium includes:</h3>
+            <ul className="space-y-2 text-sm text-gray-600">
+              <li className="flex items-center gap-2">
+                <CheckIcon className="w-4 h-4 text-green-600" />
+                New Managers Discovery - Find emerging fund managers
+              </li>
+              <li className="flex items-center gap-2">
+                <CheckIcon className="w-4 h-4 text-green-600" />
+                Intelligence Radar - Cross-reference ADV & Form D filings
+              </li>
+              <li className="flex items-center gap-2">
+                <CheckIcon className="w-4 h-4 text-green-600" />
+                Unlimited searches across all modules
+              </li>
+              <li className="flex items-center gap-2">
+                <CheckIcon className="w-4 h-4 text-green-600" />
+                Export data in CSV and JSON formats
+              </li>
+            </ul>
+          </div>
+
+          {!user ? (
+            <div className="space-y-3">
+              <button
+                onClick={() => { onClose(); onOpenAuth('signup'); }}
+                className="w-full py-2.5 bg-slate-800 text-white rounded-md font-medium hover:bg-slate-700 transition-colors"
+              >
+                Create Account to Upgrade
+              </button>
+              <button
+                onClick={() => { onClose(); onOpenAuth('login'); }}
+                className="w-full py-2.5 border border-gray-300 text-gray-700 rounded-md font-medium hover:bg-gray-50 transition-colors"
+              >
+                Sign In
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => { alert('Payment integration coming soon! Contact us for early access.'); }}
+              className="w-full py-2.5 bg-slate-800 text-white rounded-md font-medium hover:bg-slate-700 transition-colors"
+            >
+              Upgrade to Premium
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// AUTH MODAL COMPONENT
+// ============================================================================
+const AuthModal = ({ isOpen, onClose, mode, setMode }) => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setMessage('');
+    setLoading(true);
+
+    try {
+      if (mode === 'signup') {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+        });
+        if (error) throw error;
+        setMessage('Check your email to confirm your account.');
+      } else {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (error) throw error;
+        onClose();
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100]" onClick={onClose}>
+      <div
+        className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-semibold text-gray-900 font-serif">
+              {mode === 'signup' ? 'Create Account' : 'Sign In'}
+            </h2>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <XIcon className="w-5 h-5" />
+            </button>
+          </div>
+
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-600">
+              {error}
+            </div>
+          )}
+
+          {message && (
+            <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md text-sm text-green-600">
+              {message}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-transparent"
+                placeholder="you@example.com"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-transparent"
+                placeholder={mode === 'signup' ? 'Min 6 characters' : 'Your password'}
+                minLength={6}
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-2.5 bg-slate-800 text-white rounded-md font-medium hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Please wait...' : mode === 'signup' ? 'Create Account' : 'Sign In'}
+            </button>
+          </form>
+
+          <div className="mt-4 text-center text-sm text-gray-600">
+            {mode === 'signup' ? (
+              <>
+                Already have an account?{' '}
+                <button onClick={() => setMode('login')} className="text-slate-700 font-medium hover:underline">
+                  Sign in
+                </button>
+              </>
+            ) : (
+              <>
+                Don't have an account?{' '}
+                <button onClick={() => setMode('signup')} className="text-slate-700 font-medium hover:underline">
+                  Create one
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // ============================================================================
 // LOADING OVERLAY
@@ -307,7 +698,20 @@ const HistoricalChart = ({ data, label, color = '#10b981' }) => {
 // ============================================================================
 // SIDEBAR COMPONENT (Gemini style - EXACT match)
 // ============================================================================
-const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters }) => {
+const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters, user, searchCount, onOpenAuth, onLogout, hasPremiumAccess, onShowPaywall }) => {
+  // Premium tabs require sign-in AND payment
+  const PREMIUM_TABS = ['new_managers', 'cross_reference'];
+  const isPremiumTab = (tabId) => PREMIUM_TABS.includes(tabId);
+  const canAccessTab = (tabId) => !isPremiumTab(tabId) || hasPremiumAccess;
+
+  const handleTabClick = (tabId) => {
+    if (isPremiumTab(tabId) && !hasPremiumAccess) {
+      onShowPaywall();
+      return;
+    }
+    setActiveTab(tabId);
+  };
+
   return (
     <aside className="w-[280px] bg-white border-r border-gray-200 flex flex-col flex-shrink-0 z-30 shadow-[4px_0_24px_-12px_rgba(0,0,0,0.1)]">
       {/* Brand - Icon only, no branding name */}
@@ -317,7 +721,7 @@ const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters 
             <PieChartIcon className="w-4 h-4" />
           </div>
           <div>
-            <span className="block text-sm font-bold tracking-tight text-gray-900 leading-none">Cross-Reference</span>
+            <span className="block text-sm font-bold tracking-tight text-gray-900 leading-none">Private Markets</span>
             <span className="block text-[10px] text-gray-500 font-medium mt-0.5 tracking-wide uppercase">Intelligence Platform</span>
           </div>
         </div>
@@ -330,12 +734,12 @@ const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters 
           {[
             { id: 'advisers', icon: BriefcaseIcon, label: 'Advisers' },
             { id: 'funds', icon: Building2Icon, label: 'Funds' },
-            { id: 'new_managers', icon: TrendingUpIcon, label: 'New Managers' },
-            { id: 'cross_reference', icon: FileWarningIcon, label: 'Intelligence Radar' }
+            { id: 'new_managers', icon: TrendingUpIcon, label: 'New Managers', premium: true },
+            { id: 'cross_reference', icon: FileWarningIcon, label: 'Intelligence Radar', premium: true }
           ].map(item => (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => handleTabClick(item.id)}
               className={`w-full flex items-center px-3 py-2 text-xs font-medium rounded-md transition-all duration-200 group relative ${
                 activeTab === item.id
                   ? item.id === 'cross_reference'
@@ -350,6 +754,10 @@ const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters 
                   : 'text-gray-400 group-hover:text-gray-600'
               }`} />
               {item.label}
+              {/* Premium lock icon */}
+              {item.premium && !hasPremiumAccess && (
+                <LockIcon className="w-3 h-3 ml-auto text-gray-400" />
+              )}
               {activeTab === item.id && <span className="absolute right-2.5 top-2.5 w-1.5 h-1.5 rounded-full bg-slate-500"></span>}
             </button>
           ))}
@@ -476,6 +884,19 @@ const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters 
               </div>
 
               <div className="space-y-2">
+                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">REGISTRATION</label>
+                <select
+                  className="block w-full px-2.5 py-2 text-[11px] bg-white border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-slate-400 text-slate-700 appearance-none"
+                  value={filters.hasAdv || ''}
+                  onChange={(e) => setFilters(f => ({ ...f, hasAdv: e.target.value }))}
+                >
+                  <option value="">All Funds</option>
+                  <option value="yes">Has Form ADV</option>
+                  <option value="no">No Form ADV</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
                 <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">FILING DATE RANGE</label>
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
@@ -517,15 +938,55 @@ const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters 
         </div>
       </div>
 
-      {/* Footer - Reset Filters Button (Gemini style) */}
-      <div className="p-4 border-t border-gray-200 bg-gray-50/50">
-        <button
-          onClick={onResetFilters}
-          className="w-full py-2 px-3 border border-gray-200 shadow-sm text-[11px] font-medium rounded-md text-gray-600 bg-white hover:bg-gray-50 hover:text-gray-900 transition-all flex items-center justify-center gap-2"
-        >
-          <FilterIcon className="w-3.5 h-3.5" />
-          Reset Filters
-        </button>
+      {/* Footer - User Section + Reset Filters */}
+      <div className="border-t border-gray-200 bg-gray-50/50">
+        {/* User Section */}
+        <div className="p-4 border-b border-gray-100">
+          {user ? (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-8 h-8 bg-slate-700 rounded-full flex items-center justify-center text-white text-xs font-medium flex-shrink-0">
+                  {user.email?.charAt(0).toUpperCase() || 'U'}
+                </div>
+                <span className="text-xs text-gray-700 truncate">{user.email}</span>
+              </div>
+              <button
+                onClick={onLogout}
+                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                title="Sign out"
+              >
+                <LogOutIcon className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-500">Searches today</span>
+                <span className={`font-medium ${searchCount >= SEARCH_LIMIT ? 'text-red-600' : 'text-gray-700'}`}>
+                  {Math.max(0, SEARCH_LIMIT - searchCount)} / {SEARCH_LIMIT} remaining
+                </span>
+              </div>
+              <button
+                onClick={() => onOpenAuth('login')}
+                className="w-full py-2 px-3 bg-slate-800 text-white text-[11px] font-medium rounded-md hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
+              >
+                <UserIcon className="w-3.5 h-3.5" />
+                Sign In for Unlimited Access
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Reset Filters Button */}
+        <div className="p-4">
+          <button
+            onClick={onResetFilters}
+            className="w-full py-2 px-3 border border-gray-200 shadow-sm text-[11px] font-medium rounded-md text-gray-600 bg-white hover:bg-gray-50 hover:text-gray-900 transition-all flex items-center justify-center gap-2"
+          >
+            <FilterIcon className="w-3.5 h-3.5" />
+            Reset Filters
+          </button>
+        </div>
       </div>
     </aside>
   );
@@ -542,6 +1003,8 @@ const AdviserDetailView = ({ adviser, onBack, onNavigateToFund }) => {
   const [contactsExpanded, setContactsExpanded] = useState(true);
   const [ownersExpanded, setOwnersExpanded] = useState(false);
   const [serviceProvidersExpanded, setServiceProvidersExpanded] = useState(false);
+  const [portfolioExpanded, setPortfolioExpanded] = useState(false);
+  const [portfolioCompanies, setPortfolioCompanies] = useState([]);
 
   // State for enriched AUM (after aggregating fund GAVs as fallback)
   const [enrichedAumByYear, setEnrichedAumByYear] = useState({});
@@ -684,6 +1147,27 @@ const AdviserDetailView = ({ adviser, onBack, onNavigateToFund }) => {
     };
     fetchFunds();
   }, [adviser?.crd, adviser]);
+
+  // Fetch portfolio companies if this adviser has enriched data
+  useEffect(() => {
+    if (!adviser?.crd) return;
+
+    const fetchPortfolio = async () => {
+      try {
+        // First check if this adviser exists in enriched_managers (by CRD)
+        const enrichedRes = await fetch(`/api/advisers/unified/${adviser.crd}`);
+        const enrichedData = await enrichedRes.json();
+
+        if (enrichedData.success && enrichedData.adviser.portfolioCompanies) {
+          setPortfolioCompanies(enrichedData.adviser.portfolioCompanies);
+        }
+      } catch (err) {
+        console.error('Error fetching portfolio companies:', err);
+      }
+    };
+
+    fetchPortfolio();
+  }, [adviser?.crd]);
 
   // Parse owners from semicolon-separated fields
   const owners = useMemo(() => {
@@ -992,6 +1476,48 @@ const AdviserDetailView = ({ adviser, onBack, onNavigateToFund }) => {
               )}
             </div>
           )}
+
+          {/* Portfolio Companies Section */}
+          {portfolioCompanies.length > 0 && (
+            <div className="border border-slate-200 rounded-lg bg-white overflow-hidden">
+              <button onClick={() => setPortfolioExpanded(!portfolioExpanded)} className="w-full px-5 py-3 flex justify-between items-center hover:bg-slate-50 transition-colors">
+                <div className="flex items-center gap-2">
+                  <Building2Icon className="w-4 h-4 text-slate-400" />
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PORTFOLIO COMPANIES ({portfolioCompanies.length})</span>
+                </div>
+                <ChevronDownIcon className={`w-4 h-4 text-slate-400 transition-transform ${portfolioExpanded ? 'rotate-180' : ''}`} />
+              </button>
+              {portfolioExpanded && (
+                <div className="border-t border-slate-100 p-5">
+                  <div className="grid grid-cols-3 gap-4">
+                    {portfolioCompanies.map((company, i) => (
+                      <div key={i} className="border border-slate-200 rounded-lg p-3 hover:border-slate-300 transition-colors">
+                        <div className="text-[13px] font-semibold text-slate-900 mb-1">{company.company_name}</div>
+                        {company.company_website && (
+                          <a href={company.company_website.startsWith('http') ? company.company_website : `https://${company.company_website}`} target="_blank" rel="noopener noreferrer" className="text-[11px] text-blue-600 hover:text-blue-800 hover:underline block truncate">
+                            {company.company_website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                          </a>
+                        )}
+                        {company.investment_stage && (
+                          <span className="inline-flex items-center mt-2 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide rounded bg-slate-100 text-slate-600">
+                            {company.investment_stage}
+                          </span>
+                        )}
+                        {company.source_url && (
+                          <div className="mt-2 text-[9px] text-slate-400">
+                            Source: {company.extraction_method}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded text-[11px] text-blue-800">
+                    <strong>Note:</strong> Portfolio data is automatically extracted from public sources. Accuracy may vary. Confidence: {portfolioCompanies[0]?.confidence_score ? (portfolioCompanies[0].confidence_score * 100).toFixed(0) : 50}%
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* MANAGED FUNDS Section - with growth columns like original */}
@@ -1172,7 +1698,12 @@ const FundDetailView = ({ fund, onBack, onNavigateToAdviser }) => {
         <div className="mb-10 flex justify-between items-start">
           <div>
             <div className="flex items-center space-x-2 mb-3">
-              <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-700 ring-1 ring-inset ring-slate-700/10 uppercase tracking-wide">{fund.fund_type || 'HEDGE FUND'}</span>
+              <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-[10px] font-medium text-gray-700 ring-1 ring-inset ring-gray-700/10 uppercase tracking-wide">{fund.fund_type || 'HEDGE FUND'}</span>
+              {fund.adviser_entity_crd && (
+                <a href={`https://adviserinfo.sec.gov/firm/summary/${fund.adviser_entity_crd}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center rounded-md bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20 hover:bg-emerald-100 transition-colors">
+                  ✓ Form ADV
+                </a>
+              )}
             </div>
             <h1 className="text-2xl font-bold text-gray-900 tracking-tight mb-1.5 leading-tight">{fund.fund_name}</h1>
             <p className="text-xs text-gray-500 flex items-center gap-2">
@@ -1270,10 +1801,13 @@ const FundDetailView = ({ fund, onBack, onNavigateToAdviser }) => {
                   </div>
                   <div>
                     <dt className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Exemptions Claimed</dt>
-                    <dd className="text-xs font-medium text-gray-900 flex space-x-2">
-                      {fund.exclusion_3c1 === 'Y' && <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-[11px]">3(c)1</span>}
-                      {fund.exclusion_3c7 === 'Y' && <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-[11px]">3(c)7</span>}
-                      {fund.exclusion_3c1 !== 'Y' && fund.exclusion_3c7 !== 'Y' && <span className="text-gray-400">None</span>}
+                    <dd className="text-xs font-medium text-gray-900 flex flex-wrap gap-1.5">
+                      {fund.exclusion_3c1 === 'Y' && <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-[11px] font-semibold">3(c)(1)</span>}
+                      {fund.exclusion_3c7 === 'Y' && <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-[11px] font-semibold">3(c)(7)</span>}
+                      {(fund.federal_exemptions || fund.form_d_exemptions) && (
+                        <span className="text-[11px] text-gray-600">{formatExemptions(fund.federal_exemptions || fund.form_d_exemptions)}</span>
+                      )}
+                      {fund.exclusion_3c1 !== 'Y' && fund.exclusion_3c7 !== 'Y' && !fund.federal_exemptions && !fund.form_d_exemptions && <span className="text-gray-400">None</span>}
                     </dd>
                   </div>
                   <div>
@@ -1291,33 +1825,33 @@ const FundDetailView = ({ fund, onBack, onNavigateToAdviser }) => {
 
           {/* Sidebar */}
           <div className="col-span-4 space-y-6">
-            {/* Manager Contact - Slate Background */}
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-5 shadow-sm">
-              <h3 className="text-[10px] font-bold text-slate-700 uppercase tracking-widest mb-4">Manager Contact</h3>
+            {/* Manager Contact */}
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-5 shadow-sm">
+              <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-4">Manager Contact</h3>
               <div className="space-y-3">
                 {adviserWebsite && (
                   <a href={normalizeUrl(adviserWebsite)} target="_blank" rel="noopener noreferrer" className="flex items-center cursor-pointer group">
-                    <GlobeIcon className="w-3.5 h-3.5 text-slate-500 mr-3" />
-                    <span className="text-xs font-medium text-slate-700 border-b border-slate-300 group-hover:border-slate-600 transition-all truncate">{adviserWebsite.replace(/^https?:\/\//, '').replace(/\/$/, '')}</span>
+                    <GlobeIcon className="w-3.5 h-3.5 text-gray-400 mr-3" />
+                    <span className="text-xs font-medium text-gray-700 border-b border-gray-300 group-hover:border-gray-600 transition-all truncate">{adviserWebsite.replace(/^https?:\/\//, '').replace(/\/$/, '')}</span>
                   </a>
                 )}
                 {adviserPhone && (
                   <a href={`tel:${adviserPhone}`} className="flex items-center group cursor-pointer">
-                    <PhoneIcon className="w-3.5 h-3.5 text-slate-500 mr-3" />
-                    <span className="text-xs font-medium text-slate-700 group-hover:text-slate-900">{adviserPhone}</span>
+                    <PhoneIcon className="w-3.5 h-3.5 text-gray-400 mr-3" />
+                    <span className="text-xs font-medium text-gray-700 group-hover:text-gray-900">{adviserPhone}</span>
                   </a>
                 )}
                 {adviserEmail && (
                   <a href={`mailto:${adviserEmail}`} className="flex items-center group cursor-pointer">
-                    <MailIcon className="w-3.5 h-3.5 text-slate-500 mr-3" />
-                    <span className="text-xs font-medium text-slate-700 group-hover:text-slate-900">{adviserEmail}</span>
+                    <MailIcon className="w-3.5 h-3.5 text-gray-400 mr-3" />
+                    <span className="text-xs font-medium text-gray-700 group-hover:text-gray-900">{adviserEmail}</span>
                   </a>
                 )}
                 {!adviserWebsite && !adviserPhone && !adviserEmail && (
-                  <p className="text-xs text-slate-500 italic">Contact information not available</p>
+                  <p className="text-xs text-gray-500 italic">Contact information not available</p>
                 )}
-                <div className="pt-3 border-t border-slate-200 mt-1">
-                  <p className="text-[11px] text-slate-600 leading-relaxed pl-6">{adviserAddress || 'N/A'}</p>
+                <div className="pt-3 border-t border-gray-200 mt-1">
+                  <p className="text-[11px] text-gray-600 leading-relaxed pl-6">{adviserAddress || 'N/A'}</p>
                 </div>
               </div>
             </div>
@@ -1329,14 +1863,36 @@ const FundDetailView = ({ fund, onBack, onNavigateToAdviser }) => {
                 <UsersIcon className="w-3.5 h-3.5 text-gray-400" />
               </div>
               <div className="divide-y divide-gray-50">
-                <div className="px-5 py-3">
-                  <div className="text-xs font-semibold text-gray-900">{fund.adviser_entity_legal_name}</div>
-                  <div className="text-[10px] text-gray-500 mt-0.5">Investment Adviser</div>
-                </div>
+                {fund.adviser_entity_legal_name && (
+                  <div className="px-5 py-3">
+                    <div className="text-xs font-semibold text-gray-900">{fund.adviser_entity_legal_name}</div>
+                    <div className="text-[10px] text-gray-500 mt-0.5">Investment Adviser</div>
+                  </div>
+                )}
                 {fund.general_partner_name && (
                   <div className="px-5 py-3">
                     <div className="text-xs font-semibold text-gray-900">{fund.general_partner_name}</div>
                     <div className="text-[10px] text-gray-500 mt-0.5">General Partner</div>
+                  </div>
+                )}
+                {fund.related_names && (() => {
+                  const names = fund.related_names.split('|');
+                  const roles = fund.related_roles ? fund.related_roles.split('|') : [];
+                  const normalized = names.map((n, i) => ({
+                    name: normalizeRelatedPartyName(n.trim()),
+                    role: roles[i] || 'Related Party'
+                  })).filter(item => item.name);
+
+                  return normalized.map((item, i) => (
+                    <div key={i} className="px-5 py-3">
+                      <div className="text-xs font-semibold text-gray-900">{item.name}</div>
+                      <div className="text-[10px] text-gray-500 mt-0.5">{item.role.trim()}</div>
+                    </div>
+                  ));
+                })()}
+                {!fund.adviser_entity_legal_name && !fund.general_partner_name && !fund.related_names && (
+                  <div className="px-5 py-3">
+                    <div className="text-xs text-gray-400 italic">No related parties available</div>
                   </div>
                 )}
               </div>
@@ -1348,14 +1904,14 @@ const FundDetailView = ({ fund, onBack, onNavigateToAdviser }) => {
               <ul className="space-y-1">
                 <li className="flex items-center justify-between text-xs group cursor-pointer p-2 hover:bg-gray-50 rounded-md -mx-2 transition-colors">
                   <span className="text-gray-700 flex items-center font-medium">
-                    <FileTextIcon className="w-3.5 h-3.5 mr-2.5 text-gray-400 group-hover:text-slate-600 transition-colors" /> Form D Notice
+                    <FileTextIcon className="w-3.5 h-3.5 mr-2.5 text-gray-400 group-hover:text-gray-600 transition-colors" /> Form D Notice
                   </span>
                   <span className="text-[10px] text-gray-400 font-mono">{fund.form_d_filing_date ? formatDate(fund.form_d_filing_date) : 'N/A'}</span>
                 </li>
                 {fund.adv_filing_date && (
                   <li className="flex items-center justify-between text-xs group cursor-pointer p-2 hover:bg-gray-50 rounded-md -mx-2 transition-colors">
                     <span className="text-gray-700 flex items-center font-medium">
-                      <FileTextIcon className="w-3.5 h-3.5 mr-2.5 text-gray-400 group-hover:text-emerald-500 transition-colors" /> ADV Schedule D
+                      <FileTextIcon className="w-3.5 h-3.5 mr-2.5 text-gray-400 group-hover:text-gray-600 transition-colors" /> ADV Schedule D
                     </span>
                     <span className="text-[10px] text-gray-400 font-mono">{formatDate(fund.adv_filing_date)}</span>
                   </li>
@@ -1378,6 +1934,17 @@ function App() {
   const [selectedAdviser, setSelectedAdviser] = useState(null);
   const [selectedFund, setSelectedFund] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  // Auth state
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authMode, setAuthMode] = useState('login');
+  const [searchCount, setSearchCount] = useState(getSearchCount());
+
+  // Premium access state (requires sign-in AND payment)
+  const [hasPremiumAccess, setHasPremiumAccess] = useState(false);
+  const [showPaywallModal, setShowPaywallModal] = useState(false);
 
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState('');
@@ -1410,7 +1977,16 @@ function App() {
   const [nmEndDate, setNmEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [nmFundType, setNmFundType] = useState('');
   const [nmState, setNmState] = useState('');
+  const [nmHasAdv, setNmHasAdv] = useState(''); // Filter for has_form_adv
   const [expandedManagers, setExpandedManagers] = useState(new Set());
+
+  // New Managers sorting
+  const [nmSortField, setNmSortField] = useState('first_filing_date');
+  const [nmSortOrder, setNmSortOrder] = useState('desc');
+
+  // Funds sorting (default to most recent filings first)
+  const [fundsSortField, setFundsSortField] = useState('filing_date');
+  const [fundsSortOrder, setFundsSortOrder] = useState('desc');
 
   // Export menu state
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -1426,6 +2002,32 @@ function App() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Auth state listener
+  useEffect(() => {
+    // Check current session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+    });
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Auth handlers
+  const handleOpenAuth = (mode) => {
+    setAuthMode(mode);
+    setShowAuthModal(true);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+  };
 
   // ============================================================================
   // EXPORT FUNCTIONS
@@ -1489,14 +2091,18 @@ function App() {
         ]);
         break;
       case 'funds':
-        headers = ['Fund Name', 'Adviser', 'CRD', 'AUM/Offering', 'Type', 'Exemptions', 'Filing Date', 'State', 'CIK', 'Contact Phone', 'Contact Email', 'Related Parties', 'SEC Filing Link'];
+        headers = ['Fund Name', 'Adviser', 'CRD', 'Form D Offering', 'ADV AUM', 'Type', 'Exemptions', 'Filing Date', 'State', 'CIK', 'Contact Phone', 'Contact Email', 'Related Parties', 'SEC Filing Link'];
         rows = data.map(f => {
           // Get related parties
           let relatedParties = '';
           if (f.related_names) {
             const names = f.related_names.split('|');
             const roles = f.related_roles ? f.related_roles.split('|') : [];
-            relatedParties = names.map((n, i) => `${n.trim()}${roles[i] ? ` (${roles[i].trim()})` : ''}`).join('; ');
+            relatedParties = names
+              .map(n => normalizeRelatedPartyName(n.trim()))
+              .filter(n => n) // Remove nulls
+              .map((n, i) => `${n}${roles[i] ? ` (${roles[i].trim()})` : ''}`)
+              .join('; ');
           }
           // Build SEC link
           const secLink = f.cik ? `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${f.cik}&type=D&dateb=&owner=include&count=40` : '';
@@ -1504,7 +2110,8 @@ function App() {
             escapeCSV(f.name || f.fund_name),
             escapeCSV(f.adviser_entity_legal_name),
             escapeCSV(f.adviser_entity_crd || f.crd),
-            escapeCSV(f.latest_gross_asset_value || f.form_d_offering_amount),
+            escapeCSV(f.form_d_offering_amount || 'N/A'),
+            escapeCSV(f.latest_gross_asset_value || 'N/A'),
             escapeCSV(f.fund_type || f.investmentfundtype || 'N/A'),
             escapeCSV(f.exemptions || f.federalexemptions_items_list || 'N/A'),
             escapeCSV(f.filing_date || f.datesigned || 'N/A'),
@@ -1529,7 +2136,10 @@ function App() {
             if (!f.related_names) return [];
             const names = f.related_names.split('|');
             const roles = f.related_roles ? f.related_roles.split('|') : [];
-            return names.map((n, i) => `${n.trim()}${roles[i] ? ` (${roles[i].trim()})` : ''}`);
+            return names
+              .map(n => normalizeRelatedPartyName(n.trim()))
+              .filter(n => n) // Remove nulls
+              .map((n, i) => `${n}${roles[i] ? ` (${roles[i].trim()})` : ''}`);
           }))].join('; ');
           // Get contact info from first fund with contact
           let phone = '', email = '';
@@ -1633,7 +2243,7 @@ function App() {
         });
         break;
       case 'cross_reference':
-        title = 'Cross-Reference Intelligence Export';
+        title = 'Private Markets Intelligence Export';
         headers = ['ADV Fund Name', 'Form D Match', 'Issues', 'Score'];
         rows = data.map(m => [
           m.adv_fund_name || 'N/A',
@@ -1674,8 +2284,20 @@ function App() {
       if (fund.related_names) {
         const names = fund.related_names.split('|');
         const roles = fund.related_roles ? fund.related_roles.split('|') : [];
-        if (names.length > 0) {
-          return { name: names[0].trim(), role: roles[0]?.trim() || '' };
+
+        // Find first valid name (not N/A, after normalization)
+        for (let i = 0; i < names.length; i++) {
+          const rawName = names[i].trim();
+          // Skip "N/A" entries
+          if (rawName.toUpperCase() === 'N/A' || !rawName) continue;
+
+          const normalized = normalizeRelatedPartyName(rawName);
+          if (normalized) {
+            return {
+              name: normalized,
+              role: (roles[i]?.trim() && roles[i].trim().toUpperCase() !== 'N/A') ? roles[i].trim() : ''
+            };
+          }
         }
       }
     }
@@ -1684,15 +2306,8 @@ function App() {
 
   // Helper: Get avatar color based on string
   const getAvatarColor = (str) => {
-    const colors = [
-      'from-blue-500 to-blue-600', 'from-emerald-500 to-emerald-600',
-      'from-purple-500 to-purple-600', 'from-amber-500 to-amber-600',
-      'from-rose-500 to-rose-600', 'from-cyan-500 to-cyan-600',
-      'from-indigo-500 to-indigo-600', 'from-teal-500 to-teal-600'
-    ];
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
-    return colors[Math.abs(hash) % colors.length];
+    // Simple gray background, no bright colors
+    return 'from-gray-400 to-gray-500';
   };
 
   // Helper: Get fund type tag color
@@ -1738,51 +2353,99 @@ function App() {
     { value: 'WI', label: 'Wisconsin' }, { value: 'WY', label: 'Wyoming' }, { value: 'DC', label: 'Washington DC' },
   ];
 
-  // Request tracking to prevent stale responses
-  const requestIdRef = useRef(0);
+  // Simple version tracking for each search function to prevent stale results
+  const searchVersionRef = useRef({ advisers: 0, funds: 0, crossRef: 0, newManagers: 0 });
 
   // Fetch advisers
   const searchAdvisers = async (currentSearchTerm, currentFilters) => {
-    const myRequestId = ++requestIdRef.current;
+    // Rate limit check for anonymous users
+    if (!user && getSearchCount() >= SEARCH_LIMIT) {
+      setShowAuthModal(true);
+      setAuthMode('signup');
+      return;
+    }
+
+    const myVersion = ++searchVersionRef.current.advisers;
     setLoading(true);
+
+    // Increment search count for anonymous users
+    if (!user) {
+      const newCount = incrementSearchCount();
+      setSearchCount(newCount);
+    }
+
     try {
+      // Parse search query for include/exclude terms
+      const parsedQuery = parseSearchQuery(currentSearchTerm);
+
       const params = new URLSearchParams();
-      if (currentSearchTerm && currentSearchTerm.length >= 3) {
-        params.append('query', currentSearchTerm);
+      if (parsedQuery.apiQuery && parsedQuery.apiQuery.length >= 3) {
+        params.append('query', parsedQuery.apiQuery);
       }
       if (currentFilters.state) params.append('state', currentFilters.state);
       if (currentFilters.type) params.append('type', currentFilters.type);
       if (currentFilters.exemption) params.append('exemption', currentFilters.exemption);
-      if (currentFilters.minAum > 0) params.append('minAum', currentFilters.minAum);
+      if (currentFilters.minAum > 0) params.append('minAum', currentFilters.minAum / 1000000);
+      if (currentFilters.maxAum > 0) params.append('maxAum', currentFilters.maxAum / 1000000);
       params.append('limit', '500');
+      params.append('sortBy', 'aum');
+      params.append('sortOrder', 'desc');
 
       const res = await fetch(`/api/advisers/search?${params.toString()}`);
       const data = await res.json();
+
+      // Apply search exclusions
+      const filteredData = applySearchFilters(data || [], parsedQuery, (adviser) => {
+        return [
+          adviser.adviser_name || '',
+          adviser.type || ''
+        ].join(' ');
+      });
+
       // Only update if this is still the latest request
-      if (myRequestId === requestIdRef.current) {
-        setAdvisers(data || []);
+      if (myVersion === searchVersionRef.current.advisers) {
+        setAdvisers(filteredData);
         setLoading(false);
       }
     } catch (err) {
       console.error('Error fetching advisers:', err);
-      if (myRequestId === requestIdRef.current) setLoading(false);
+      if (myVersion === searchVersionRef.current.advisers) setLoading(false);
     }
   };
 
   // Fetch funds - default to recent Form D filings sorted by date
   const searchFunds = async (currentSearchTerm, currentFilters) => {
-    const myRequestId = ++requestIdRef.current;
-    console.log('[searchFunds] Starting fund search, requestId:', myRequestId);
+    // Rate limit check for anonymous users
+    if (!user && getSearchCount() >= SEARCH_LIMIT) {
+      setShowAuthModal(true);
+      setAuthMode('signup');
+      return;
+    }
+
+    const myVersion = ++searchVersionRef.current.funds;
+    console.log('[searchFunds] Starting fund search, version:', myVersion, 'searchTerm:', currentSearchTerm || '(empty)');
     setLoading(true);
+
+    // Increment search count for anonymous users
+    if (!user) {
+      const newCount = incrementSearchCount();
+      setSearchCount(newCount);
+    }
+
     try {
+      // Parse search query for include/exclude terms
+      // Supports: "anthropic -philanthropic" to exclude philanthropic results
+      const parsedQuery = parseSearchQuery(currentSearchTerm);
+      console.log('[searchFunds] Parsed query:', parsedQuery);
+
       // DEFAULT VIEW: Fetch recent Form D filings sorted by date (when no search term)
-      // When searching: Also fetch ADV funds and merge
-      const hasSearchTerm = currentSearchTerm && currentSearchTerm.length >= 2;
+      // When searching: Also fetch ADV funds and merge (backend requires 5 chars min)
+      const hasSearchTerm = parsedQuery.apiQuery && parsedQuery.apiQuery.length >= 5;
 
       // Always fetch Form D filings (they're the default view)
       const formdParams = new URLSearchParams({ limit: '500' });
       if (hasSearchTerm) {
-        formdParams.append('query', currentSearchTerm);
+        formdParams.append('query', parsedQuery.apiQuery);
       }
       if (currentFilters.state) formdParams.append('state', currentFilters.state);
 
@@ -1790,16 +2453,17 @@ function App() {
       const formdResponse = await fetch(`/api/funds/formd?${formdParams}`);
       const formdData = await formdResponse.json();
       console.log('[searchFunds] Form D response:', formdData.results?.length, 'results');
+      console.log('[searchFunds] First 3 results:', formdData.results?.slice(0, 3).map(r => r.entityname));
 
-      // If searching, also get ADV funds and merge
+      // If searching OR "Has Form ADV" filter is active, also get ADV funds and merge
       let advResults = [];
-      if (hasSearchTerm) {
+      if (hasSearchTerm || currentFilters.hasAdv === 'yes') {
         const advParams = new URLSearchParams({
           pageSize: '500',
           sortBy: 'updated_at',
           sortOrder: 'desc'
         });
-        advParams.append('query', currentSearchTerm);
+        if (hasSearchTerm) advParams.append('query', parsedQuery.apiQuery);
         if (currentFilters.exemption === '3c1') advParams.append('exemption3c1', 'yes');
         if (currentFilters.exemption === '3c7') advParams.append('exemption3c7', 'yes');
 
@@ -1810,38 +2474,107 @@ function App() {
         console.log('[searchFunds] ADV response:', advResults.length, 'results');
       }
 
-      // Create lookup maps
+      // Create lookup map and array for Form D filings
       const formdMap = {};
+      const formdArray = [];
       (formdData.results || []).forEach(filing => {
         if (filing.entityname) {
-          formdMap[filing.entityname.toLowerCase().trim()] = filing;
+          const key = filing.entityname.toLowerCase().trim();
+          formdMap[key] = filing;
+          formdArray.push({ key, filing });
         }
       });
 
+      // Normalize name for matching - strips punctuation and normalizes whitespace
+      const normalizeForMatch = (name) => {
+        return name
+          .toLowerCase()
+          .replace(/[,.'"\-()]/g, ' ')  // Replace punctuation with spaces
+          .replace(/\s+/g, ' ')          // Collapse multiple spaces
+          .trim();
+      };
+
+      // Helper function for fuzzy matching
+      const findBestFormDMatch = (advFundName) => {
+        const advKey = advFundName.toLowerCase().trim();
+        const advNorm = normalizeForMatch(advFundName);
+
+        // Try exact match first (original lowercase)
+        if (formdMap[advKey]) {
+          return formdMap[advKey];
+        }
+
+        // Try normalized exact match (handles punctuation differences)
+        let bestMatch = null;
+        let bestScore = 0;
+
+        for (const { key, filing } of formdArray) {
+          const formdNorm = normalizeForMatch(key);
+
+          // Check for exact normalized match
+          if (advNorm === formdNorm) {
+            return filing;
+          }
+
+          // Fall back to similarity scoring on normalized strings
+          const maxLen = Math.max(advNorm.length, formdNorm.length);
+          const minLen = Math.min(advNorm.length, formdNorm.length);
+          const lengthRatio = minLen / maxLen;
+          if (lengthRatio < 0.9) continue;
+
+          // Calculate character similarity on normalized strings
+          let matchingChars = 0;
+          for (let i = 0; i < maxLen; i++) {
+            if (advNorm[i] === formdNorm[i]) {
+              matchingChars++;
+            }
+          }
+          const score = matchingChars / maxLen;
+
+          // Require 90%+ match on normalized strings
+          if (score > bestScore && score >= 0.90) {
+            bestScore = score;
+            bestMatch = filing;
+          }
+        }
+
+        return bestMatch;
+      };
+
       // Build combined results
       let combinedFunds = [];
+      const matchedFormDKeys = new Set();
 
-      // Add ADV funds with Form D enrichment
+      // Add ADV funds with Form D enrichment (matching done client-side from batch data)
       advResults.forEach(fund => {
-        const fundNameKey = (fund.fund_name || '').toLowerCase().trim();
-        const formD = formdMap[fundNameKey];
+        const formD = findBestFormDMatch(fund.fund_name || '');
         combinedFunds.push({
           ...fund,
           source: 'adv',
           adv_filing_date: formatFilingDate(fund.updated_at ? fund.updated_at.split('T')[0] : null),
           form_d_filing_date: formatFilingDate(formD?.filing_date || formD?.dateoffirstsale || null),
           form_d_offering_amount: formD?.totalofferingamount || null,
+          form_d_cik: formD?.cik || null,
           formd_entity_name: formD?.entityname || null,
           has_form_d_match: !!formD,
-          related_parties_count: fund.owners ? (fund.owners.match(/;/g) || []).length + 1 : (fund.partner_names ? fund.partner_names.split(',').length : 0),
-          sort_date: formatFilingDate(fund.updated_at || formD?.filing_date)
+          related_parties_count: (typeof fund.owners === 'string' && fund.owners) ? (fund.owners.match(/;/g) || []).length + 1 : (typeof fund.partner_names === 'string' && fund.partner_names ? fund.partner_names.split(',').length : 0),
+          sort_date: formatFilingDate(fund.updated_at || formD?.filing_date),
+          related_names: formD?.related_names || null,
+          related_roles: formD?.related_roles || null
         });
-        // Remove from formdMap to avoid duplicates
-        if (formD) delete formdMap[fundNameKey];
+        // Track matched Form D filings to avoid duplicates
+        if (formD) {
+          matchedFormDKeys.add(formD.entityname.toLowerCase().trim());
+        }
+        // Note: Unmatched ADV funds rely on pre-computed cross_reference_matches table
+        // which is refreshed periodically. No individual API lookups needed.
       });
 
       // Add remaining Form D filings that didn't match ADV funds
       Object.values(formdMap).forEach(filing => {
+        const filingKey = filing.entityname.toLowerCase().trim();
+        if (matchedFormDKeys.has(filingKey)) return; // Skip already matched
+
         combinedFunds.push({
           fund_name: filing.entityname,
           source: 'formd',
@@ -1861,6 +2594,36 @@ function App() {
         });
       });
 
+      // DEDUPLICATION: Remove duplicate entries based on normalized fund name
+      // Prefer ADV entries over Form D only, and entries with Form D match over those without
+      const dedupeMap = {};
+      combinedFunds.forEach(fund => {
+        const key = normalizeForMatch(fund.fund_name || fund.formd_entity_name || '');
+        if (!key) return;
+
+        const existing = dedupeMap[key];
+        if (!existing) {
+          dedupeMap[key] = fund;
+        } else {
+          // Prefer ADV source over Form D only
+          const existingIsAdv = existing.source === 'adv';
+          const currentIsAdv = fund.source === 'adv';
+
+          if (currentIsAdv && !existingIsAdv) {
+            // Replace Form D only with ADV entry
+            dedupeMap[key] = fund;
+          } else if (currentIsAdv && existingIsAdv) {
+            // Both are ADV - prefer the one with Form D match
+            if (fund.has_form_d_match && !existing.has_form_d_match) {
+              dedupeMap[key] = fund;
+            }
+          }
+          // Otherwise keep existing
+        }
+      });
+      combinedFunds = Object.values(dedupeMap);
+      console.log(`[searchFunds] After deduplication: ${combinedFunds.length} unique funds`);
+
       // Sort by most recent filing date
       combinedFunds.sort((a, b) => {
         const dateA = a.sort_date || '0000-00-00';
@@ -1876,27 +2639,32 @@ function App() {
         const strategyMap = {
           'hedge': 'Hedge Fund',
           'pe': 'Private Equity Fund',
-          'vc': 'Venture Capital',
+          'vc': 'Venture Capital Fund',  // Fixed: should be "Venture Capital Fund" not "Venture Capital"
           'real_estate': 'Real Estate Fund'
         };
         const targetStrategy = strategyMap[currentFilters.strategy];
-        filteredFunds = filteredFunds.filter(f =>
-          f.investment_fund_type?.toLowerCase().includes(targetStrategy?.toLowerCase() || '') ||
-          f.fund_type?.toLowerCase().includes(targetStrategy?.toLowerCase() || '')
-        );
+        console.log(`[searchFunds] Filtering by strategy: ${currentFilters.strategy} -> ${targetStrategy}`);
+        filteredFunds = filteredFunds.filter(f => {
+          const matchInvestmentType = f.investment_fund_type?.toLowerCase().includes(targetStrategy?.toLowerCase() || '');
+          const matchFundType = f.fund_type?.toLowerCase().includes(targetStrategy?.toLowerCase() || '');
+          return matchInvestmentType || matchFundType;
+        });
+        console.log(`[searchFunds] After strategy filter: ${filteredFunds.length} funds remain`);
       }
 
-      // Filter by offering amount range
+      // Filter by offering amount range (Form D only)
       if (currentFilters.minOffering) {
         filteredFunds = filteredFunds.filter(f => {
-          const amount = parseCurrency(f.form_d_offering_amount);
-          return amount >= currentFilters.minOffering;
+          const formDAmount = parseCurrency(f.form_d_offering_amount);
+          if (!formDAmount) return false; // Exclude funds without Form D offering amount
+          return formDAmount >= currentFilters.minOffering;
         });
       }
       if (currentFilters.maxOffering) {
         filteredFunds = filteredFunds.filter(f => {
-          const amount = parseCurrency(f.form_d_offering_amount);
-          return amount <= currentFilters.maxOffering;
+          const formDAmount = parseCurrency(f.form_d_offering_amount);
+          if (!formDAmount) return false; // Exclude funds without Form D offering amount
+          return formDAmount <= currentFilters.maxOffering;
         });
       }
 
@@ -1916,44 +2684,69 @@ function App() {
 
       console.log('[searchFunds] Combined funds:', combinedFunds.length, ', after filters:', filteredFunds.length);
 
+      // Apply search exclusions (e.g., -philanthropic to exclude results containing "philanthropic")
+      const finalFunds = applySearchFilters(filteredFunds, parsedQuery, (fund) => {
+        return [
+          fund.fund_name || '',
+          fund.adviser_entity_legal_name || '',
+          fund.formd_entity_name || ''
+        ].join(' ');
+      });
+      console.log('[searchFunds] After exclusion filter:', finalFunds.length);
+      console.log('[searchFunds] First 3 filtered:', finalFunds.slice(0, 3).map(f => f.fund_name));
+
       // Only update if this is still the latest request
-      if (myRequestId === requestIdRef.current) {
-        setFunds(filteredFunds);
+      if (myVersion === searchVersionRef.current.funds) {
+        console.log('[searchFunds] Setting funds state with', finalFunds.length, 'funds, version:', myVersion);
+        setFunds(finalFunds);
         setLoading(false);
+      } else {
+        console.log('[searchFunds] SKIPPED update - stale request version', myVersion, 'vs current', searchVersionRef.current.funds);
       }
     } catch (err) {
       console.error('[searchFunds] Error:', err);
-      if (myRequestId === requestIdRef.current) setLoading(false);
+      if (myVersion === searchVersionRef.current.funds) setLoading(false);
     }
   };
 
   // Fetch cross-reference matches
   const fetchCrossRef = async (currentSearchTerm, currentFilters) => {
-    const myRequestId = ++requestIdRef.current;
+    const myVersion = ++searchVersionRef.current.crossRef;
     setLoading(true);
     try {
+      // Parse search query for modifiers
+      const parsedQuery = parseSearchQuery(currentSearchTerm);
+
       const params = new URLSearchParams({ limit: '10000' });
-      if (currentSearchTerm && currentSearchTerm.trim()) {
-        params.append('searchTerm', currentSearchTerm.trim());
+      if (parsedQuery.apiQuery) {
+        params.append('searchTerm', parsedQuery.apiQuery);
       }
       if (currentFilters.discrepanciesOnly) params.append('discrepanciesOnly', 'true');
       if (currentFilters.overdueAdvOnly) params.append('overdueAdvOnly', 'true');
 
       const response = await fetch(`/api/browse-computed?${params}`);
       const result = await response.json();
-      if (myRequestId === requestIdRef.current) {
-        if (result.success) setCrossRefMatches(result.matches || []);
+      if (myVersion === searchVersionRef.current.crossRef) {
+        if (result.success) {
+          // Apply client-side filtering for exclusions and exact phrases
+          const filtered = applySearchFilters(
+            result.matches || [],
+            parsedQuery,
+            (match) => `${match.adv_fund_name || ''} ${match.formd_entity_name || ''} ${match.adviser_entity_legal_name || ''}`
+          );
+          setCrossRefMatches(filtered);
+        }
         setLoading(false);
       }
     } catch (err) {
       console.error('Error fetching cross-ref:', err);
-      if (myRequestId === requestIdRef.current) setLoading(false);
+      if (myVersion === searchVersionRef.current.crossRef) setLoading(false);
     }
   };
 
   // Fetch new managers
   const fetchNewManagers = async () => {
-    const myRequestId = ++requestIdRef.current;
+    const myVersion = ++searchVersionRef.current.newManagers;
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -1963,37 +2756,162 @@ function App() {
       if (nmState) params.append('state', nmState);
       const res = await fetch(`/api/funds/new-managers?${params}`);
       const result = await res.json();
-      if (myRequestId === requestIdRef.current) {
+      if (myVersion === searchVersionRef.current.newManagers) {
         if (result.success) setNewManagers(result.managers || []);
         setLoading(false);
       }
     } catch (err) {
       console.error('Error fetching new managers:', err);
-      if (myRequestId === requestIdRef.current) setLoading(false);
+      if (myVersion === searchVersionRef.current.newManagers) setLoading(false);
     }
   };
 
-  // Load data on tab change
-  useEffect(() => {
-    if (view !== 'dashboard') return;
-    console.log('[useEffect] Tab changed to:', activeTab);
-    if (activeTab === 'advisers') searchAdvisers(searchTerm, filters);
-    else if (activeTab === 'funds') searchFunds(searchTerm, filters);
-    else if (activeTab === 'cross_reference') fetchCrossRef(searchTerm, filters);
-    else if (activeTab === 'new_managers') fetchNewManagers();
-  }, [activeTab, view]);
+  // Handle new managers sorting
+  const handleNmSort = (field) => {
+    if (nmSortField === field) {
+      setNmSortOrder(nmSortOrder === 'desc' ? 'asc' : 'desc');
+    } else {
+      setNmSortField(field);
+      setNmSortOrder('desc');
+    }
+  };
 
-  // Debounced search effect - only triggers after user stops typing
+  // Handle funds sorting
+  const handleFundsSort = (field) => {
+    if (fundsSortField === field) {
+      setFundsSortOrder(fundsSortOrder === 'desc' ? 'asc' : 'desc');
+    } else {
+      setFundsSortField(field);
+      setFundsSortOrder('desc');
+    }
+  };
+
+  // Filter new managers first
+  const filteredNewManagers = React.useMemo(() => {
+    return newManagers.filter(manager => {
+      // Apply Form ADV filter
+      if (nmHasAdv === 'yes' && !manager.has_form_adv) return false;
+      if (nmHasAdv === 'no' && manager.has_form_adv) return false;
+
+      return true;
+    });
+  }, [newManagers, nmHasAdv]);
+
+  // Sorted new managers (with proper date parsing)
+  const sortedNewManagers = React.useMemo(() => {
+    if (!nmSortField) return filteredNewManagers;
+
+    return [...filteredNewManagers].sort((a, b) => {
+      let aVal, bVal;
+
+      if (nmSortField === 'first_filing_date') {
+        aVal = parseFilingDate(a.first_filing_date).getTime();
+        bVal = parseFilingDate(b.first_filing_date).getTime();
+      } else if (nmSortField === 'total_offering_amount') {
+        aVal = parseCurrency(a.total_offering_amount) || 0;
+        bVal = parseCurrency(b.total_offering_amount) || 0;
+      } else if (nmSortField === 'fund_count') {
+        aVal = a.fund_count || 0;
+        bVal = b.fund_count || 0;
+      } else {
+        return 0;
+      }
+
+      if (nmSortOrder === 'desc') {
+        return bVal - aVal;
+      } else {
+        return aVal - bVal;
+      }
+    });
+  }, [filteredNewManagers, nmSortField, nmSortOrder]);
+
+  // Sorted funds (with proper date parsing and filtering)
+  const sortedFunds = React.useMemo(() => {
+    // First filter
+    let filtered = funds;
+
+    // Filter by has Form ADV
+    if (filters.hasAdv === 'yes') {
+      filtered = filtered.filter(f => f.adviser_entity_crd || f.source === 'adv');
+    } else if (filters.hasAdv === 'no') {
+      filtered = filtered.filter(f => !f.adviser_entity_crd && f.source !== 'adv');
+    }
+
+    // Then sort
+    if (!fundsSortField) return filtered;
+
+    return [...filtered].sort((a, b) => {
+      let aVal, bVal;
+
+      if (fundsSortField === 'filing_date') {
+        const aDate = a.form_d_filing_date || a.adv_filing_date;
+        const bDate = b.form_d_filing_date || b.adv_filing_date;
+        aVal = parseFilingDate(aDate).getTime();
+        bVal = parseFilingDate(bDate).getTime();
+      } else if (fundsSortField === 'aum_offering') {
+        // Sort by Form D Offering amount only (to match column header)
+        const aAmount = parseCurrency(a.form_d_offering_amount);
+        const bAmount = parseCurrency(b.form_d_offering_amount);
+
+        // Push N/A values to the bottom regardless of sort direction
+        if (!aAmount && !bAmount) return 0;
+        if (!aAmount) return 1; // a is N/A, put it after b
+        if (!bAmount) return -1; // b is N/A, put it after a
+
+        aVal = aAmount;
+        bVal = bAmount;
+      } else if (fundsSortField === 'adv_aum') {
+        // Sort by ADV AUM
+        const aAmount = parseCurrency(a.latest_gross_asset_value);
+        const bAmount = parseCurrency(b.latest_gross_asset_value);
+
+        // Push N/A values to the bottom regardless of sort direction
+        if (!aAmount && !bAmount) return 0;
+        if (!aAmount) return 1;
+        if (!bAmount) return -1;
+
+        aVal = aAmount;
+        bVal = bAmount;
+      } else {
+        return 0;
+      }
+
+      if (fundsSortOrder === 'desc') {
+        return bVal - aVal;
+      } else {
+        return aVal - bVal;
+      }
+    });
+  }, [funds, fundsSortField, fundsSortOrder, filters.hasAdv]);
+
+  // Track previous tab to detect actual tab changes (for immediate vs debounced search)
+  const prevActiveTabRef = useRef(activeTab);
+
+  // Unified search effect - handles tab changes (immediate) and search/filter changes (debounced)
   useEffect(() => {
     if (view !== 'dashboard') return;
-    const timeoutId = setTimeout(() => {
-      console.log('[useEffect] Search/filter changed, triggering search');
+
+    const tabChanged = prevActiveTabRef.current !== activeTab;
+    prevActiveTabRef.current = activeTab;
+
+    const triggerSearch = () => {
+      console.log('[useEffect] Triggering search for tab:', activeTab, 'searchTerm:', searchTerm || '(empty)');
       if (activeTab === 'advisers') searchAdvisers(searchTerm, filters);
       else if (activeTab === 'funds') searchFunds(searchTerm, filters);
       else if (activeTab === 'cross_reference') fetchCrossRef(searchTerm, filters);
-    }, 300); // 300ms debounce
+      else if (activeTab === 'new_managers') fetchNewManagers();
+    };
+
+    if (tabChanged) {
+      // Tab changed - search immediately (no debounce)
+      triggerSearch();
+      return;
+    }
+
+    // Search/filter changed - debounce to avoid excessive API calls while typing
+    const timeoutId = setTimeout(triggerSearch, 300);
     return () => clearTimeout(timeoutId);
-  }, [searchTerm, filters.state, filters.type, filters.exemption, filters.minAum, filters.maxAum, filters.strategy, filters.minOffering, filters.maxOffering, filters.startDate, filters.endDate, filters.hasWebsite, filters.discrepanciesOnly, filters.overdueAdvOnly]);
+  }, [activeTab, view, searchTerm, filters.state, filters.type, filters.exemption, filters.minAum, filters.maxAum, filters.strategy, filters.minOffering, filters.maxOffering, filters.startDate, filters.endDate, filters.hasAdv, filters.hasWebsite, filters.discrepanciesOnly, filters.overdueAdvOnly]);
 
   // New managers filter effect
   useEffect(() => {
@@ -2070,9 +2988,37 @@ function App() {
 
   return (
     <div className="flex h-screen bg-gray-50 font-sans text-gray-900 overflow-hidden antialiased selection:bg-slate-100 selection:text-slate-900">
+      {/* Auth Modal */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        mode={authMode}
+        setMode={setAuthMode}
+      />
+
+      {/* Paywall Modal */}
+      <PaywallModal
+        isOpen={showPaywallModal}
+        onClose={() => setShowPaywallModal(false)}
+        onOpenAuth={handleOpenAuth}
+        user={user}
+      />
+
       {/* Sidebar */}
       {view === 'dashboard' && (
-        <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} filters={filters} setFilters={setFilters} onResetFilters={handleResetFilters} />
+        <Sidebar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          filters={filters}
+          setFilters={setFilters}
+          onResetFilters={handleResetFilters}
+          user={user}
+          searchCount={searchCount}
+          onOpenAuth={handleOpenAuth}
+          onLogout={handleLogout}
+          hasPremiumAccess={hasPremiumAccess}
+          onShowPaywall={() => setShowPaywallModal(true)}
+        />
       )}
 
       {/* Main Content */}
@@ -2164,7 +3110,8 @@ function App() {
                             <th className="px-6 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-gray-100">Entity</th>
                             <th className="px-4 py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-gray-100">Type</th>
                             <th className="px-4 py-3 text-right text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-gray-100">AUM</th>
-                            <th className="px-4 py-3 text-right text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-gray-100">CRD</th>
+                            <th className="px-4 py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-gray-100"># Funds</th>
+                            <th className="px-4 py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-gray-100">Links</th>
                             <th className="px-4 py-3 border-b border-gray-100"></th>
                           </tr>
                         </thead>
@@ -2173,10 +3120,7 @@ function App() {
                             <tr key={adviser.crd} onClick={() => handleAdviserClick(adviser)} className="group hover:bg-gray-50 cursor-pointer transition-colors">
                               <td className="px-6 py-4 whitespace-nowrap">
                                 <div className="text-[13px] font-serif font-semibold text-slate-900 italic tracking-tight">{adviser.adviser_name || adviser.adviser_entity_legal_name}</div>
-                                <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-1">
-                                  <MapPinIcon className="w-3 h-3" />
-                                  <span>{adviser.state_country || 'N/A'}</span>
-                                </div>
+                                <div className="text-[10px] text-slate-400 font-mono mt-0.5">CRD: {adviser.crd}</div>
                               </td>
                               <td className="px-4 py-4 whitespace-nowrap text-center">
                                 <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-slate-600 border border-slate-200">{adviser.type || 'RIA'}</span>
@@ -2184,8 +3128,36 @@ function App() {
                               <td className="px-4 py-4 whitespace-nowrap text-right">
                                 <div className="text-[13px] text-slate-900 font-mono tabular-nums font-semibold">{formatCurrency(getEffectiveAum(adviser))}</div>
                               </td>
-                              <td className="px-4 py-4 whitespace-nowrap text-right">
-                                <div className="text-[11px] text-slate-400 font-mono">{adviser.crd}</div>
+                              <td className="px-4 py-4 whitespace-nowrap text-center">
+                                <div className="text-[12px] text-slate-700 font-mono tabular-nums">{adviser.num_funds_reported || adviser.number_of_funds || '—'}</div>
+                              </td>
+                              <td className="px-4 py-4 whitespace-nowrap text-center">
+                                <div className="flex items-center justify-center gap-2">
+                                  {adviser.primary_website && (
+                                    <a
+                                      href={adviser.primary_website.startsWith('http') ? adviser.primary_website : `https://${adviser.primary_website}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="text-blue-600 hover:text-blue-800 transition-colors"
+                                      title="Website"
+                                    >
+                                      <GlobeIcon className="w-4 h-4" />
+                                    </a>
+                                  )}
+                                  {adviser.crd && (
+                                    <a
+                                      href={`https://adviserinfo.sec.gov/firm/summary/${adviser.crd}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="text-green-600 hover:text-green-800 transition-colors"
+                                      title="SEC ADV Filing"
+                                    >
+                                      <FileTextIcon className="w-4 h-4" />
+                                    </a>
+                                  )}
+                                </div>
                               </td>
                               <td className="px-4 py-4 whitespace-nowrap text-right">
                                 <ChevronRightIcon className="w-4 h-4 text-gray-300 group-hover:text-slate-600 ml-auto transition-colors" />
@@ -2214,17 +3186,25 @@ function App() {
                             <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Fund / Entity Name</th>
                             <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Source</th>
                             <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Type</th>
-                            <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Adviser / Related</th>
-                            <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Filing Date</th>
-                            <th className="px-3 py-2.5 text-right text-[10px] font-semibold text-gray-600 uppercase tracking-wider">AUM / Offering</th>
+                            <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Adviser</th>
+                            <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Related Parties</th>
+                            <th onClick={() => handleFundsSort('filing_date')} className="px-3 py-2.5 text-left text-[10px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                              Filing Date {fundsSortField === 'filing_date' && (fundsSortOrder === 'desc' ? '↓' : '↑')}
+                            </th>
+                            <th onClick={() => handleFundsSort('aum_offering')} className="px-3 py-2.5 text-right text-[10px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                              Form D Offering {fundsSortField === 'aum_offering' && (fundsSortOrder === 'desc' ? '↓' : '↑')}
+                            </th>
+                            <th onClick={() => handleFundsSort('adv_aum')} className="px-3 py-2.5 text-right text-[10px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                              ADV AUM {fundsSortField === 'adv_aum' && (fundsSortOrder === 'desc' ? '↓' : '↑')}
+                            </th>
                             <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Links</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
-                          {funds.map((fund, idx) => (
+                          {sortedFunds.map((fund, idx) => (
                             <tr key={idx} onClick={() => handleFundClick(fund)} className="group hover:bg-blue-50/50 cursor-pointer transition-colors">
                               <td className="px-4 py-2.5">
-                                <div className="text-[12px] font-medium text-gray-900 group-hover:text-blue-700 transition-colors truncate max-w-[260px]" title={fund.fund_name}>{fund.fund_name}</div>
+                                <div className="text-[12px] font-medium text-gray-900 group-hover:text-blue-700 transition-colors">{fund.fund_name}</div>
                                 <div className="text-[10px] text-gray-400 mt-0.5">{fund.state_of_organization || fund.adviser_state || '—'}</div>
                               </td>
                               <td className="px-3 py-2.5 text-center">
@@ -2237,23 +3217,56 @@ function App() {
                                   ) : (
                                     <span className="px-1.5 py-0.5 text-[9px] rounded font-semibold bg-blue-100 text-blue-700">Form D</span>
                                   )}
-                                  {fund.exclusion_3c1 === 'Y' && <span className="px-1.5 py-0.5 text-[9px] rounded font-semibold bg-slate-100 text-slate-700">3c1</span>}
-                                  {fund.exclusion_3c7 === 'Y' && <span className="px-1.5 py-0.5 text-[9px] rounded font-semibold bg-slate-100 text-slate-700">3c7</span>}
                                 </div>
                               </td>
                               <td className="px-3 py-2.5">
                                 <div className="text-[11px] text-gray-700">{fund.fund_type || fund.investment_fund_type || '—'}</div>
-                                {fund.federal_exemptions && <div className="text-[9px] text-gray-400 truncate max-w-[80px]" title={fund.federal_exemptions}>{fund.federal_exemptions}</div>}
+                                <div className="flex gap-1 mt-0.5">
+                                  {fund.exclusion_3c1 === 'Y' && <span className="px-1.5 py-0.5 text-[9px] rounded font-semibold bg-slate-100 text-slate-700">3(c)(1)</span>}
+                                  {fund.exclusion_3c7 === 'Y' && <span className="px-1.5 py-0.5 text-[9px] rounded font-semibold bg-slate-100 text-slate-700">3(c)(7)</span>}
+                                </div>
+                                {fund.federal_exemptions && <div className="text-[9px] text-gray-400 truncate max-w-[80px]" title={formatExemptions(fund.federal_exemptions)}>{formatExemptions(fund.federal_exemptions)}</div>}
                               </td>
                               <td className="px-3 py-2.5">
-                                {fund.adviser_entity_legal_name ? (
-                                  <>
-                                    <div className="text-[11px] text-gray-700 truncate max-w-[150px]" title={fund.adviser_entity_legal_name}>{fund.adviser_entity_legal_name}</div>
-                                    {fund.adviser_entity_crd && <div className="text-[9px] text-gray-400">CRD: {fund.adviser_entity_crd}</div>}
-                                  </>
-                                ) : fund.related_names ? (
-                                  <div className="text-[11px] text-gray-700 truncate max-w-[150px]" title={fund.related_names}>{fund.related_names}</div>
+                                {fund.adviser_entity_legal_name && fund.adviser_entity_crd ? (
+                                  <div
+                                    className="cursor-pointer hover:bg-blue-50 p-1 -m-1 rounded transition-colors"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleNavigateToAdviserFromFund(fund.adviser_entity_crd);
+                                    }}
+                                  >
+                                    <div className="text-[11px] text-blue-600 hover:text-blue-800 font-medium" title={fund.adviser_entity_legal_name}>{fund.adviser_entity_legal_name}</div>
+                                    <div className="text-[9px] text-gray-400">CRD: {fund.adviser_entity_crd}</div>
+                                  </div>
+                                ) : fund.adviser_entity_legal_name ? (
+                                  <div className="text-[11px] text-gray-700" title={fund.adviser_entity_legal_name}>{fund.adviser_entity_legal_name}</div>
                                 ) : (
+                                  <span className="text-[11px] text-gray-400">—</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2.5">
+                                {fund.related_names ? (() => {
+                                  const names = fund.related_names.split('|');
+                                  const roles = fund.related_roles ? fund.related_roles.split('|') : [];
+                                  const normalized = names.map((n, i) => ({
+                                    name: normalizeRelatedPartyName(n.trim()),
+                                    role: roles[i] || ''
+                                  })).filter(item => item.name); // Remove nulls
+
+                                  return normalized.length > 0 ? (
+                                    <div className="space-y-1">
+                                      {normalized.slice(0, 2).map((item, i) => (
+                                        <div key={i}>
+                                          <div className="text-[11px] text-gray-700">{item.name}</div>
+                                          {item.role && <div className="text-[9px] text-gray-400">{item.role.trim()}</div>}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-[11px] text-gray-400">—</span>
+                                  );
+                                })() : (
                                   <span className="text-[11px] text-gray-400">—</span>
                                 )}
                               </td>
@@ -2266,12 +3279,15 @@ function App() {
                                 )}
                               </td>
                               <td className="px-3 py-2.5 text-right">
+                                {fund.form_d_offering_amount ? (
+                                  <div className="text-[11px] text-gray-900 font-mono tabular-nums font-medium">{formatCurrency(parseCurrency(fund.form_d_offering_amount))}</div>
+                                ) : (
+                                  <span className="text-[11px] text-gray-400">—</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2.5 text-right">
                                 {fund.latest_gross_asset_value ? (
                                   <div className="text-[11px] text-gray-900 font-mono tabular-nums font-medium">{formatCurrency(fund.latest_gross_asset_value)}</div>
-                                ) : fund.form_d_offering_amount ? (
-                                  <div className="text-[11px] text-gray-900 font-mono tabular-nums font-medium">{formatCurrency(parseCurrency(fund.form_d_offering_amount))}</div>
-                                ) : fund.form_d_amount_sold ? (
-                                  <div className="text-[11px] text-gray-600 font-mono tabular-nums">{formatCurrency(parseCurrency(fund.form_d_amount_sold))}</div>
                                 ) : (
                                   <span className="text-[11px] text-gray-400">—</span>
                                 )}
@@ -2344,29 +3360,29 @@ function App() {
 
                 {/* New Managers Table */}
                 {activeTab === 'new_managers' && (
-                  <div className="min-w-full inline-block align-middle px-6 pb-12">
-                    {/* Filter Bar - Gemini Style */}
-                    <div className="mb-6 p-4 bg-slate-50/80 rounded-xl border border-slate-200/60">
+                  <div className="px-4 pb-4 overflow-x-auto">
+                    {/* Filter Bar */}
+                    <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
                       <div className="flex flex-wrap items-center gap-4">
                         {/* Date Range */}
-                        <div className="flex items-center gap-3 bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
+                        <div className="flex items-center gap-3 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm">
                           <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">From</span>
+                            <span className="text-[10px] font-semibold text-gray-600 uppercase tracking-wide">From</span>
                             <input
                               type="date"
                               value={nmStartDate}
                               onChange={(e) => setNmStartDate(e.target.value)}
-                              className="px-2 py-1 text-[12px] border-0 bg-slate-50 rounded focus:outline-none focus:ring-2 focus:ring-slate-400 font-mono"
+                              className="px-2 py-1 text-[12px] border-0 bg-gray-50 rounded focus:outline-none focus:ring-2 focus:ring-blue-400 font-mono"
                             />
                           </div>
-                          <span className="text-slate-300">→</span>
+                          <span className="text-gray-300">→</span>
                           <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">To</span>
+                            <span className="text-[10px] font-semibold text-gray-600 uppercase tracking-wide">To</span>
                             <input
                               type="date"
                               value={nmEndDate}
                               onChange={(e) => setNmEndDate(e.target.value)}
-                              className="px-2 py-1 text-[12px] border-0 bg-slate-50 rounded focus:outline-none focus:ring-2 focus:ring-slate-400 font-mono"
+                              className="px-2 py-1 text-[12px] border-0 bg-gray-50 rounded focus:outline-none focus:ring-2 focus:ring-blue-400 font-mono"
                             />
                           </div>
                         </div>
@@ -2374,7 +3390,7 @@ function App() {
                         <select
                           value={nmFundType}
                           onChange={(e) => setNmFundType(e.target.value)}
-                          className="px-3 py-2 text-[12px] bg-white border border-slate-200 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-400 cursor-pointer"
+                          className="px-3 py-2 text-[12px] bg-white border border-gray-200 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer"
                         >
                           {fundTypeOptions.map(opt => (
                             <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -2384,42 +3400,58 @@ function App() {
                         <select
                           value={nmState}
                           onChange={(e) => setNmState(e.target.value)}
-                          className="px-3 py-2 text-[12px] bg-white border border-slate-200 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-400 cursor-pointer"
+                          className="px-3 py-2 text-[12px] bg-white border border-gray-200 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer"
                         >
                           {stateOptions.map(opt => (
                             <option key={opt.value} value={opt.value}>{opt.label}</option>
                           ))}
                         </select>
+                        {/* Form ADV Filter */}
+                        <select
+                          value={nmHasAdv}
+                          onChange={(e) => setNmHasAdv(e.target.value)}
+                          className="px-3 py-2 text-[12px] bg-white border border-gray-200 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer"
+                        >
+                          <option value="">All Registrations</option>
+                          <option value="yes">Has Form ADV</option>
+                          <option value="no">No Form ADV</option>
+                        </select>
                         {/* Result Count */}
                         <div className="ml-auto flex items-center gap-2">
-                          {(nmFundType || nmState) && (
+                          {(nmFundType || nmState || nmHasAdv) && (
                             <button
-                              onClick={() => { setNmFundType(''); setNmState(''); }}
-                              className="px-2 py-1 text-[10px] font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded transition-colors"
+                              onClick={() => { setNmFundType(''); setNmState(''); setNmHasAdv(''); }}
+                              className="px-2 py-1 text-[10px] font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
                             >
                               Clear Filters
                             </button>
                           )}
-                          <span className="text-[11px] text-slate-500 font-medium bg-white px-3 py-1.5 rounded-full border border-slate-200">
-                            {newManagers.length} managers
+                          <span className="text-[11px] text-gray-600 font-medium bg-white px-3 py-1.5 rounded-full border border-gray-200">
+                            {filteredNewManagers.length} managers
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm bg-white">
-                      <table className="min-w-full">
-                        <thead className="bg-slate-50/80">
+                    <div className="border border-gray-200 rounded-lg overflow-hidden shadow-sm bg-white">
+                      <table className="min-w-full divide-y divide-gray-100">
+                        <thead className="bg-gray-50">
                           <tr>
-                            <th className="px-6 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Series Master LLC</th>
-                            <th className="px-4 py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">Funds</th>
-                            <th className="px-4 py-3 text-right text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total Offering</th>
-                            <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Key Person</th>
-                            <th className="px-4 py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">First Filing</th>
+                            <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Series Master LLC</th>
+                            <th onClick={() => handleNmSort('fund_count')} className="px-3 py-2.5 text-center text-[10px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                              Funds {nmSortField === 'fund_count' && (nmSortOrder === 'desc' ? '↓' : '↑')}
+                            </th>
+                            <th onClick={() => handleNmSort('total_offering_amount')} className="px-3 py-2.5 text-right text-[10px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                              Total Offering {nmSortField === 'total_offering_amount' && (nmSortOrder === 'desc' ? '↓' : '↑')}
+                            </th>
+                            <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Key Person</th>
+                            <th onClick={() => handleNmSort('first_filing_date')} className="px-3 py-2.5 text-center text-[10px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                              First Filing {nmSortField === 'first_filing_date' && (nmSortOrder === 'desc' ? '↓' : '↑')}
+                            </th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {newManagers.map((manager, idx) => {
+                        <tbody className="divide-y divide-gray-50">
+                          {sortedNewManagers.map((manager, idx) => {
                             const isExpanded = expandedManagers.has(manager.series_master_llc);
                             const fundType = getPrimaryFundType(manager);
                             const keyPerson = getKeyPerson(manager);
@@ -2428,7 +3460,7 @@ function App() {
                             return (
                               <React.Fragment key={idx}>
                                 <tr
-                                  className="group hover:bg-slate-50/50 cursor-pointer transition-all duration-150"
+                                  className="group hover:bg-blue-50/50 cursor-pointer transition-colors"
                                   onClick={() => {
                                     const newExpanded = new Set(expandedManagers);
                                     if (isExpanded) {
@@ -2439,46 +3471,164 @@ function App() {
                                     setExpandedManagers(newExpanded);
                                   }}
                                 >
-                                  <td className="px-6 py-4">
-                                    <div className="flex items-center gap-3">
-                                      <span className={`text-slate-400 text-[10px] transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>▶</span>
-                                      <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${avatarColor} flex items-center justify-center text-white font-bold text-[14px] shadow-sm flex-shrink-0`}>
-                                        {firstLetter}
-                                      </div>
+                                  <td className="px-4 py-2.5">
+                                    <div className="flex items-center gap-2.5">
+                                      <span className={`text-gray-400 text-[10px] transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>▶</span>
                                       <div className="min-w-0">
-                                        <div className="text-[13px] font-medium text-slate-900 group-hover:text-slate-700 transition-colors truncate max-w-[280px]">{manager.series_master_llc}</div>
+                                        <div className="text-[12px] font-medium text-gray-900 group-hover:text-blue-700 transition-colors truncate max-w-[260px]" title={manager.series_master_llc}>{manager.series_master_llc}</div>
                                         {fundType && (
-                                          <span className={`inline-flex items-center mt-1 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide rounded ${getFundTypeTagColor(fundType)}`}>
-                                            {fundType}
-                                          </span>
+                                          <div className="mt-1">
+                                            <span className={`inline-flex items-center px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide rounded ${getFundTypeTagColor(fundType)}`}>
+                                              {fundType}
+                                            </span>
+                                          </div>
                                         )}
                                       </div>
                                     </div>
                                   </td>
-                                  <td className="px-4 py-4 text-center">
-                                    <span className="inline-flex items-center justify-center min-w-[28px] px-2.5 py-1 text-[11px] font-bold bg-slate-100 text-slate-700 rounded-full">{manager.fund_count}</span>
+                                  <td className="px-3 py-2.5 text-center">
+                                    <span className="inline-flex items-center justify-center min-w-[28px] px-2.5 py-1 text-[11px] font-bold bg-gray-100 text-gray-700 rounded-full">{manager.fund_count}</span>
                                   </td>
-                                  <td className="px-4 py-4 text-right">
-                                    <div className="text-[13px] font-mono text-slate-800 tabular-nums font-semibold">{formatCurrency(manager.total_offering_amount)}</div>
+                                  <td className="px-3 py-2.5 text-right">
+                                    <div className="text-[11px] font-mono text-gray-700 tabular-nums font-semibold">{formatCurrency(manager.total_offering_amount)}</div>
                                   </td>
-                                  <td className="px-4 py-4">
+                                  <td className="px-3 py-2.5">
                                     {keyPerson ? (
-                                      <div className="min-w-0">
-                                        <div className="text-[12px] font-medium text-slate-700 truncate max-w-[160px]">{keyPerson.name}</div>
+                                      <div>
+                                        <div className="text-[11px] font-medium text-gray-700">{keyPerson.name}</div>
                                         {keyPerson.role && (
-                                          <div className="text-[10px] text-slate-400 truncate max-w-[160px]">{keyPerson.role}</div>
+                                          <div className="text-[9px] text-gray-400">{keyPerson.role}</div>
                                         )}
                                       </div>
                                     ) : (
-                                      <span className="text-[11px] text-slate-300 italic">N/A</span>
+                                      <span className="text-[11px] text-gray-400 italic">—</span>
                                     )}
                                   </td>
-                                  <td className="px-4 py-4 text-center">
-                                    <div className="text-[12px] font-mono text-slate-500">{formatDate(manager.first_filing_date)}</div>
+                                  <td className="px-3 py-2.5 text-center">
+                                    <div className="text-[11px] font-mono text-gray-500">{formatDate(manager.first_filing_date)}</div>
                                   </td>
                                 </tr>
+                                {isExpanded && manager.has_form_adv && (
+                                  <tr className="bg-emerald-50/50 border-l-2 border-emerald-400">
+                                    <td colSpan="5" className="px-6 py-3">
+                                      <div className="ml-6">
+                                        <div className="flex items-start justify-between">
+                                          <div>
+                                            <div className="flex items-center gap-2 mb-2">
+                                              <span className="inline-flex items-center px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide rounded bg-emerald-100 text-emerald-700">
+                                                ✓ Form ADV
+                                              </span>
+                                              <span className="text-[11px] font-medium text-gray-700">
+                                                CRD {manager.adv_data.crd}
+                                              </span>
+                                            </div>
+                                            <div className="grid grid-cols-4 gap-4 text-[11px]">
+                                              <div>
+                                                <div className="text-gray-500">Registered Name:</div>
+                                                <div className="text-gray-900 font-medium">{manager.adv_data.name}</div>
+                                              </div>
+                                              {manager.adv_data.location && (
+                                                <div>
+                                                  <div className="text-gray-500">Location:</div>
+                                                  <div className="text-gray-900">{manager.adv_data.location}</div>
+                                                </div>
+                                              )}
+                                              {manager.adv_data.aum && (
+                                                <div>
+                                                  <div className="text-gray-500">AUM:</div>
+                                                  <div className="text-gray-900 font-mono">{formatCurrency(manager.adv_data.aum)}</div>
+                                                </div>
+                                              )}
+                                              {manager.adv_data.website && (
+                                                <div>
+                                                  <div className="text-gray-500">Website:</div>
+                                                  <a href={manager.adv_data.website} target="_blank" rel="noopener noreferrer" className="text-gray-700 hover:text-gray-900 hover:underline">
+                                                    {manager.adv_data.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                                                  </a>
+                                                </div>
+                                              )}
+                                            </div>
+                                          </div>
+                                          <div className="flex gap-2">
+                                            <button
+                                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 text-white rounded text-[10px] font-medium hover:bg-gray-800 transition-colors shadow-sm"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleNavigateToAdviserFromFund(manager.adv_data.crd);
+                                              }}
+                                            >
+                                              <span>View Adviser Page</span>
+                                            </button>
+                                            <a
+                                              href={`https://adviserinfo.sec.gov/firm/summary/${manager.adv_data.crd}`}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 rounded text-[10px] font-medium hover:bg-gray-50 transition-colors shadow-sm"
+                                              onClick={(e) => e.stopPropagation()}
+                                            >
+                                              <span>SEC IAPD</span>
+                                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                            </a>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                                {isExpanded && manager.enrichment_data && manager.enrichment_data.is_published && (
+                                  <tr className="bg-blue-50/50 border-l-2 border-blue-400">
+                                    <td colSpan="5" className="px-6 py-3">
+                                      <div className="ml-6">
+                                        <div className="flex items-start justify-between">
+                                          <div>
+                                            <div className="flex items-center gap-2 mb-2">
+                                              <span className="inline-flex items-center px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide rounded bg-blue-100 text-blue-700">
+                                                ✓ Enriched Data
+                                              </span>
+                                              {manager.enrichment_data.confidence && (
+                                                <span className="text-[10px] text-gray-500">
+                                                  {Math.round(manager.enrichment_data.confidence * 100)}% confidence
+                                                </span>
+                                              )}
+                                            </div>
+                                            <div className="grid grid-cols-4 gap-4 text-[11px]">
+                                              {manager.enrichment_data.fund_type && (
+                                                <div>
+                                                  <div className="text-gray-500">Fund Type:</div>
+                                                  <div className="text-gray-900 font-medium">{manager.enrichment_data.fund_type}</div>
+                                                </div>
+                                              )}
+                                              {manager.enrichment_data.investment_stage && (
+                                                <div>
+                                                  <div className="text-gray-500">Investment Stage:</div>
+                                                  <div className="text-gray-900">{manager.enrichment_data.investment_stage}</div>
+                                                </div>
+                                              )}
+                                              {manager.enrichment_data.website && (
+                                                <div>
+                                                  <div className="text-gray-500">Website:</div>
+                                                  <a href={manager.enrichment_data.website} target="_blank" rel="noopener noreferrer" className="text-gray-700 hover:text-gray-900 hover:underline">
+                                                    {manager.enrichment_data.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                                                  </a>
+                                                </div>
+                                              )}
+                                              {manager.enrichment_data.linkedin && (
+                                                <div>
+                                                  <div className="text-gray-500">LinkedIn:</div>
+                                                  <a href={manager.enrichment_data.linkedin} target="_blank" rel="noopener noreferrer" className="text-gray-700 hover:text-gray-900 hover:underline">
+                                                    View Profile
+                                                  </a>
+                                                </div>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
                                 {isExpanded && manager.funds && manager.funds.map((fund, fundIdx) => (
-                                  <tr key={`${idx}-${fundIdx}`} className="bg-slate-50/30 border-l-2 border-slate-300">
+                                  <tr key={`${idx}-${fundIdx}`} className="bg-gray-50/50 border-l-2 border-gray-300">
                                     <td colSpan="5" className="px-6 py-4">
                                       <div className="ml-6 grid grid-cols-3 gap-6 text-[12px]">
                                         {/* Fund Details */}
@@ -2540,57 +3690,42 @@ function App() {
                                             )}
                                             {/* Contact Action Buttons */}
                                             <div className="flex flex-wrap gap-2 pt-2">
-                                              {/* Email Button */}
-                                              {fund.email ? (
-                                                <a
-                                                  href={`mailto:${fund.email}`}
-                                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-100 text-slate-700 rounded text-[10px] font-medium hover:bg-slate-200 transition-colors"
-                                                  onClick={(e) => e.stopPropagation()}
-                                                >
-                                                  <MailIcon className="w-3 h-3" />
-                                                  Email
-                                                </a>
-                                              ) : (
-                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-50 text-gray-300 rounded text-[10px] font-medium cursor-not-allowed">
-                                                  <MailIcon className="w-3 h-3" />
-                                                  Email
-                                                </span>
-                                              )}
-                                              {/* LinkedIn Button */}
-                                              {fund.linkedin ? (
-                                                <a
-                                                  href={fund.linkedin}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-100 text-slate-700 rounded text-[10px] font-medium hover:bg-slate-200 transition-colors"
-                                                  onClick={(e) => e.stopPropagation()}
-                                                >
-                                                  <LinkedinIcon className="w-3 h-3" />
-                                                  LinkedIn
-                                                </a>
-                                              ) : (
-                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-50 text-gray-300 rounded text-[10px] font-medium cursor-not-allowed">
-                                                  <LinkedinIcon className="w-3 h-3" />
-                                                  LinkedIn
-                                                </span>
-                                              )}
                                               {/* Website Button */}
-                                              {fund.website ? (
+                                              {fund.website && (
                                                 <a
                                                   href={fund.website.startsWith('http') ? fund.website : `https://${fund.website}`}
                                                   target="_blank"
                                                   rel="noopener noreferrer"
-                                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-100 text-slate-700 rounded text-[10px] font-medium hover:bg-slate-200 transition-colors"
+                                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-300 text-gray-700 rounded text-[10px] font-medium hover:bg-gray-50 transition-colors shadow-sm"
                                                   onClick={(e) => e.stopPropagation()}
                                                 >
                                                   <GlobeIcon className="w-3 h-3" />
-                                                  Website
+                                                  {fund.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
                                                 </a>
-                                              ) : (
-                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-50 text-gray-300 rounded text-[10px] font-medium cursor-not-allowed">
-                                                  <GlobeIcon className="w-3 h-3" />
-                                                  Website
-                                                </span>
+                                              )}
+                                              {/* LinkedIn Button */}
+                                              {fund.linkedin && (
+                                                <a
+                                                  href={fund.linkedin}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-300 text-gray-700 rounded text-[10px] font-medium hover:bg-gray-50 transition-colors shadow-sm"
+                                                  onClick={(e) => e.stopPropagation()}
+                                                >
+                                                  <LinkedinIcon className="w-3 h-3" />
+                                                  LinkedIn
+                                                </a>
+                                              )}
+                                              {/* Email Button */}
+                                              {fund.email && (
+                                                <a
+                                                  href={`mailto:${fund.email}`}
+                                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-300 text-gray-700 rounded text-[10px] font-medium hover:bg-gray-50 transition-colors shadow-sm"
+                                                  onClick={(e) => e.stopPropagation()}
+                                                >
+                                                  <MailIcon className="w-3 h-3" />
+                                                  Email
+                                                </a>
                                               )}
                                             </div>
                                           </div>
@@ -2598,22 +3733,30 @@ function App() {
                                         {/* Related Parties */}
                                         <div>
                                           <div className="font-semibold text-gray-900 mb-2 text-[11px] uppercase tracking-wide">Related Parties</div>
-                                          {fund.related_names ? (
-                                            <div className="space-y-2">
-                                              {fund.related_names.split('|').slice(0, 4).map((name, i) => {
-                                                const roles = fund.related_roles ? fund.related_roles.split('|')[i] : '';
-                                                return (
+                                          {fund.related_names ? (() => {
+                                            const names = fund.related_names.split('|');
+                                            const roles = fund.related_roles ? fund.related_roles.split('|') : [];
+                                            const normalized = names.map((n, i) => ({
+                                              name: normalizeRelatedPartyName(n.trim()),
+                                              role: roles[i] || ''
+                                            })).filter(item => item.name); // Remove nulls
+
+                                            return normalized.length > 0 ? (
+                                              <div className="space-y-2">
+                                                {normalized.slice(0, 4).map((item, i) => (
                                                   <div key={i} className="bg-white rounded px-3 py-2 border border-gray-100">
-                                                    <div className="text-gray-900 font-medium text-[12px]">{name.trim()}</div>
-                                                    {roles && <div className="text-gray-500 text-[10px] mt-0.5">{roles.trim()}</div>}
+                                                    <div className="text-gray-900 font-medium text-[12px]">{item.name}</div>
+                                                    {item.role && <div className="text-gray-500 text-[10px] mt-0.5">{item.role.trim()}</div>}
                                                   </div>
-                                                );
-                                              })}
-                                              {fund.related_names.split('|').length > 4 && (
-                                                <div className="text-gray-400 text-[10px] italic">+{fund.related_names.split('|').length - 4} more</div>
-                                              )}
-                                            </div>
-                                          ) : (
+                                                ))}
+                                                {normalized.length > 4 && (
+                                                  <div className="text-gray-400 text-[10px] italic">+{normalized.length - 4} more</div>
+                                                )}
+                                              </div>
+                                            ) : (
+                                              <div className="text-gray-400 text-[11px] italic">No related parties listed</div>
+                                            );
+                                          })() : (
                                             <div className="text-gray-400 text-[11px] italic">No related parties listed</div>
                                           )}
                                         </div>

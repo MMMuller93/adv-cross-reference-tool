@@ -159,7 +159,8 @@ app.get('/api/advisers/search', async (req, res) => {
       adviserQuery = adviserQuery.lte('total_aum', parseFloat(maxAum) * 1000000);
     }
 
-    adviserQuery = adviserQuery.order('total_aum', { ascending: false }).limit(parseInt(limit));
+    // Sort by aum_2025 (most complete), push NULLs to end
+    adviserQuery = adviserQuery.order('aum_2025', { ascending: false, nullsFirst: false }).limit(parseInt(limit));
     const { data, error } = await adviserQuery;
 
     if (error) throw error;
@@ -242,9 +243,15 @@ app.get('/api/funds/adv', async (req, res) => {
     const { data, error, count } = await dbQuery;
     if (error) throw error;
 
+    // Add source field to each result
+    const results = (data || []).map(fund => ({
+      ...fund,
+      source: 'adv'
+    }));
+
     res.json({
       success: true,
-      results: data || [],
+      results,
       pagination: {
         page: pageNum,
         pageSize: pageSizeNum,
@@ -352,8 +359,8 @@ app.get('/api/funds/formd', async (req, res) => {
     if (endDate) dbQuery = dbQuery.lte('filing_date', endDate);
     if (state) dbQuery = dbQuery.eq('stateorcountry', state);
 
-    // Fetch more than needed for proper sorting, then limit after sorting
-    dbQuery = dbQuery.limit(Math.min(parseInt(limit) * 3, 5000));
+    // Order by id descending (indexed, fast) to get most recent filings first
+    dbQuery = dbQuery.order('id', { ascending: false }).limit(Math.min(parseInt(limit), 2000));
 
     const { data, error } = await dbQuery;
     if (error) throw error;
@@ -374,8 +381,18 @@ app.get('/api/funds/formd', async (req, res) => {
       }
     }
 
-    // Apply limit after deduplication
-    const results = Array.from(fundMap.values()).slice(0, parseInt(limit));
+    // Apply limit after deduplication and normalize field names for frontend
+    const results = Array.from(fundMap.values()).slice(0, parseInt(limit)).map(fund => ({
+      ...fund,
+      fund_name: fund.entityname,
+      form_d_cik: fund.cik,
+      form_d_filing_date: fund.filing_date,
+      federal_exemptions: fund.federalexemptions_items_list,
+      investment_fund_type: fund.investmentfundtype,
+      form_d_offering_amount: fund.totalofferingamount,
+      form_d_amount_sold: fund.totalamountsold,
+      source: 'formd'
+    }));
 
     res.json({ success: true, results });
   } catch (error) {
@@ -424,18 +441,28 @@ app.get('/api/browse-computed', async (req, res) => {
 // API: New Managers
 app.get('/api/funds/new-managers', async (req, res) => {
   try {
-    const { startDate, endDate, fundType, state } = req.query;
-    console.log(`[Gemini] Fetching new managers from ${startDate || 'beginning'} to ${endDate || 'now'}, fundType: ${fundType || 'all'}, state: ${state || 'all'}`);
+    const { startDate, endDate, fundType, state, query } = req.query;
+
+    // Default to last 12 months if no date filter provided for performance
+    const defaultStartDate = startDate || new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    console.log(`[Gemini] Fetching new managers from ${defaultStartDate} to ${endDate || 'now'}, fundType: ${fundType || 'all'}, state: ${state || 'all'}, query: ${query || 'none'}`);
 
     // Use paginated fetch to get all results (Supabase has 1000 row limit)
     const data = await fetchAllResultsPaginated((from, to) => {
       let q = formdClient
         .from('form_d_filings')
         .select('*')
-        .ilike('entityname', '%a series of%')
         .range(from, to);
 
-      if (startDate) q = q.gte('filing_date', startDate);
+      // If query provided, search entityname; otherwise filter by "a series of"
+      if (query) {
+        q = q.ilike('entityname', `%${query}%`);
+      } else {
+        q = q.ilike('entityname', '%a series of%');
+      }
+
+      // Always apply date filter (default to last 12 months for performance)
+      q = q.gte('filing_date', defaultStartDate);
       if (endDate) q = q.lte('filing_date', endDate);
       if (fundType) q = q.ilike('investmentfundtype', `%${fundType}%`);
       if (state) q = q.eq('stateorcountry', state);
@@ -487,14 +514,443 @@ app.get('/api/funds/new-managers', async (req, res) => {
     });
 
     // Sort managers by first filing date (newest first) using parsed dates
-    const result = Object.values(managers).sort((a, b) => {
+    let result = Object.values(managers).sort((a, b) => {
       return b.first_filing_date_parsed - a.first_filing_date_parsed;
     });
 
-    res.json({ success: true, managers: result, total: result.length });
+    // OPTIMIZED: Batch fetch enriched_managers and advisers upfront instead of individual queries
+    console.log(`[Gemini] Batch fetching enrichment data for ${result.length} managers...`);
+
+    // Batch fetch all enriched_managers data
+    const enrichedManagersData = await fetchAllResultsPaginated((from, to) => {
+      return formdClient
+        .from('enriched_managers')
+        .select('*')
+        .range(from, to);
+    });
+
+    // Create lookup map for enriched managers
+    const enrichedManagersMap = {};
+    enrichedManagersData.forEach(em => {
+      if (em.series_master_llc) {
+        enrichedManagersMap[em.series_master_llc.toLowerCase()] = em;
+      }
+    });
+    console.log(`  Loaded ${enrichedManagersData.length} enriched managers for matching`);
+
+    // Batch fetch all advisers for matching
+    const advisersData = await fetchAllResultsPaginated((from, to) => {
+      return advClient
+        .from('advisers_enriched')
+        .select('crd, adviser_name, adviser_entity_legal_name, primary_website, total_aum')
+        .range(from, to);
+    });
+
+    // Create lookup structures for advisers
+    const advisersByNameExact = {};
+    const advisersByNamePrefix = [];
+    advisersData.forEach(adv => {
+      const name1 = (adv.adviser_name || '').toLowerCase();
+      const name2 = (adv.adviser_entity_legal_name || '').toLowerCase();
+      if (name1) advisersByNameExact[name1] = adv;
+      if (name2) advisersByNameExact[name2] = adv;
+      advisersByNamePrefix.push({
+        names: [name1, name2].filter(n => n),
+        adv
+      });
+    });
+    console.log(`  Loaded ${advisersData.length} advisers for matching`);
+
+    // Helper to parse fund name
+    const parseFundName = (name) => {
+      return name
+        .replace(/\s+[A-Z]{2}[,\s]+(LLC|LP|L\.P\.|L\.L\.C\.)$/i, '')
+        .replace(/,?\s+(LLC|LP|L\.P\.|L\.L\.C\.|Ltd|Limited|Inc|Incorporated|GP)$/i, '')
+        .replace(/[,\s]+$/, '')
+        .trim();
+    };
+
+    // Helper to find adviser match
+    const findAdviserMatch = (parsedName) => {
+      const lowerName = parsedName.toLowerCase();
+
+      // Try exact match first
+      if (advisersByNameExact[lowerName]) {
+        return advisersByNameExact[lowerName];
+      }
+
+      // Try prefix match
+      for (const { names, adv } of advisersByNamePrefix) {
+        for (const name of names) {
+          if (name.startsWith(lowerName) || lowerName.startsWith(name)) {
+            return adv;
+          }
+        }
+      }
+
+      return null;
+    };
+
+    // Process all managers in memory (no API calls)
+    const enrichedResult = result.map(manager => {
+      const enrichedManager = { ...manager };
+      const parsedName = parseFundName(manager.series_master_llc);
+
+      // Check enriched_managers lookup
+      const enrichedData = enrichedManagersMap[manager.series_master_llc.toLowerCase()];
+      if (enrichedData) {
+        enrichedManager.enrichment_data = {
+          website: enrichedData.website_url,
+          fund_type: enrichedData.fund_type,
+          investment_stage: enrichedData.investment_stage,
+          linkedin: enrichedData.linkedin_company_url,
+          is_published: enrichedData.is_published,
+          confidence: enrichedData.confidence_score
+        };
+      }
+
+      // Check advisers lookup
+      const advData = findAdviserMatch(parsedName);
+      if (advData) {
+        enrichedManager.has_form_adv = true;
+        enrichedManager.linked_crd = advData.crd;
+        enrichedManager.adv_data = {
+          crd: advData.crd,
+          name: advData.adviser_name || advData.adviser_entity_legal_name,
+          website: advData.primary_website,
+          aum: advData.total_aum
+        };
+      } else {
+        enrichedManager.has_form_adv = false;
+      }
+
+      return enrichedManager;
+    });
+
+    const hasAdvCount = enrichedResult.filter(m => m.has_form_adv).length;
+    console.log(`[Gemini] Found ${hasAdvCount} managers with existing Form ADV data`);
+
+    res.json({ success: true, managers: enrichedResult, total: enrichedResult.length });
   } catch (error) {
     console.error('New managers error:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// ENRICHMENT REVIEW QUEUE ROUTES
+// ============================================
+
+// Get all funds needing manual review
+app.get('/api/review/queue', async (req, res) => {
+  try {
+    const { data, error } = await formdClient
+      .from('enriched_managers')
+      .select('*')
+      .in('enrichment_status', ['needs_manual_review', 'platform_spv', 'no_data_found', 'conflicting_data'])
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      count: data.length,
+      managers: data
+    });
+  } catch (error) {
+    console.error('Error fetching review queue:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get auto-enriched funds (for verification)
+app.get('/api/review/auto-enriched', async (req, res) => {
+  try {
+    const { data, error } = await formdClient
+      .from('enriched_managers')
+      .select('*')
+      .eq('enrichment_status', 'auto_enriched')
+      .eq('is_published', false)
+      .order('confidence_score', { ascending: false })
+      .limit(50);
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      count: data.length,
+      managers: data
+    });
+  } catch (error) {
+    console.error('Error fetching auto-enriched:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Publish a fund (mark as verified and public)
+app.post('/api/review/publish', async (req, res) => {
+  try {
+    const { id } = req.body;
+
+    const { data, error } = await formdClient
+      .from('enriched_managers')
+      .update({
+        is_published: true,
+        enrichment_status: 'manually_verified',
+        verified_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      manager: data
+    });
+  } catch (error) {
+    console.error('Error publishing fund:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Update enrichment data
+app.post('/api/review/update', async (req, res) => {
+  try {
+    const { id, updates } = req.body;
+
+    const { data, error } = await formdClient
+      .from('enriched_managers')
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      manager: data
+    });
+  } catch (error) {
+    console.error('Error updating fund:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Mark as not a fund / skip
+app.post('/api/review/skip', async (req, res) => {
+  try {
+    const { id, reason } = req.body;
+
+    const { data, error } = await formdClient
+      .from('enriched_managers')
+      .update({
+        enrichment_status: 'not_a_fund',
+        flagged_issues: reason ? [reason] : [],
+        is_published: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      manager: data
+    });
+  } catch (error) {
+    console.error('Error skipping fund:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get enrichment stats
+app.get('/api/review/stats', async (req, res) => {
+  try {
+    const { data, error } = await formdClient
+      .from('enriched_managers')
+      .select('enrichment_status, is_published');
+
+    if (error) throw error;
+
+    const stats = {
+      total: data.length,
+      auto_enriched: data.filter(m => m.enrichment_status === 'auto_enriched').length,
+      needs_review: data.filter(m => m.enrichment_status === 'needs_manual_review').length,
+      platform_spv: data.filter(m => m.enrichment_status === 'platform_spv').length,
+      no_data: data.filter(m => m.enrichment_status === 'no_data_found').length,
+      manually_verified: data.filter(m => m.enrichment_status === 'manually_verified').length,
+      published: data.filter(m => m.is_published).length,
+      unpublished: data.filter(m => !m.is_published).length
+    };
+
+    res.json({
+      success: true,
+      stats
+    });
+  } catch (error) {
+    console.error('Error fetching stats:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ============================================
+// UNIFIED ADVISER / ENRICHED MANAGER ROUTES
+// ============================================
+
+// Get unified adviser data (Form ADV + Enriched Manager)
+app.get('/api/advisers/unified/:identifier', async (req, res) => {
+  try {
+    const { identifier } = req.params;
+    const isCRD = /^\d+$/.test(identifier);
+
+    let adviserData = null;
+    let enrichedData = null;
+    let portfolioCompanies = [];
+
+    if (isCRD) {
+      // Fetch from Form ADV by CRD
+      const { data: advData } = await advClient
+        .from('advisers_enriched')
+        .select('*')
+        .eq('crd', identifier)
+        .single();
+
+      adviserData = advData;
+
+      // Check if also in enriched managers (linked by CRD)
+      const { data: enriched } = await formdClient
+        .from('enriched_managers')
+        .select('*')
+        .eq('linked_crd', identifier)
+        .single();
+
+      enrichedData = enriched;
+    } else {
+      // Fetch from enriched managers by name
+      const { data: enriched } = await formdClient
+        .from('enriched_managers')
+        .select('*')
+        .eq('series_master_llc', identifier)
+        .single();
+
+      enrichedData = enriched;
+
+      // If has CRD, also fetch ADV data
+      if (enriched && enriched.linked_crd) {
+        const { data: advData } = await advClient
+          .from('advisers_enriched')
+          .select('*')
+          .eq('crd', enriched.linked_crd)
+          .single();
+
+        adviserData = advData;
+      }
+    }
+
+    // Fetch portfolio companies if enriched data exists
+    if (enrichedData) {
+      const { data: portfolio } = await formdClient
+        .from('portfolio_companies')
+        .select('*')
+        .eq('manager_id', enrichedData.id)
+        .order('company_name');
+
+      portfolioCompanies = portfolio || [];
+    }
+
+    // Merge the data
+    const unifiedData = {
+      // Basic info (prefer ADV data if available)
+      name: adviserData?.adviser_name || adviserData?.adviser_entity_legal_name || enrichedData?.series_master_llc,
+      crd: adviserData?.crd || enrichedData?.linked_crd,
+      website: enrichedData?.website_url || adviserData?.primary_website,
+
+      // Form ADV specific
+      hasFormADV: !!adviserData,
+      advData: adviserData ? {
+        aum: adviserData.total_aum,
+        crd: adviserData.crd
+      } : null,
+
+      // Enriched data specific
+      hasEnrichedData: !!enrichedData,
+      enrichedData: enrichedData ? {
+        fund_type: enrichedData.fund_type,
+        investment_stage: enrichedData.investment_stage,
+        linkedin_url: enrichedData.linkedin_company_url,
+        confidence_score: enrichedData.confidence_score,
+        enrichment_status: enrichedData.enrichment_status
+      } : null,
+
+      // Portfolio companies
+      portfolioCompanies
+    };
+
+    res.json({
+      success: true,
+      adviser: unifiedData
+    });
+
+  } catch (error) {
+    console.error('Error fetching unified adviser:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get portfolio companies for a manager
+app.get('/api/managers/:managerId/portfolio', async (req, res) => {
+  try {
+    const { managerId } = req.params;
+
+    const { data, error } = await formdClient
+      .from('portfolio_companies')
+      .select('*')
+      .eq('manager_id', managerId)
+      .order('company_name');
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      companies: data || [],
+      count: data?.length || 0
+    });
+
+  } catch (error) {
+    console.error('Error fetching portfolio companies:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 });
 
