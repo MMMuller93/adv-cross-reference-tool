@@ -495,7 +495,7 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
 // ============================================================================
 // AUTH MODAL COMPONENT
 // ============================================================================
-const AuthModal = ({ isOpen, onClose, mode, setMode }) => {
+const AuthModal = ({ isOpen, onClose, mode, setMode, user, hasPremiumAccess, onLogout }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -531,8 +531,85 @@ const AuthModal = ({ isOpen, onClose, mode, setMode }) => {
     }
   };
 
+  const handleLogout = async () => {
+    setLoading(true);
+    try {
+      await supabase.auth.signOut();
+      onLogout();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (!isOpen) return null;
 
+  // If user is logged in, show account info instead of login form
+  if (user) {
+    return (
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100]" onClick={onClose}>
+        <div
+          className="bg-white rounded-lg shadow-xl w-full max-w-sm mx-4 overflow-hidden"
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-semibold text-gray-900 font-serif">Account</h2>
+              <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+                <XIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* User Profile */}
+            <div className="flex items-center gap-4 mb-6 pb-6 border-b border-gray-100">
+              <div className="h-14 w-14 rounded-full bg-gradient-to-tr from-slate-600 to-slate-700 flex items-center justify-center text-white font-bold text-lg shadow-md">
+                {user.email ? user.email.substring(0, 2).toUpperCase() : 'U'}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">{user.email}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  {hasPremiumAccess ? (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
+                      Professional
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                      Free Plan
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Account Actions */}
+            <div className="space-y-2">
+              {!hasPremiumAccess && (
+                <a
+                  href="mailto:contact@strategicfundpartners.com?subject=Professional Access Request"
+                  className="w-full py-2.5 px-4 bg-slate-800 text-white rounded-md font-medium hover:bg-slate-700 transition-colors text-sm flex items-center justify-center gap-2"
+                >
+                  <TrendingUpIcon className="w-4 h-4" />
+                  Upgrade to Professional
+                </a>
+              )}
+              <button
+                onClick={handleLogout}
+                disabled={loading}
+                className="w-full py-2.5 px-4 border border-gray-200 text-gray-700 rounded-md font-medium hover:bg-gray-50 transition-colors text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <LogOutIcon className="w-4 h-4" />
+                {loading ? 'Signing out...' : 'Sign Out'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Login/Signup form for non-logged-in users
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100]" onClick={onClose}>
       <div
@@ -3046,6 +3123,9 @@ function App() {
         onClose={() => setShowAuthModal(false)}
         mode={authMode}
         setMode={setAuthMode}
+        user={user}
+        hasPremiumAccess={hasPremiumAccess}
+        onLogout={handleLogout}
       />
 
       {/* Paywall Modal */}
