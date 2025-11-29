@@ -3164,12 +3164,11 @@ function App() {
                   <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-slate-600 transition-colors" />
                   <input
                     type="search"
-                    placeholder="Command + K to search CRD, CIK, or Entity Name..."
-                    className="block w-full pl-10 pr-12 py-2 border border-gray-200 rounded-lg leading-5 bg-gray-50/50 text-gray-900 placeholder-gray-400 focus:outline-none focus:bg-white focus:ring-1 focus:ring-slate-500 focus:border-slate-500 text-[13px] transition-all shadow-sm"
+                    placeholder="Search CRD, CIK, or Entity Name..."
+                    className="block w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg leading-5 bg-gray-50/50 text-gray-900 placeholder-gray-400 focus:outline-none focus:bg-white focus:ring-1 focus:ring-slate-500 focus:border-slate-500 text-[13px] transition-all shadow-sm"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                   />
-                  <kbd className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center border border-gray-200 rounded px-1.5 py-0.5 text-[10px] font-mono text-gray-400 bg-white shadow-sm">⌘K</kbd>
                 </div>
               </div>
               <div className="ml-6 flex items-center space-x-6">
@@ -3259,7 +3258,6 @@ function App() {
                             <th className="px-6 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-gray-100">Entity</th>
                             <th className="px-4 py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-gray-100">Type</th>
                             <th className="px-4 py-3 text-right text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-gray-100">AUM</th>
-                            <th className="px-4 py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-gray-100"># Funds</th>
                             <th className="px-4 py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-gray-100">Links</th>
                             <th className="px-4 py-3 border-b border-gray-100"></th>
                           </tr>
@@ -3276,9 +3274,6 @@ function App() {
                               </td>
                               <td className="px-4 py-4 whitespace-nowrap text-right">
                                 <div className="text-[13px] text-slate-900 font-mono tabular-nums font-semibold">{formatCurrency(getEffectiveAum(adviser))}</div>
-                              </td>
-                              <td className="px-4 py-4 whitespace-nowrap text-center">
-                                <div className="text-[12px] text-slate-700 font-mono tabular-nums">{adviser.num_funds_reported || adviser.number_of_funds || '—'}</div>
                               </td>
                               <td className="px-4 py-4 whitespace-nowrap text-center">
                                 <div className="flex items-center justify-center gap-2">
