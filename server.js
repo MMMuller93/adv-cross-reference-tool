@@ -164,7 +164,35 @@ app.get('/api/advisers/search', async (req, res) => {
     const { data, error } = await adviserQuery;
 
     if (error) throw error;
-    res.json(data || []);
+
+    // Enrich advisers with fund counts
+    const advisers = data || [];
+    if (advisers.length > 0) {
+      const crdList = advisers.map(a => a.crd).filter(Boolean);
+      if (crdList.length > 0) {
+        // Get fund counts per adviser using a grouped query
+        // Note: Need high limit since Supabase defaults to 1000 rows
+        const { data: fundCounts } = await advClient
+          .from('funds_enriched')
+          .select('adviser_entity_crd')
+          .in('adviser_entity_crd', crdList.map(c => String(c)))
+          .limit(50000);
+
+        // Count funds per CRD
+        const countMap = {};
+        (fundCounts || []).forEach(f => {
+          const crd = f.adviser_entity_crd;
+          countMap[crd] = (countMap[crd] || 0) + 1;
+        });
+
+        // Merge counts into advisers
+        advisers.forEach(a => {
+          a.fund_count = countMap[a.crd] || 0;
+        });
+      }
+    }
+
+    res.json(advisers);
   } catch (error) {
     console.error('Adviser search error:', error);
     res.status(500).json({ error: error.message });
