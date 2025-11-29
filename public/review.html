@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fund Enrichment Review Queue - Internal Only</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .badge {
+      @apply px-2 py-1 text-xs font-medium rounded-full;
+    }
+    .badge-needs-review { @apply bg-yellow-100 text-yellow-800; }
+    .badge-auto-enriched { @apply bg-green-100 text-green-800; }
+    .badge-platform-spv { @apply bg-purple-100 text-purple-800; }
+    .badge-no-data { @apply bg-red-100 text-red-800; }
+    .badge-verified { @apply bg-blue-100 text-blue-800; }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <div class="min-h-screen">
+    <!-- Header -->
+    <div class="bg-white border-b border-gray-200">
+      <div class="max-w-7xl mx-auto px-4 py-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h1 class="text-2xl font-bold text-gray-900">Fund Enrichment Review Queue</h1>
+            <p class="text-sm text-gray-500 mt-1">Internal Only - Verify and publish enriched fund data</p>
+          </div>
+          <a href="/" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
+            ← Back to Main App
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats Dashboard -->
+    <div class="max-w-7xl mx-auto px-4 py-6">
+      <div id="stats-grid" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <!-- Stats will be loaded here -->
+      </div>
+
+      <!-- Tabs -->
+      <div class="bg-white rounded-lg shadow">
+        <div class="border-b border-gray-200">
+          <nav class="flex -mb-px">
+            <button onclick="switchTab('needs-review')" id="tab-needs-review" class="tab-button px-6 py-3 border-b-2 border-blue-500 text-blue-600 font-medium">
+              Needs Review
+            </button>
+            <button onclick="switchTab('auto-enriched')" id="tab-auto-enriched" class="tab-button px-6 py-3 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">
+              Auto-Enriched (Verify)
+            </button>
+            <button onclick="switchTab('platform-spv')" id="tab-platform-spv" class="tab-button px-6 py-3 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">
+              Platform SPVs
+            </button>
+            <button onclick="switchTab('no-data')" id="tab-no-data" class="tab-button px-6 py-3 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">
+              No Data Found
+            </button>
+          </nav>
+        </div>
+
+        <!-- Content Area -->
+        <div id="content-area" class="p-6">
+          <div class="text-center text-gray-500 py-12">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+            <p class="mt-4">Loading enrichment data...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Modal -->
+  <div id="edit-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+      <div class="p-6 border-b border-gray-200">
+        <h2 class="text-xl font-bold text-gray-900">Edit Enrichment Data</h2>
+      </div>
+      <div id="edit-form-content" class="p-6">
+        <!-- Form will be loaded here -->
+      </div>
+      <div class="p-6 border-t border-gray-200 flex justify-end gap-3">
+        <button onclick="closeEditModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">
+          Cancel
+        </button>
+        <button onclick="saveChanges()" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+          Save Changes
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentTab = 'needs-review';
+    let currentData = [];
+    let currentEditingId = null;
+    let stats = {};
+
+    // Load stats
+    async function loadStats() {
+      try {
+        const response = await fetch('/api/review/stats');
+        const data = await response.json();
+        if (data.success) {
+          stats = data.stats;
+          renderStats();
+        }
+      } catch (error) {
+        console.error('Error loading stats:', error);
+      }
+    }
+
+    // Render stats
+    function renderStats() {
+      const statsGrid = document.getElementById('stats-grid');
+      statsGrid.innerHTML = `
+        <div class="bg-white rounded-lg shadow p-4">
+          <div class="text-sm text-gray-500">Total Managers</div>
+          <div class="text-2xl font-bold text-gray-900">${stats.total || 0}</div>
+        </div>
+        <div class="bg-white rounded-lg shadow p-4">
+          <div class="text-sm text-gray-500">Auto-Enriched</div>
+          <div class="text-2xl font-bold text-green-600">${stats.auto_enriched || 0}</div>
+        </div>
+        <div class="bg-white rounded-lg shadow p-4">
+          <div class="text-sm text-gray-500">Needs Review</div>
+          <div class="text-2xl font-bold text-yellow-600">${stats.needs_review || 0}</div>
+        </div>
+        <div class="bg-white rounded-lg shadow p-4">
+          <div class="text-sm text-gray-500">Published</div>
+          <div class="text-2xl font-bold text-blue-600">${stats.published || 0}</div>
+        </div>
+      `;
+    }
+
+    // Switch tabs
+    function switchTab(tab) {
+      currentTab = tab;
+      // Update tab styling
+      document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('border-blue-500', 'text-blue-600');
+        btn.classList.add('border-transparent', 'text-gray-500');
+      });
+      document.getElementById(`tab-${tab}`).classList.remove('border-transparent', 'text-gray-500');
+      document.getElementById(`tab-${tab}`).classList.add('border-blue-500', 'text-blue-600');
+
+      loadTabData();
+    }
+
+    // Load tab data
+    async function loadTabData() {
+      const contentArea = document.getElementById('content-area');
+      contentArea.innerHTML = `
+        <div class="text-center text-gray-500 py-12">
+          <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+          <p class="mt-4">Loading...</p>
+        </div>
+      `;
+
+      try {
+        let endpoint = '/api/review/queue';
+        if (currentTab === 'auto-enriched') {
+          endpoint = '/api/review/auto-enriched';
+        }
+
+        const response = await fetch(endpoint);
+        const data = await response.json();
+
+        if (data.success) {
+          currentData = data.managers;
+
+          // Filter by tab
+          let filteredData = currentData;
+          if (currentTab === 'needs-review') {
+            filteredData = currentData.filter(m => m.enrichment_status === 'needs_manual_review');
+          } else if (currentTab === 'platform-spv') {
+            filteredData = currentData.filter(m => m.enrichment_status === 'platform_spv');
+          } else if (currentTab === 'no-data') {
+            filteredData = currentData.filter(m => m.enrichment_status === 'no_data_found');
+          }
+
+          renderManagers(filteredData);
+        }
+      } catch (error) {
+        console.error('Error loading data:', error);
+        contentArea.innerHTML = `
+          <div class="text-center text-red-500 py-12">
+            <p>Error loading data. Please try again.</p>
+          </div>
+        `;
+      }
+    }
+
+    // Render managers
+    function renderManagers(managers) {
+      const contentArea = document.getElementById('content-area');
+
+      if (managers.length === 0) {
+        contentArea.innerHTML = `
+          <div class="text-center text-gray-500 py-12">
+            <p>No funds in this category.</p>
+          </div>
+        `;
+        return;
+      }
+
+      contentArea.innerHTML = managers.map(manager => `
+        <div class="bg-gray-50 rounded-lg p-4 mb-4 border border-gray-200">
+          <div class="flex items-start justify-between mb-3">
+            <div class="flex-1">
+              <h3 class="text-lg font-semibold text-gray-900">${manager.series_master_llc}</h3>
+              <div class="flex items-center gap-2 mt-2">
+                <span class="badge badge-${getStatusBadgeClass(manager.enrichment_status)}">${manager.enrichment_status.replace(/_/g, ' ')}</span>
+                ${manager.confidence_score ? `<span class="text-sm text-gray-500">Confidence: ${(manager.confidence_score * 100).toFixed(0)}%</span>` : ''}
+                ${manager.has_form_adv ? '<span class="badge badge-verified">Has Form ADV</span>' : ''}
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4 text-sm mb-4">
+            ${manager.website_url ? `
+              <div>
+                <span class="text-gray-500">Website:</span>
+                <a href="${manager.website_url}" target="_blank" class="text-blue-600 hover:underline ml-2">${manager.website_url}</a>
+              </div>
+            ` : ''}
+            ${manager.fund_type ? `
+              <div>
+                <span class="text-gray-500">Fund Type:</span>
+                <span class="ml-2 font-medium">${manager.fund_type}</span>
+              </div>
+            ` : ''}
+            ${manager.investment_stage ? `
+              <div>
+                <span class="text-gray-500">Stage:</span>
+                <span class="ml-2">${manager.investment_stage}</span>
+              </div>
+            ` : ''}
+            ${manager.linkedin_company_url ? `
+              <div>
+                <span class="text-gray-500">LinkedIn:</span>
+                <a href="${manager.linkedin_company_url}" target="_blank" class="text-blue-600 hover:underline ml-2">View Profile</a>
+              </div>
+            ` : ''}
+            ${manager.linked_crd ? `
+              <div>
+                <span class="text-gray-500">CRD:</span>
+                <a href="https://adviserinfo.sec.gov/firm/summary/${manager.linked_crd}" target="_blank" class="text-blue-600 hover:underline ml-2">${manager.linked_crd}</a>
+              </div>
+            ` : ''}
+          </div>
+
+          ${manager.flagged_issues && manager.flagged_issues.length > 0 ? `
+            <div class="bg-yellow-50 border border-yellow-200 rounded p-3 mb-4">
+              <p class="text-sm font-medium text-yellow-800">Flagged Issues:</p>
+              <ul class="text-sm text-yellow-700 list-disc list-inside mt-1">
+                ${manager.flagged_issues.map(issue => `<li>${issue}</li>`).join('')}
+              </ul>
+            </div>
+          ` : ''}
+
+          <div class="flex gap-2 mt-4">
+            <button onclick="publishFund('${manager.id}')" class="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700">
+              ✓ Publish
+            </button>
+            <button onclick="openEditModal('${manager.id}')" class="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+              Edit & Publish
+            </button>
+            <button onclick="skipFund('${manager.id}')" class="px-4 py-2 bg-gray-600 text-white text-sm rounded hover:bg-gray-700">
+              Skip
+            </button>
+            <button onclick="openResearch('${manager.series_master_llc}')" class="px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700">
+              🔍 Research
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Get status badge class
+    function getStatusBadgeClass(status) {
+      const map = {
+        'needs_manual_review': 'needs-review',
+        'auto_enriched': 'auto-enriched',
+        'platform_spv': 'platform-spv',
+        'no_data_found': 'no-data',
+        'manually_verified': 'verified'
+      };
+      return map[status] || 'needs-review';
+    }
+
+    // Publish fund
+    async function publishFund(id) {
+      if (!confirm('Publish this fund to the public view?')) return;
+
+      try {
+        const response = await fetch('/api/review/publish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          alert('Fund published successfully!');
+          loadStats();
+          loadTabData();
+        } else {
+          alert('Error publishing fund: ' + data.error);
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('Error publishing fund');
+      }
+    }
+
+    // Skip fund
+    async function skipFund(id) {
+      const reason = prompt('Why are you skipping this fund? (e.g., "Operating company", "Not a fund", etc.)');
+      if (!reason) return;
+
+      try {
+        const response = await fetch('/api/review/skip', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, reason })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          alert('Fund marked as skipped');
+          loadStats();
+          loadTabData();
+        } else {
+          alert('Error skipping fund: ' + data.error);
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('Error skipping fund');
+      }
+    }
+
+    // Open research in new tab
+    function openResearch(name) {
+      const queries = [
+        `https://www.google.com/search?q="${name}"+venture+capital`,
+        `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(name)}`,
+        `https://www.crunchbase.com/textsearch?q=${encodeURIComponent(name)}`
+      ];
+      queries.forEach(url => window.open(url, '_blank'));
+    }
+
+    // Open edit modal
+    function openEditModal(id) {
+      const manager = currentData.find(m => m.id === id);
+      if (!manager) return;
+
+      currentEditingId = id;
+      document.getElementById('edit-form-content').innerHTML = `
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Fund Name</label>
+            <input type="text" id="edit-name" value="${manager.series_master_llc || ''}" class="w-full px-3 py-2 border border-gray-300 rounded" disabled>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Website URL</label>
+            <input type="text" id="edit-website" value="${manager.website_url || ''}" class="w-full px-3 py-2 border border-gray-300 rounded">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Fund Type</label>
+            <select id="edit-fund-type" class="w-full px-3 py-2 border border-gray-300 rounded">
+              <option value="">Unknown</option>
+              <option value="VC" ${manager.fund_type === 'VC' ? 'selected' : ''}>VC</option>
+              <option value="PE" ${manager.fund_type === 'PE' ? 'selected' : ''}>PE</option>
+              <option value="Real Estate" ${manager.fund_type === 'Real Estate' ? 'selected' : ''}>Real Estate</option>
+              <option value="Hedge Fund" ${manager.fund_type === 'Hedge Fund' ? 'selected' : ''}>Hedge Fund</option>
+              <option value="Credit" ${manager.fund_type === 'Credit' ? 'selected' : ''}>Credit</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Investment Stage</label>
+            <input type="text" id="edit-stage" value="${manager.investment_stage || ''}" class="w-full px-3 py-2 border border-gray-300 rounded" placeholder="e.g., Seed to Series A">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">LinkedIn URL</label>
+            <input type="text" id="edit-linkedin" value="${manager.linkedin_company_url || ''}" class="w-full px-3 py-2 border border-gray-300 rounded">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Contact Email</label>
+            <input type="text" id="edit-email" value="${manager.primary_contact_email || ''}" class="w-full px-3 py-2 border border-gray-300 rounded">
+          </div>
+        </div>
+      `;
+
+      document.getElementById('edit-modal').classList.remove('hidden');
+    }
+
+    // Close edit modal
+    function closeEditModal() {
+      document.getElementById('edit-modal').classList.add('hidden');
+      currentEditingId = null;
+    }
+
+    // Save changes
+    async function saveChanges() {
+      if (!currentEditingId) return;
+
+      const updates = {
+        website_url: document.getElementById('edit-website').value,
+        fund_type: document.getElementById('edit-fund-type').value,
+        investment_stage: document.getElementById('edit-stage').value,
+        linkedin_company_url: document.getElementById('edit-linkedin').value,
+        primary_contact_email: document.getElementById('edit-email').value,
+        is_published: true,
+        enrichment_status: 'manually_verified'
+      };
+
+      try {
+        const response = await fetch('/api/review/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: currentEditingId, updates })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          alert('Fund updated and published!');
+          closeEditModal();
+          loadStats();
+          loadTabData();
+        } else {
+          alert('Error updating fund: ' + data.error);
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('Error updating fund');
+      }
+    }
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+      loadStats();
+      loadTabData();
+    });
+  </script>
+</body>
+</html>

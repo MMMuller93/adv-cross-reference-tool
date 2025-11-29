@@ -1,0 +1,40 @@
+name: Refresh Cross-Reference Matches
+
+on:
+  schedule:
+    # Run every Sunday at 3:00 AM UTC (Saturday 10 PM EST)
+    - cron: '0 3 * * 0'
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+jobs:
+  refresh-matches:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # 2 hour timeout for large dataset
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r scripts/requirements.txt
+
+      - name: Run cross-reference computation
+        env:
+          ADV_URL: ${{ secrets.ADV_SUPABASE_URL }}
+          ADV_KEY: ${{ secrets.ADV_SUPABASE_KEY }}
+          FORMD_URL: ${{ secrets.FORMD_SUPABASE_URL }}
+          FORMD_KEY: ${{ secrets.FORMD_SUPABASE_KEY }}
+        run: |
+          python scripts/compute_cross_reference.py
+
+      - name: Report status
+        if: always()
+        run: |
+          echo "Cross-reference refresh completed at $(date)"
