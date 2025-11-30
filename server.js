@@ -286,12 +286,13 @@ app.get('/api/funds/adv', async (req, res) => {
 
       if (fundNames.length > 0) {
         try {
-          // DIRECT LOOKUP: Query cross_reference_matches by exact fund names (in batches if needed)
-          // This is much more reliable than word-based fuzzy matching
+          // DIRECT LOOKUP: Query cross_reference_matches by exact fund names
+          // Only return exact matches (match_score = 1.0) to filter out old fuzzy matches
           // NOTE: Table only has formd_offering_amount (not formd_amount_sold or formd_indefinite)
           const { data: matches, error: crossRefError } = await formdClient
             .from('cross_reference_matches')
             .select('adv_fund_name,formd_entity_name,formd_filing_date,formd_offering_amount,formd_accession,match_score')
+            .eq('match_score', 1)
             .in('adv_fund_name', fundNames);
 
           if (crossRefError) {
