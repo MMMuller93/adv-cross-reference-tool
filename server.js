@@ -440,6 +440,11 @@ app.get('/api/funds/formd', async (req, res) => {
     // State filter (server-side - works fine)
     if (state) dbQuery = dbQuery.eq('stateorcountry', state);
 
+    // Server-side date filtering for YYYY-MM-DD formatted dates (newer records)
+    // This ensures we actually get records in the requested date range
+    if (startDate) dbQuery = dbQuery.gte('filing_date', startDate);
+    if (endDate) dbQuery = dbQuery.lte('filing_date', endDate + 'Z'); // Add Z to include end date
+
     // Order by id descending (indexed, fast) to get most recent filings first
     dbQuery = dbQuery.order('id', { ascending: false }).limit(Math.min(parseInt(limit), 2000));
 
