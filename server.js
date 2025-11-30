@@ -431,7 +431,7 @@ app.get('/api/funds/formd', async (req, res) => {
 
     let dbQuery = formdClient
       .from('form_d_filings')
-      .select('accessionnumber,entityname,cik,filing_date,stateorcountry,federalexemptions_items_list,investmentfundtype,related_names,related_roles,totalofferingamount,totalamountsold,indefiniteofferingamount');
+      .select('accessionnumber,entityname,cik,filing_date,stateorcountry,federalexemptions_items_list,investmentfundtype,related_names,related_roles,totalofferingamount,totalamountsold');
 
     if (query) {
       dbQuery = dbQuery.or(`entityname.ilike.%${query}%,related_names.ilike.%${query}%`);

@@ -14,11 +14,12 @@ from datetime import datetime
 from supabase import create_client
 
 # Load from environment variables (GitHub Secrets)
-ADV_URL = os.environ.get('ADV_URL', 'https://ezuqwwffjgfzymqxsctq.supabase.co')
-ADV_KEY = os.environ.get('ADV_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6dXF3d2ZmamdmenltcXhzY3RxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMzMjY0NDAsImV4cCI6MjA3ODkwMjQ0MH0.RGMhIb7yMXmOQpysiPgazxJzflGKNCdzRZ8XBgPDCAE')
+# Use 'or' to handle empty strings from GitHub Actions when secrets aren't configured
+ADV_URL = os.environ.get('ADV_URL') or 'https://ezuqwwffjgfzymqxsctq.supabase.co'
+ADV_KEY = os.environ.get('ADV_KEY') or 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6dXF3d2ZmamdmenltcXhzY3RxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMzMjY0NDAsImV4cCI6MjA3ODkwMjQ0MH0.RGMhIb7yMXmOQpysiPgazxJzflGKNCdzRZ8XBgPDCAE'
 
-FORMD_URL = os.environ.get('FORMD_URL', 'https://ltdalxkhbbhmkimmogyq.supabase.co')
-FORMD_KEY = os.environ.get('FORMD_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0ZGFseGtoYmJobWtpbW1vZ3lxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1OTg3NTMsImV4cCI6MjA3NTE3NDc1M30.TS9uNMRqPKcthHCSMKAcFfhFEP-7Q6XbDHQNujBDOtc')
+FORMD_URL = os.environ.get('FORMD_URL') or 'https://ltdalxkhbbhmkimmogyq.supabase.co'
+FORMD_KEY = os.environ.get('FORMD_KEY') or 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0ZGFseGtoYmJobWtpbW1vZ3lxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1OTg3NTMsImV4cCI6MjA3NTE3NDc1M30.TS9uNMRqPKcthHCSMKAcFfhFEP-7Q6XbDHQNujBDOtc'
 
 adv_client = create_client(ADV_URL, ADV_KEY)
 formd_client = create_client(FORMD_URL, FORMD_KEY)

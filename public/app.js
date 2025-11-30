@@ -896,19 +896,10 @@ const SkeletonRow = () => (
   </div>
 );
 
-const LoadingOverlay = ({ isLoading, showColdStartToast }) => {
+const LoadingOverlay = ({ isLoading }) => {
   if (!isLoading) return null;
   return (
-    <div className="absolute inset-0 bg-white z-50">
-      {/* Cold-start toast */}
-      {showColdStartToast && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-60">
-          <div className="bg-slate-800 text-white px-4 py-2.5 rounded-lg shadow-lg text-sm flex items-center gap-3">
-            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            <span>Waking up server... first request may take a moment</span>
-          </div>
-        </div>
-      )}
+    <div className="absolute inset-0 bg-white z-50 overflow-hidden">
       {/* Skeleton loader */}
       <div className="pt-4">
         {[...Array(12)].map((_, i) => <SkeletonRow key={i} />)}
@@ -2272,10 +2263,6 @@ function App() {
   const [selectedFund, setSelectedFund] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // Cold-start toast state (shows after 2s of loading)
-  const [showColdStartToast, setShowColdStartToast] = useState(false);
-  const loadingStartRef = useRef(null);
-
   // Auth state
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -2448,20 +2435,6 @@ function App() {
     };
     loadAdviserFromURL();
   }, []);
-
-  // Cold-start toast (show after 2s of loading)
-  useEffect(() => {
-    if (loading) {
-      loadingStartRef.current = Date.now();
-      const timer = setTimeout(() => {
-        setShowColdStartToast(true);
-      }, 2000);
-      return () => clearTimeout(timer);
-    } else {
-      setShowColdStartToast(false);
-      loadingStartRef.current = null;
-    }
-  }, [loading]);
 
   // Auth handlers
   const handleOpenAuth = (mode) => {
@@ -3560,7 +3533,7 @@ function App() {
 
             {/* Content */}
             <div className="flex-1 overflow-auto custom-scrollbar bg-white relative">
-              <LoadingOverlay isLoading={loading} showColdStartToast={showColdStartToast} />
+              <LoadingOverlay isLoading={loading} />
               <div className="max-w-full mx-auto">
                 {/* Data Header */}
                 <div className="px-8 py-6 flex items-end justify-between bg-white">
