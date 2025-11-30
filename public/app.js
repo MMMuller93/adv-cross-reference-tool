@@ -2793,8 +2793,11 @@ function App() {
 
   // Fetch advisers
   const searchAdvisers = async (currentSearchTerm, currentFilters) => {
+    console.log('[searchAdvisers] Starting adviser search, searchTerm:', currentSearchTerm || '(empty)');
+
     // Rate limit check for non-premium users (both anonymous and logged-in free users)
     if (!hasPremiumAccess && getSearchCount() >= SEARCH_LIMIT) {
+      console.log('[searchAdvisers] Rate limited - showing modal');
       if (!user) {
         setShowAuthModal(true);
         setAuthMode('signup');
@@ -2805,6 +2808,7 @@ function App() {
     }
 
     const myVersion = ++searchVersionRef.current.advisers;
+    console.log('[searchAdvisers] Version:', myVersion, 'hasPremiumAccess:', hasPremiumAccess);
     setLoading(true);
 
     // Increment search count for non-premium users
@@ -2830,8 +2834,10 @@ function App() {
       params.append('sortBy', 'aum');
       params.append('sortOrder', 'desc');
 
+      console.log('[searchAdvisers] Fetching:', `/api/advisers/search?${params.toString()}`);
       const res = await fetch(`/api/advisers/search?${params.toString()}`);
       const data = await res.json();
+      console.log('[searchAdvisers] Response received:', data?.length || 0, 'advisers');
 
       // Apply search exclusions
       const filteredData = applySearchFilters(data || [], parsedQuery, (adviser) => {
