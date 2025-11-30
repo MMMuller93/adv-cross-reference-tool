@@ -169,25 +169,49 @@ app.get('/api/advisers/search', async (req, res) => {
     const advisers = data || [];
     if (advisers.length > 0) {
       const crdList = advisers.map(a => a.crd).filter(Boolean);
-      if (crdList.length > 0) {
-        // Get fund counts per adviser using a grouped query
-        // Note: Need high limit since Supabase defaults to 1000 rows
-        const { data: fundCounts } = await advClient
-          .from('funds_enriched')
-          .select('adviser_entity_crd')
-          .in('adviser_entity_crd', crdList.map(c => String(c)))
-          .limit(50000);
+      const crdStrings = crdList.map(c => String(c));
+
+      if (crdStrings.length > 0) {
+        // Supabase has a 1000 row limit per query, so we need to paginate
+        // Fetch all fund rows matching our CRDs
+        const allFundRows = [];
+        const PAGE_SIZE = 1000;
+        let offset = 0;
+        let hasMore = true;
+
+        while (hasMore) {
+          const { data: fundPage, error: fundError } = await advClient
+            .from('funds_enriched')
+            .select('adviser_entity_crd')
+            .in('adviser_entity_crd', crdStrings)
+            .range(offset, offset + PAGE_SIZE - 1);
+
+          if (fundError) {
+            console.error('[FundCount] Query error:', fundError.message);
+            break;
+          }
+
+          if (fundPage && fundPage.length > 0) {
+            allFundRows.push(...fundPage);
+            offset += PAGE_SIZE;
+            hasMore = fundPage.length === PAGE_SIZE;
+          } else {
+            hasMore = false;
+          }
+        }
+
+        console.log(`[FundCount] Total fund rows fetched: ${allFundRows.length} for ${crdStrings.length} advisers`);
 
         // Count funds per CRD
         const countMap = {};
-        (fundCounts || []).forEach(f => {
+        allFundRows.forEach(f => {
           const crd = f.adviser_entity_crd;
           countMap[crd] = (countMap[crd] || 0) + 1;
         });
 
         // Merge counts into advisers
         advisers.forEach(a => {
-          a.fund_count = countMap[a.crd] || 0;
+          a.fund_count = countMap[String(a.crd)] || 0;
         });
       }
     }
