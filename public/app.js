@@ -230,6 +230,8 @@ const normalizeRelatedPartyName = (name) => {
 };
 
 const formatCurrency = (value) => {
+  // Handle "Indefinite" values from Form D (SEC filings allow indefinite offering amounts)
+  if (typeof value === 'string' && value.toLowerCase() === 'indefinite') return 'Indefinite';
   const num = parseCurrency(value);
   if (num === null || num === 0) return 'N/A';
   if (num >= 1e12) return `$${(num / 1e12).toFixed(1)}T`;
@@ -260,6 +262,8 @@ const formatPhone = (phone) => {
 };
 
 const formatFullCurrency = (value) => {
+  // Handle "Indefinite" values from Form D
+  if (typeof value === 'string' && value.toLowerCase() === 'indefinite') return 'Indefinite';
   const num = parseCurrency(value);
   if (num === null) return 'N/A';
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(num);
