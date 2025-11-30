@@ -288,9 +288,10 @@ app.get('/api/funds/adv', async (req, res) => {
         try {
           // DIRECT LOOKUP: Query cross_reference_matches by exact fund names (in batches if needed)
           // This is much more reliable than word-based fuzzy matching
+          // NOTE: Table only has formd_offering_amount (not formd_amount_sold or formd_indefinite)
           const { data: matches, error: crossRefError } = await formdClient
             .from('cross_reference_matches')
-            .select('adv_fund_name,formd_entity_name,formd_filing_date,formd_offering_amount,formd_amount_sold,formd_indefinite,formd_accession,match_score')
+            .select('adv_fund_name,formd_entity_name,formd_filing_date,formd_offering_amount,formd_accession,match_score')
             .in('adv_fund_name', fundNames);
 
           if (crossRefError) {
@@ -321,11 +322,10 @@ app.get('/api/funds/adv', async (req, res) => {
         ...fund,
         source: 'adv',
         // Add Form D data from pre-computed cross-reference matches
+        // NOTE: cross_reference_matches only has formd_offering_amount (not amount_sold or indefinite)
         form_d_entity_name: crossRef?.formd_entity_name || null,
         form_d_filing_date: crossRef?.formd_filing_date || null,
         form_d_offering_amount: crossRef?.formd_offering_amount || null,
-        form_d_amount_sold: crossRef?.formd_amount_sold || null,
-        form_d_indefinite: crossRef?.formd_indefinite || false,
         form_d_accession: crossRef?.formd_accession || null,
         form_d_match_score: crossRef?.match_score || null,
         has_form_d_match: !!crossRef
