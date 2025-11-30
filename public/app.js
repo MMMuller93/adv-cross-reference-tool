@@ -2116,7 +2116,7 @@ const FundDetailView = ({ fund, onBack, onNavigateToAdviser }) => {
                   </div>
                   <div>
                     <dt className="text-[10px] font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Total Offering Amount (D)</dt>
-                    <dd className="text-2xl font-bold text-gray-900 tracking-tight font-mono">{formDOfferingAmount ? formatFullCurrency(parseCurrency(formDOfferingAmount)) : 'N/A'}</dd>
+                    <dd className="text-2xl font-bold text-gray-900 tracking-tight font-mono">{formDOfferingAmount ? formatFullCurrency(formDOfferingAmount) : 'N/A'}</dd>
                   </div>
                 </dl>
                 <div className="mt-8 pt-8 border-t border-gray-50 grid grid-cols-3 gap-8">
