@@ -3787,10 +3787,8 @@ function App() {
                                 )}
                               </td>
                               <td className="px-3 py-2.5 text-right">
-                                {fund.form_d_indefinite ? (
-                                  <div className="text-[11px] text-amber-600 font-medium">Indefinite</div>
-                                ) : fund.form_d_offering_amount ? (
-                                  <div className="text-[11px] text-gray-900 font-mono tabular-nums font-medium">{formatCurrency(parseCurrency(fund.form_d_offering_amount))}</div>
+                                {fund.form_d_offering_amount ? (
+                                  <div className={`text-[11px] font-medium ${typeof fund.form_d_offering_amount === 'string' && fund.form_d_offering_amount.toLowerCase() === 'indefinite' ? 'text-amber-600' : 'text-gray-900 font-mono tabular-nums'}`}>{formatCurrency(fund.form_d_offering_amount)}</div>
                                 ) : (
                                   <span className="text-[11px] text-gray-400">—</span>
                                 )}
