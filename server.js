@@ -165,49 +165,32 @@ app.get('/api/advisers/search', async (req, res) => {
 
     if (error) throw error;
 
-    // Enrich advisers with fund counts
+    // Enrich advisers with fund counts using database-level aggregation
     const advisers = data || [];
     if (advisers.length > 0) {
       const crdList = advisers.map(a => a.crd).filter(Boolean);
       const crdStrings = crdList.map(c => String(c));
 
       if (crdStrings.length > 0) {
-        // Supabase has a 1000 row limit per query, so we need to paginate
-        // Fetch all fund rows matching our CRDs
-        const allFundRows = [];
-        const PAGE_SIZE = 1000;
-        let offset = 0;
-        let hasMore = true;
-
-        while (hasMore) {
-          const { data: fundPage, error: fundError } = await advClient
+        // OPTIMIZED: Use parallel count queries with head: true (no row data transferred)
+        // This is much faster than fetching all rows just to count them
+        const countPromises = crdStrings.map(crd =>
+          advClient
             .from('funds_enriched')
-            .select('adviser_entity_crd')
-            .in('adviser_entity_crd', crdStrings)
-            .range(offset, offset + PAGE_SIZE - 1);
+            .select('*', { count: 'exact', head: true })
+            .eq('adviser_entity_crd', crd)
+            .then(({ count, error }) => ({ crd, count: error ? 0 : (count || 0) }))
+        );
 
-          if (fundError) {
-            console.error('[FundCount] Query error:', fundError.message);
-            break;
-          }
+        const countResults = await Promise.all(countPromises);
 
-          if (fundPage && fundPage.length > 0) {
-            allFundRows.push(...fundPage);
-            offset += PAGE_SIZE;
-            hasMore = fundPage.length === PAGE_SIZE;
-          } else {
-            hasMore = false;
-          }
-        }
-
-        console.log(`[FundCount] Total fund rows fetched: ${allFundRows.length} for ${crdStrings.length} advisers`);
-
-        // Count funds per CRD
+        // Build count map from results
         const countMap = {};
-        allFundRows.forEach(f => {
-          const crd = f.adviser_entity_crd;
-          countMap[crd] = (countMap[crd] || 0) + 1;
+        countResults.forEach(({ crd, count }) => {
+          countMap[crd] = count;
         });
+
+        console.log(`[FundCount] Got counts for ${crdStrings.length} advisers via parallel database queries`);
 
         // Merge counts into advisers
         advisers.forEach(a => {

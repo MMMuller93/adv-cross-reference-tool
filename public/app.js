@@ -899,13 +899,13 @@ const SkeletonRow = () => (
 const LoadingOverlay = ({ isLoading, showColdStartToast }) => {
   if (!isLoading) return null;
   return (
-    <div className="absolute inset-0 bg-white/95 z-50">
+    <div className="absolute inset-0 bg-white z-50">
       {/* Cold-start toast */}
       {showColdStartToast && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-60">
-          <div className="bg-slate-800 text-white px-4 py-2 rounded-lg shadow-lg text-sm flex items-center gap-2">
+          <div className="bg-slate-800 text-white px-4 py-2.5 rounded-lg shadow-lg text-sm flex items-center gap-3">
             <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            Waking up server... first request may take a moment
+            <span>Waking up server... first request may take a moment</span>
           </div>
         </div>
       )}
