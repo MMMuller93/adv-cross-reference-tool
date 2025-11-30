@@ -437,9 +437,7 @@ app.get('/api/funds/formd', async (req, res) => {
       dbQuery = dbQuery.or(`entityname.ilike.%${query}%,related_names.ilike.%${query}%`);
     }
 
-    // Note: Date filters may not work perfectly with mixed formats, but we'll apply them
-    if (startDate) dbQuery = dbQuery.gte('filing_date', startDate);
-    if (endDate) dbQuery = dbQuery.lte('filing_date', endDate);
+    // State filter (server-side - works fine)
     if (state) dbQuery = dbQuery.eq('stateorcountry', state);
 
     // Order by id descending (indexed, fast) to get most recent filings first
@@ -449,11 +447,25 @@ app.get('/api/funds/formd', async (req, res) => {
     if (error) throw error;
 
     // Sort by parsed date (handles mixed DD-MMM-YYYY and YYYY-MM-DD formats)
-    const sortedData = (data || []).sort((a, b) => {
+    let sortedData = (data || []).sort((a, b) => {
       const dateA = parseFilingDate(a.filing_date);
       const dateB = parseFilingDate(b.filing_date);
       return dateB - dateA; // Descending (newest first)
     });
+
+    // Client-side date filtering (handles mixed date formats correctly)
+    if (startDate || endDate) {
+      const startDateObj = startDate ? new Date(startDate + 'T00:00:00') : null;
+      const endDateObj = endDate ? new Date(endDate + 'T23:59:59') : null;
+
+      sortedData = sortedData.filter(filing => {
+        const filingDate = parseFilingDate(filing.filing_date);
+        if (startDateObj && filingDate < startDateObj) return false;
+        if (endDateObj && filingDate > endDateObj) return false;
+        return true;
+      });
+      console.log(`[Form D] Date filter applied: ${startDate || 'any'} to ${endDate || 'any'}, ${sortedData.length} results after filter`);
+    }
 
     // Deduplicate by CIK (keep most recent filing for each CIK)
     const fundMap = new Map();
