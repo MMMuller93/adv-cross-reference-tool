@@ -36,21 +36,55 @@ console.log('[Auth Init] URL:', window.location.href);
 console.log('[Auth Init] Hash:', window.location.hash ? 'Present (' + window.location.hash.substring(0, 50) + '...)' : 'None');
 console.log('[Auth Init] Origin:', window.location.origin);
 
-// Check if this is an OAuth callback
-if (window.location.hash && window.location.hash.includes('access_token')) {
-  console.log('[Auth Init] OAuth callback detected! Processing...');
-}
+// MANUAL OAuth hash processing - Supabase auto-detect isn't working
+(async function processOAuthHash() {
+  const hash = window.location.hash;
+  if (hash && hash.includes('access_token')) {
+    console.log('[Auth Init] OAuth callback detected! Manually processing tokens...');
 
-// Check existing session immediately
-supabase.auth.getSession().then(({ data, error }) => {
-  if (error) {
-    console.error('[Auth Init] Session error:', error.message);
-  } else if (data.session) {
-    console.log('[Auth Init] Existing session found:', data.session.user?.email);
+    // Parse the hash fragment
+    const params = new URLSearchParams(hash.substring(1));
+    const access_token = params.get('access_token');
+    const refresh_token = params.get('refresh_token');
+
+    console.log('[Auth Init] Tokens found:', {
+      access_token: access_token ? 'present (' + access_token.length + ' chars)' : 'missing',
+      refresh_token: refresh_token ? 'present' : 'missing'
+    });
+
+    if (access_token && refresh_token) {
+      try {
+        // Manually set the session using the tokens from the hash
+        const { data, error } = await supabase.auth.setSession({
+          access_token,
+          refresh_token
+        });
+
+        if (error) {
+          console.error('[Auth Init] setSession error:', error.message);
+        } else if (data.session) {
+          console.log('[Auth Init] Session MANUALLY established:', data.session.user?.email);
+          // Clean up the URL hash
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        }
+      } catch (err) {
+        console.error('[Auth Init] setSession exception:', err);
+      }
+    } else {
+      console.warn('[Auth Init] Missing tokens in hash');
+    }
   } else {
-    console.log('[Auth Init] No existing session');
+    // No OAuth callback, just check existing session
+    const { data, error } = await supabase.auth.getSession();
+    if (error) {
+      console.error('[Auth Init] Session error:', error.message);
+    } else if (data.session) {
+      console.log('[Auth Init] Existing session found:', data.session.user?.email);
+    } else {
+      console.log('[Auth Init] No existing session');
+    }
   }
-});
+})();
 
 // ============================================================================
 // RATE LIMITING (localStorage-based for anonymous users)
