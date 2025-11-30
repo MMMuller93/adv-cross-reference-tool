@@ -184,6 +184,26 @@ const formatCurrency = (value) => {
   return `$${num.toFixed(0)}`;
 };
 
+// Format phone number - handles scientific notation and numeric phone numbers
+const formatPhone = (phone) => {
+  if (!phone) return null;
+  // Convert to string (handles scientific notation like 4.47787E+11)
+  let phoneStr = typeof phone === 'number' ? phone.toFixed(0) : String(phone);
+  // Remove any non-digit characters except + at start
+  const digits = phoneStr.replace(/[^\d+]/g, '');
+  if (!digits || digits.length < 7) return phoneStr; // Return as-is if too short
+  // Format based on length
+  if (digits.length === 10) {
+    return `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+  } else if (digits.length === 11 && digits[0] === '1') {
+    return `+1 (${digits.slice(1,4)}) ${digits.slice(4,7)}-${digits.slice(7)}`;
+  } else if (digits.length > 10) {
+    // International format - just add spaces
+    return `+${digits.slice(0,-10)} ${digits.slice(-10,-7)} ${digits.slice(-7,-4)} ${digits.slice(-4)}`;
+  }
+  return phoneStr;
+};
+
 const formatFullCurrency = (value) => {
   const num = parseCurrency(value);
   if (num === null) return 'N/A';
@@ -537,7 +557,7 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
           ) : (
             <div className="space-y-3">
               <a
-                href="mailto:contact@strategicfundpartners.com?subject=Professional Access Request"
+                href="mailto:contact@strategicfundpartners.com?subject=Professional%20Access%20Request&body=Hi%2C%0A%0AI%27m%20interested%20in%20Professional%20access%20to%20Private%20Fund%20Radar.%0A%0AName%3A%20%0ACompany%3A%20%0AUse%20Case%3A%20%0A%0APlease%20let%20me%20know%20the%20pricing%20and%20next%20steps.%0A%0AThank%20you!"
                 className="w-full py-3 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors text-sm flex items-center justify-center gap-2"
               >
                 Request Access
@@ -673,7 +693,7 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, user, hasPremiumAccess, onL
             <div className="space-y-2">
               {!hasPremiumAccess && (
                 <a
-                  href="mailto:contact@strategicfundpartners.com?subject=Professional Access Request"
+                  href="mailto:contact@strategicfundpartners.com?subject=Professional%20Access%20Request&body=Hi%2C%0A%0AI%27m%20interested%20in%20Professional%20access%20to%20Private%20Fund%20Radar.%0A%0AName%3A%20%0ACompany%3A%20%0AUse%20Case%3A%20%0A%0APlease%20let%20me%20know%20the%20pricing%20and%20next%20steps.%0A%0AThank%20you!"
                   className="w-full py-2.5 px-4 bg-slate-800 text-white rounded-md font-medium hover:bg-slate-700 transition-colors text-sm flex items-center justify-center gap-2"
                 >
                   <TrendingUpIcon className="w-4 h-4" />
@@ -1591,7 +1611,7 @@ const AdviserDetailView = ({ adviser, onBack, onNavigateToFund }) => {
                       {adviser.cco_phone && (
                         <div className="flex items-center gap-2">
                           <PhoneIcon className="w-3.5 h-3.5 text-slate-400" />
-                          <a href={`tel:${adviser.cco_phone}`} className="text-[11px] font-mono text-slate-600 hover:text-slate-900">{adviser.cco_phone}</a>
+                          <a href={`tel:${adviser.cco_phone}`} className="text-[11px] font-mono text-slate-600 hover:text-slate-900">{formatPhone(adviser.cco_phone)}</a>
                         </div>
                       )}
                       {adviser.cco_email && (
@@ -1627,7 +1647,7 @@ const AdviserDetailView = ({ adviser, onBack, onNavigateToFund }) => {
                 <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">CONTACT</h3>
                 <div className="flex items-center gap-2">
                   <PhoneIcon className="w-3.5 h-3.5 text-slate-400" />
-                  <a href={`tel:${adviser.phone_number}`} className="text-[12px] font-mono text-slate-700 hover:text-slate-900">{adviser.phone_number}</a>
+                  <a href={`tel:${adviser.phone_number}`} className="text-[12px] font-mono text-slate-700 hover:text-slate-900">{formatPhone(adviser.phone_number)}</a>
                 </div>
               </div>
             )}
@@ -1927,9 +1947,10 @@ const FundDetailView = ({ fund, onBack, onNavigateToAdviser }) => {
   const iapdUrl = fund.adviser_entity_crd ? `https://adviserinfo.sec.gov/firm/summary/${fund.adviser_entity_crd}` : null;
 
   // Form D data (from match if available)
-  const formDOfferingAmount = fund.form_d_offering_amount || formDMatch?.totalofferingamount;
+  const formDOfferingAmount = fund.form_d_offering_amount || formDMatch?.totalamountsold || formDMatch?.totalofferingamount;
   const formDFilingDate = fund.form_d_filing_date || formDMatch?.filing_date;
   const formDExemptions = fund.form_d_exemptions || formDMatch?.federalexemptions_items_list;
+  const formDSaleDate = fund.first_sale_date || formDMatch?.sale_date;
 
   return (
     <div className="flex flex-col h-full bg-white overflow-y-auto custom-scrollbar">
@@ -2044,13 +2065,13 @@ const FundDetailView = ({ fund, onBack, onNavigateToAdviser }) => {
                   </div>
                   <div>
                     <dt className="text-[10px] font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Total Offering Amount (D)</dt>
-                    <dd className="text-2xl font-bold text-gray-900 tracking-tight font-mono">{fund.form_d_offering_amount ? formatFullCurrency(parseCurrency(fund.form_d_offering_amount)) : 'N/A'}</dd>
+                    <dd className="text-2xl font-bold text-gray-900 tracking-tight font-mono">{formDOfferingAmount ? formatFullCurrency(parseCurrency(formDOfferingAmount)) : 'N/A'}</dd>
                   </div>
                 </dl>
                 <div className="mt-8 pt-8 border-t border-gray-50 grid grid-cols-3 gap-8">
                   <div>
                     <dt className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">First Sale Date</dt>
-                    <dd className="text-[13px] font-medium text-gray-900 tabular-nums">{fund.first_sale_date ? formatDate(fund.first_sale_date) : 'N/A'}</dd>
+                    <dd className="text-[13px] font-medium text-gray-900 tabular-nums">{formDSaleDate ? formatDate(formDSaleDate) : 'N/A'}</dd>
                   </div>
                   <div>
                     <dt className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Last Form ADV</dt>
@@ -2163,7 +2184,7 @@ const FundDetailView = ({ fund, onBack, onNavigateToAdviser }) => {
                   <span className="text-gray-700 flex items-center font-medium">
                     <FileTextIcon className="w-3.5 h-3.5 mr-2.5 text-gray-400 group-hover:text-gray-600 transition-colors" /> Form D Notice
                   </span>
-                  <span className="text-[10px] text-gray-400 font-mono">{fund.form_d_filing_date ? formatDate(fund.form_d_filing_date) : 'N/A'}</span>
+                  <span className="text-[10px] text-gray-400 font-mono">{formDFilingDate ? formatDate(formDFilingDate) : 'N/A'}</span>
                 </li>
                 {fund.adv_filing_date && (
                   <li className="flex items-center justify-between text-xs group cursor-pointer p-2 hover:bg-gray-50 rounded-md -mx-2 transition-colors">
@@ -3522,7 +3543,8 @@ function App() {
                               </td>
                               <td className="px-4 py-4 whitespace-nowrap text-center">
                                 <div className="flex items-center justify-center gap-2">
-                                  {adviser.primary_website && (
+                                  {/* Website - always show */}
+                                  {adviser.primary_website ? (
                                     <a
                                       href={adviser.primary_website.startsWith('http') ? adviser.primary_website : `https://${adviser.primary_website}`}
                                       target="_blank"
@@ -3533,7 +3555,12 @@ function App() {
                                     >
                                       <GlobeIcon className="w-4 h-4" />
                                     </a>
+                                  ) : (
+                                    <span className="text-gray-300 cursor-not-allowed relative" title="Website not available">
+                                      <GlobeIcon className="w-4 h-4" />
+                                    </span>
                                   )}
+                                  {/* SEC ADV - always available when CRD exists */}
                                   {adviser.crd && (
                                     <a
                                       href={`https://adviserinfo.sec.gov/firm/summary/${adviser.crd}`}
@@ -4061,7 +4088,7 @@ function App() {
                                             {fund.issuerphonenumber && (
                                               <div className="flex items-center gap-2">
                                                 <PhoneIcon className="w-3.5 h-3.5 text-slate-400" />
-                                                <a href={`tel:${fund.issuerphonenumber}`} className="text-slate-700 hover:text-slate-900">{fund.issuerphonenumber}</a>
+                                                <a href={`tel:${fund.issuerphonenumber}`} className="text-slate-700 hover:text-slate-900">{formatPhone(fund.issuerphonenumber)}</a>
                                               </div>
                                             )}
                                             {/* Address */}
@@ -4077,25 +4104,34 @@ function App() {
                                                 </div>
                                               </div>
                                             )}
-                                            {/* Contact Action Buttons */}
+                                            {/* Contact Action Buttons - always visible, disabled state when no data */}
                                             <div className="flex flex-wrap gap-2 pt-2">
                                               {/* Website Button */}
-                                              {fund.website && (
+                                              {(manager.enrichment_data?.website || manager.adv_data?.primary_website) ? (
                                                 <a
-                                                  href={fund.website.startsWith('http') ? fund.website : `https://${fund.website}`}
+                                                  href={(() => {
+                                                    const website = manager.enrichment_data?.website || manager.adv_data?.primary_website;
+                                                    return website.startsWith('http') ? website : `https://${website}`;
+                                                  })()}
                                                   target="_blank"
                                                   rel="noopener noreferrer"
                                                   className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-300 text-gray-700 rounded text-[10px] font-medium hover:bg-gray-50 transition-colors shadow-sm"
                                                   onClick={(e) => e.stopPropagation()}
                                                 >
                                                   <GlobeIcon className="w-3 h-3" />
-                                                  {fund.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                                                  Website
                                                 </a>
+                                              ) : (
+                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-50 border border-gray-200 text-gray-400 rounded text-[10px] font-medium cursor-not-allowed relative group">
+                                                  <GlobeIcon className="w-3 h-3" />
+                                                  Website
+                                                  <svg className="w-3 h-3 absolute -top-1 -right-1 text-gray-400" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="white" stroke="currentColor" strokeWidth="1.5"/><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                                                </span>
                                               )}
                                               {/* LinkedIn Button */}
-                                              {fund.linkedin && (
+                                              {manager.enrichment_data?.linkedin ? (
                                                 <a
-                                                  href={fund.linkedin}
+                                                  href={manager.enrichment_data.linkedin}
                                                   target="_blank"
                                                   rel="noopener noreferrer"
                                                   className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-300 text-gray-700 rounded text-[10px] font-medium hover:bg-gray-50 transition-colors shadow-sm"
@@ -4104,17 +4140,29 @@ function App() {
                                                   <LinkedinIcon className="w-3 h-3" />
                                                   LinkedIn
                                                 </a>
+                                              ) : (
+                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-50 border border-gray-200 text-gray-400 rounded text-[10px] font-medium cursor-not-allowed relative group">
+                                                  <LinkedinIcon className="w-3 h-3" />
+                                                  LinkedIn
+                                                  <svg className="w-3 h-3 absolute -top-1 -right-1 text-gray-400" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="white" stroke="currentColor" strokeWidth="1.5"/><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                                                </span>
                                               )}
                                               {/* Email Button */}
-                                              {fund.email && (
+                                              {fund.issueremail ? (
                                                 <a
-                                                  href={`mailto:${fund.email}`}
+                                                  href={`mailto:${fund.issueremail}`}
                                                   className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-300 text-gray-700 rounded text-[10px] font-medium hover:bg-gray-50 transition-colors shadow-sm"
                                                   onClick={(e) => e.stopPropagation()}
                                                 >
                                                   <MailIcon className="w-3 h-3" />
                                                   Email
                                                 </a>
+                                              ) : (
+                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-50 border border-gray-200 text-gray-400 rounded text-[10px] font-medium cursor-not-allowed relative group">
+                                                  <MailIcon className="w-3 h-3" />
+                                                  Email
+                                                  <svg className="w-3 h-3 absolute -top-1 -right-1 text-gray-400" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="white" stroke="currentColor" strokeWidth="1.5"/><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                                                </span>
                                               )}
                                             </div>
                                           </div>

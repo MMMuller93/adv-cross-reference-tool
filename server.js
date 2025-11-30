@@ -330,7 +330,7 @@ app.get('/api/funds/formd-match', async (req, res) => {
     // Search Form D database for potential matches
     const { data, error } = await formdClient
       .from('form_d_filings')
-      .select('cik,entityname,filing_date,totalofferingamount,totalamountsold,federalexemptions_items_list,stateorcountry,related_names,related_roles,accessionnumber')
+      .select('cik,entityname,filing_date,sale_date,totalofferingamount,totalamountsold,federalexemptions_items_list,stateorcountry,related_names,related_roles,accessionnumber')
       .or(`entityname.ilike.%${name.substring(0, 20)}%,entityname.ilike.%${name.split(' ').slice(0, 3).join('%')}%`)
       .limit(50);
 
