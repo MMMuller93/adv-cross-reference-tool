@@ -278,60 +278,34 @@ app.get('/api/funds/adv', async (req, res) => {
     const { data, error, count } = await dbQuery;
     if (error) throw error;
 
-    // Enrich ADV funds with Form D cross-reference data using fuzzy matching
+    // Enrich ADV funds with Form D cross-reference data using DIRECT lookup
+    // The cross_reference_matches table has adv_fund_name that matches funds_enriched.fund_name exactly
     let crossRefMap = {};
     if (data && data.length > 0) {
       const fundNames = data.map(f => f.fund_name).filter(Boolean);
 
       if (fundNames.length > 0) {
         try {
-          // Build OR filter for ILIKE matching - search for partial matches
-          // Extract unique significant words from fund names for broader search
-          const searchWords = new Set();
-          fundNames.forEach(name => {
-            const words = normalizeName(name).split(/\s+/).filter(w => w.length > 3);
-            words.slice(0, 3).forEach(w => searchWords.add(w)); // Take first 3 significant words
-          });
+          // DIRECT LOOKUP: Query cross_reference_matches by exact fund names (in batches if needed)
+          // This is much more reliable than word-based fuzzy matching
+          const { data: matches, error: crossRefError } = await formdClient
+            .from('cross_reference_matches')
+            .select('adv_fund_name,formd_entity_name,formd_filing_date,formd_offering_amount,formd_amount_sold,formd_indefinite,formd_accession,match_score')
+            .in('adv_fund_name', fundNames);
 
-          // Query cross_reference_matches using ILIKE for broader matching
-          let crossRefData = [];
-          const wordArray = Array.from(searchWords).slice(0, 20); // Limit to 20 words
-
-          if (wordArray.length > 0) {
-            // Build OR query for each word
-            const orFilters = wordArray.map(w => `adv_fund_name.ilike.%${w}%`).join(',');
-            const { data: matches, error: crossRefError } = await formdClient
-              .from('cross_reference_matches')
-              .select('adv_fund_name,formd_entity_name,formd_filing_date,formd_offering_amount,formd_amount_sold,formd_indefinite,formd_accession,match_score')
-              .or(orFilters)
-              .limit(500);
-
-            if (!crossRefError && matches) {
-              crossRefData = matches;
-            }
-          }
-
-          if (crossRefData.length > 0) {
-            // Use fuzzy matching to find best cross-reference for each ADV fund
-            fundNames.forEach(fundName => {
-              const normalizedFund = normalizeName(fundName);
-              let bestMatch = null;
-              let bestScore = 0;
-
-              crossRefData.forEach(match => {
-                const normalizedMatch = normalizeName(match.adv_fund_name || '');
-                const score = similarity(normalizedFund, normalizedMatch);
-                if (score > bestScore && score >= 0.80) { // 80% similarity threshold
-                  bestScore = score;
-                  bestMatch = match;
-                }
-              });
-
-              if (bestMatch) {
-                crossRefMap[fundName] = bestMatch;
+          if (crossRefError) {
+            console.error('[ADV Search] Cross-reference query error:', crossRefError.message);
+          } else if (matches && matches.length > 0) {
+            // Build map from adv_fund_name to match data (keep best match per fund)
+            matches.forEach(match => {
+              const key = match.adv_fund_name;
+              if (!crossRefMap[key] || (match.match_score > (crossRefMap[key].match_score || 0))) {
+                crossRefMap[key] = match;
               }
             });
-            console.log(`[ADV Search] Found ${crossRefData.length} potential matches, linked ${Object.keys(crossRefMap).length} Form D cross-references`);
+            console.log(`[ADV Search] Direct lookup found ${matches.length} Form D matches for ${fundNames.length} funds, linked ${Object.keys(crossRefMap).length} unique`);
+          } else {
+            console.log(`[ADV Search] No Form D matches found for ${fundNames.length} funds`);
           }
         } catch (crossRefErr) {
           console.error('[ADV Search] Cross-reference lookup failed:', crossRefErr.message);
