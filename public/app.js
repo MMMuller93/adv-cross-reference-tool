@@ -58,6 +58,73 @@ const incrementSearchCount = () => {
 const getRemainingSearches = () => SEARCH_LIMIT - getSearchCount();
 
 // ============================================================================
+// URL STATE SERIALIZATION
+// ============================================================================
+// Read state from URL query parameters (for shareable links)
+const getStateFromURL = () => {
+  const params = new URLSearchParams(window.location.search);
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+  return {
+    tab: params.get('tab') || 'advisers',
+    q: params.get('q') || '',
+    state: params.get('state') || '',
+    type: params.get('type') || '',
+    exemption: params.get('exemption') || '',
+    minAum: params.get('minAum') ? parseInt(params.get('minAum')) : 0,
+    maxAum: params.get('maxAum') || '',
+    strategy: params.get('strategy') || '',
+    hasAdv: params.get('hasAdv') || '',
+    // New Managers specific
+    nmStartDate: params.get('nmStart') || sixMonthsAgo.toISOString().split('T')[0],
+    nmEndDate: params.get('nmEnd') || new Date().toISOString().split('T')[0],
+    nmFundType: params.get('nmType') || '',
+    nmState: params.get('nmState') || '',
+    nmHasAdv: params.get('nmHasAdv') || '',
+    // Individual entity view
+    adviser: params.get('adviser') || ''
+  };
+};
+
+// Update URL without page reload (replaceState to avoid polluting history)
+const updateURL = (state) => {
+  const params = new URLSearchParams();
+
+  // Only add non-default values to keep URL clean
+  if (state.tab && state.tab !== 'advisers') params.set('tab', state.tab);
+  if (state.q) params.set('q', state.q);
+  if (state.state) params.set('state', state.state);
+  if (state.type) params.set('type', state.type);
+  if (state.exemption) params.set('exemption', state.exemption);
+  if (state.minAum > 0) params.set('minAum', state.minAum);
+  if (state.maxAum) params.set('maxAum', state.maxAum);
+  if (state.strategy) params.set('strategy', state.strategy);
+  if (state.hasAdv) params.set('hasAdv', state.hasAdv);
+
+  // New Managers specific (only if on that tab)
+  if (state.tab === 'new_managers') {
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const defaultStart = sixMonthsAgo.toISOString().split('T')[0];
+    const defaultEnd = new Date().toISOString().split('T')[0];
+
+    if (state.nmStartDate && state.nmStartDate !== defaultStart) params.set('nmStart', state.nmStartDate);
+    if (state.nmEndDate && state.nmEndDate !== defaultEnd) params.set('nmEnd', state.nmEndDate);
+    if (state.nmFundType) params.set('nmType', state.nmFundType);
+    if (state.nmState) params.set('nmState', state.nmState);
+    if (state.nmHasAdv) params.set('nmHasAdv', state.nmHasAdv);
+  }
+
+  // Individual entity view (adviser CRD)
+  if (state.adviser) params.set('adviser', state.adviser);
+
+  const queryString = params.toString();
+  const newURL = queryString ? `${window.location.pathname}?${queryString}` : window.location.pathname;
+  window.history.replaceState({}, '', newURL);
+};
+
+// ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
 // Get effective AUM - use total_aum if available, otherwise find latest yearly value
@@ -739,15 +806,36 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, user, hasPremiumAccess, onL
 };
 
 // ============================================================================
-// LOADING OVERLAY
+// LOADING OVERLAY WITH SKELETON + COLD-START TOAST
 // ============================================================================
-const LoadingOverlay = ({ isLoading }) => {
+const SkeletonRow = () => (
+  <div className="flex items-center gap-4 px-6 py-3 border-b border-gray-100 animate-pulse">
+    <div className="w-6 h-4 bg-gray-200 rounded" />
+    <div className="flex-1">
+      <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
+      <div className="h-3 bg-gray-100 rounded w-1/2" />
+    </div>
+    <div className="w-20 h-4 bg-gray-200 rounded" />
+    <div className="w-16 h-4 bg-gray-100 rounded" />
+  </div>
+);
+
+const LoadingOverlay = ({ isLoading, showColdStartToast }) => {
   if (!isLoading) return null;
   return (
-    <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="flex flex-col items-center gap-4">
-        <div className="w-10 h-10 border-2 border-slate-600 border-t-transparent rounded-full animate-spin"></div>
-        <span className="text-sm font-medium text-gray-600">Loading data...</span>
+    <div className="absolute inset-0 bg-white/95 z-50">
+      {/* Cold-start toast */}
+      {showColdStartToast && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-60">
+          <div className="bg-slate-800 text-white px-4 py-2 rounded-lg shadow-lg text-sm flex items-center gap-2">
+            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            Waking up server... first request may take a moment
+          </div>
+        </div>
+      )}
+      {/* Skeleton loader */}
+      <div className="pt-4">
+        {[...Array(12)].map((_, i) => <SkeletonRow key={i} />)}
       </div>
     </div>
   );
@@ -1159,6 +1247,18 @@ const AdviserDetailView = ({ adviser, onBack, onNavigateToFund }) => {
   const [serviceProvidersExpanded, setServiceProvidersExpanded] = useState(false);
   const [portfolioExpanded, setPortfolioExpanded] = useState(false);
   const [portfolioCompanies, setPortfolioCompanies] = useState([]);
+  const [shareCopied, setShareCopied] = useState(false);
+
+  // Share link handler - copies current URL to clipboard
+  const handleShare = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
 
   // State for enriched AUM (after aggregating fund GAVs as fallback)
   const [enrichedAumByYear, setEnrichedAumByYear] = useState({});
@@ -1390,6 +1490,9 @@ const AdviserDetailView = ({ adviser, onBack, onNavigateToFund }) => {
           <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded">CRD: {adviser.crd}</span>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={handleShare} className="px-3 py-1.5 border border-slate-200 rounded text-[11px] font-semibold text-slate-700 hover:bg-slate-50 bg-white flex items-center gap-1.5 transition-all relative">
+            <ShareIcon className="w-3 h-3" /> {shareCopied ? 'Copied!' : 'Share'}
+          </button>
           {bestWebsite && (
             <a href={normalizeUrl(bestWebsite)} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 border border-slate-200 rounded text-[11px] font-semibold text-slate-700 hover:bg-slate-50 bg-white flex items-center gap-1.5 transition-all">
               <GlobeIcon className="w-3 h-3" /> Website
@@ -2083,11 +2186,18 @@ const FundDetailView = ({ fund, onBack, onNavigateToAdviser }) => {
 // MAIN APP COMPONENT
 // ============================================================================
 function App() {
+  // Initialize state from URL params (for shareable links)
+  const initialURLState = getStateFromURL();
+
   const [view, setView] = useState('dashboard');
-  const [activeTab, setActiveTab] = useState('advisers');
+  const [activeTab, setActiveTab] = useState(initialURLState.tab);
   const [selectedAdviser, setSelectedAdviser] = useState(null);
   const [selectedFund, setSelectedFund] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  // Cold-start toast state (shows after 2s of loading)
+  const [showColdStartToast, setShowColdStartToast] = useState(false);
+  const loadingStartRef = useRef(null);
 
   // Auth state
   const [user, setUser] = useState(null);
@@ -2102,15 +2212,16 @@ function App() {
   const [hasPremiumAccess, setHasPremiumAccess] = useState(false);
   const [showPaywallModal, setShowPaywallModal] = useState(false);
 
-  // Search & Filter state
-  const [searchTerm, setSearchTerm] = useState('');
+  // Search & Filter state (initialized from URL)
+  const [searchTerm, setSearchTerm] = useState(initialURLState.q);
   const [filters, setFilters] = useState({
-    state: '',
-    type: '',
-    exemption: '',
-    minAum: 0,
-    maxAum: '',
-    strategy: '',
+    state: initialURLState.state,
+    type: initialURLState.type,
+    exemption: initialURLState.exemption,
+    minAum: initialURLState.minAum,
+    maxAum: initialURLState.maxAum,
+    strategy: initialURLState.strategy,
+    hasAdv: initialURLState.hasAdv,
     minOffering: '',
     maxOffering: '',
     startDate: '',
@@ -2126,14 +2237,12 @@ function App() {
   const [crossRefMatches, setCrossRefMatches] = useState([]);
   const [newManagers, setNewManagers] = useState([]);
 
-  // New Manager filters (default to last 6 months)
-  const sixMonthsAgo = new Date();
-  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-  const [nmStartDate, setNmStartDate] = useState(sixMonthsAgo.toISOString().split('T')[0]);
-  const [nmEndDate, setNmEndDate] = useState(new Date().toISOString().split('T')[0]);
-  const [nmFundType, setNmFundType] = useState('');
-  const [nmState, setNmState] = useState('');
-  const [nmHasAdv, setNmHasAdv] = useState(''); // Filter for has_form_adv
+  // New Manager filters (initialized from URL, default to last 6 months)
+  const [nmStartDate, setNmStartDate] = useState(initialURLState.nmStartDate);
+  const [nmEndDate, setNmEndDate] = useState(initialURLState.nmEndDate);
+  const [nmFundType, setNmFundType] = useState(initialURLState.nmFundType);
+  const [nmState, setNmState] = useState(initialURLState.nmState);
+  const [nmHasAdv, setNmHasAdv] = useState(initialURLState.nmHasAdv);
   const [expandedManagers, setExpandedManagers] = useState(new Set());
 
   // New Managers sorting
@@ -2170,6 +2279,10 @@ function App() {
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
+      // Close auth modal on successful login (including OAuth callback)
+      if (session?.user) {
+        setShowAuthModal(false);
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -2183,6 +2296,64 @@ function App() {
       setHasPremiumAccess(false);
     }
   }, [user]);
+
+  // Sync state to URL (for shareable links)
+  useEffect(() => {
+    updateURL({
+      tab: activeTab,
+      q: searchTerm,
+      state: filters.state,
+      type: filters.type,
+      exemption: filters.exemption,
+      minAum: filters.minAum,
+      maxAum: filters.maxAum,
+      strategy: filters.strategy,
+      hasAdv: filters.hasAdv,
+      nmStartDate,
+      nmEndDate,
+      nmFundType,
+      nmState,
+      nmHasAdv,
+      adviser: selectedAdviser?.crd || ''
+    });
+  }, [activeTab, searchTerm, filters.state, filters.type, filters.exemption, filters.minAum, filters.maxAum, filters.strategy, filters.hasAdv, nmStartDate, nmEndDate, nmFundType, nmState, nmHasAdv, selectedAdviser]);
+
+  // Auto-load adviser from URL param on initial load
+  const urlAdviserLoadedRef = useRef(false);
+  useEffect(() => {
+    const loadAdviserFromURL = async () => {
+      if (urlAdviserLoadedRef.current) return;
+      const adviserCrd = initialURLState.adviser;
+      if (!adviserCrd) return;
+
+      urlAdviserLoadedRef.current = true;
+      try {
+        const res = await fetch(`${SUPABASE_ADV_URL}/rest/v1/advisers_enriched?crd=eq.${adviserCrd}&select=*`, { headers: advHeaders });
+        const data = await res.json();
+        if (data && data.length > 0) {
+          setSelectedAdviser(data[0]);
+          setView('adviser_detail');
+        }
+      } catch (err) {
+        console.error('Error loading adviser from URL:', err);
+      }
+    };
+    loadAdviserFromURL();
+  }, []);
+
+  // Cold-start toast (show after 2s of loading)
+  useEffect(() => {
+    if (loading) {
+      loadingStartRef.current = Date.now();
+      const timer = setTimeout(() => {
+        setShowColdStartToast(true);
+      }, 2000);
+      return () => clearTimeout(timer);
+    } else {
+      setShowColdStartToast(false);
+      loadingStartRef.current = null;
+    }
+  }, [loading]);
 
   // Auth handlers
   const handleOpenAuth = (mode) => {
@@ -3256,7 +3427,7 @@ function App() {
 
             {/* Content */}
             <div className="flex-1 overflow-auto custom-scrollbar bg-white relative">
-              <LoadingOverlay isLoading={loading} />
+              <LoadingOverlay isLoading={loading} showColdStartToast={showColdStartToast} />
               <div className="max-w-full mx-auto">
                 {/* Data Header */}
                 <div className="px-8 py-6 flex items-end justify-between bg-white">
