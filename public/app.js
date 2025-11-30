@@ -1210,7 +1210,7 @@ const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters,
               </div>
 
               <div className="space-y-2">
-                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">REGISTRATION</label>
+                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">ADVISER REGISTRATION</label>
                 <select
                   className="block w-full px-2.5 py-2 text-[11px] bg-white border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-slate-400 text-slate-700 appearance-none"
                   value={filters.hasAdv || ''}
@@ -3788,7 +3788,7 @@ function App() {
                               </td>
                               <td className="px-3 py-2.5 text-right">
                                 {fund.form_d_offering_amount ? (
-                                  <div className={`text-[11px] font-medium ${typeof fund.form_d_offering_amount === 'string' && fund.form_d_offering_amount.toLowerCase() === 'indefinite' ? 'text-amber-600' : 'text-gray-900 font-mono tabular-nums'}`}>{formatCurrency(fund.form_d_offering_amount)}</div>
+                                  <div className="text-[11px] font-medium text-gray-900 font-mono tabular-nums">{formatCurrency(fund.form_d_offering_amount)}</div>
                                 ) : (
                                   <span className="text-[11px] text-gray-400">—</span>
                                 )}
