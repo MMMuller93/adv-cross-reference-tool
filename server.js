@@ -295,11 +295,85 @@ app.get('/api/funds/adv', async (req, res) => {
     const { data, error, count } = await dbQuery;
     if (error) throw error;
 
-    // Add source field to each result
-    const results = (data || []).map(fund => ({
-      ...fund,
-      source: 'adv'
-    }));
+    // Enrich ADV funds with Form D cross-reference data using fuzzy matching
+    let crossRefMap = {};
+    if (data && data.length > 0) {
+      const fundNames = data.map(f => f.fund_name).filter(Boolean);
+
+      if (fundNames.length > 0) {
+        try {
+          // Build OR filter for ILIKE matching - search for partial matches
+          // Extract unique significant words from fund names for broader search
+          const searchWords = new Set();
+          fundNames.forEach(name => {
+            const words = normalizeName(name).split(/\s+/).filter(w => w.length > 3);
+            words.slice(0, 3).forEach(w => searchWords.add(w)); // Take first 3 significant words
+          });
+
+          // Query cross_reference_matches using ILIKE for broader matching
+          let crossRefData = [];
+          const wordArray = Array.from(searchWords).slice(0, 20); // Limit to 20 words
+
+          if (wordArray.length > 0) {
+            // Build OR query for each word
+            const orFilters = wordArray.map(w => `adv_fund_name.ilike.%${w}%`).join(',');
+            const { data: matches, error: crossRefError } = await formdClient
+              .from('cross_reference_matches')
+              .select('adv_fund_name,formd_entity_name,formd_filing_date,formd_offering_amount,formd_amount_sold,formd_indefinite,formd_accession,match_score')
+              .or(orFilters)
+              .limit(500);
+
+            if (!crossRefError && matches) {
+              crossRefData = matches;
+            }
+          }
+
+          if (crossRefData.length > 0) {
+            // Use fuzzy matching to find best cross-reference for each ADV fund
+            fundNames.forEach(fundName => {
+              const normalizedFund = normalizeName(fundName);
+              let bestMatch = null;
+              let bestScore = 0;
+
+              crossRefData.forEach(match => {
+                const normalizedMatch = normalizeName(match.adv_fund_name || '');
+                const score = similarity(normalizedFund, normalizedMatch);
+                if (score > bestScore && score >= 0.80) { // 80% similarity threshold
+                  bestScore = score;
+                  bestMatch = match;
+                }
+              });
+
+              if (bestMatch) {
+                crossRefMap[fundName] = bestMatch;
+              }
+            });
+            console.log(`[ADV Search] Found ${crossRefData.length} potential matches, linked ${Object.keys(crossRefMap).length} Form D cross-references`);
+          }
+        } catch (crossRefErr) {
+          console.error('[ADV Search] Cross-reference lookup failed:', crossRefErr.message);
+          // Continue without cross-reference data rather than failing
+        }
+      }
+    }
+
+    // Add source field and Form D enrichment to each result
+    const results = (data || []).map(fund => {
+      const crossRef = crossRefMap[fund.fund_name];
+      return {
+        ...fund,
+        source: 'adv',
+        // Add Form D data from pre-computed cross-reference matches
+        form_d_entity_name: crossRef?.formd_entity_name || null,
+        form_d_filing_date: crossRef?.formd_filing_date || null,
+        form_d_offering_amount: crossRef?.formd_offering_amount || null,
+        form_d_amount_sold: crossRef?.formd_amount_sold || null,
+        form_d_indefinite: crossRef?.formd_indefinite || false,
+        form_d_accession: crossRef?.formd_accession || null,
+        form_d_match_score: crossRef?.match_score || null,
+        has_form_d_match: !!crossRef
+      };
+    });
 
     res.json({
       success: true,

@@ -31,6 +31,27 @@ const US_STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','
 // ============================================================================
 const supabase = window.supabase.createClient(SUPABASE_ADV_URL, SUPABASE_ADV_KEY);
 
+// Immediate auth debugging - runs before React
+console.log('[Auth Init] URL:', window.location.href);
+console.log('[Auth Init] Hash:', window.location.hash ? 'Present (' + window.location.hash.substring(0, 50) + '...)' : 'None');
+console.log('[Auth Init] Origin:', window.location.origin);
+
+// Check if this is an OAuth callback
+if (window.location.hash && window.location.hash.includes('access_token')) {
+  console.log('[Auth Init] OAuth callback detected! Processing...');
+}
+
+// Check existing session immediately
+supabase.auth.getSession().then(({ data, error }) => {
+  if (error) {
+    console.error('[Auth Init] Session error:', error.message);
+  } else if (data.session) {
+    console.log('[Auth Init] Existing session found:', data.session.user?.email);
+  } else {
+    console.log('[Auth Init] No existing session');
+  }
+});
+
 // ============================================================================
 // RATE LIMITING (localStorage-based for anonymous users)
 // ============================================================================
@@ -403,8 +424,9 @@ const formatGrowth = (value) => {
 };
 
 const selectBestWebsite = (primary, others) => {
-  const socialDomains = ['linkedin.com', 'twitter.com', 'facebook.com', 'instagram.com'];
-  const isSocial = (url) => url && socialDomains.some(d => url.toLowerCase().includes(d));
+  // Filter out social media and non-professional domains - never show these as manager contact
+  const blockedDomains = ['linkedin.com', 'twitter.com', 'facebook.com', 'instagram.com', 'reddit.com', 'youtube.com', 'tiktok.com', 'medium.com', 'substack.com', 'x.com'];
+  const isSocial = (url) => url && blockedDomains.some(d => url.toLowerCase().includes(d));
   if (primary && !isSocial(primary)) return primary;
   if (others) {
     const urls = others.split(/[,;\s]+/).filter(u => u && !isSocial(u));
@@ -2289,16 +2311,47 @@ function App() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Auth state listener
+  // Auth state listener with OAuth callback handling
   useEffect(() => {
-    // Check current session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setAuthLoading(false);
+    // Handle OAuth callback - check for tokens in URL hash
+    const handleOAuthCallback = async () => {
+      const hash = window.location.hash;
+      if (hash && hash.includes('access_token')) {
+        console.log('[Auth] OAuth callback detected, processing tokens...');
+        // Supabase should auto-detect, but let's ensure we get the session
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) {
+          console.error('[Auth] Error getting session after OAuth:', error);
+        } else if (session) {
+          console.log('[Auth] Session established:', session.user?.email);
+          setUser(session.user);
+          setShowAuthModal(false);
+          // Clean up URL hash
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        } else {
+          console.log('[Auth] No session found after OAuth callback - possible domain mismatch');
+        }
+        setAuthLoading(false);
+        return true;
+      }
+      return false;
+    };
+
+    // Check for OAuth callback first
+    handleOAuthCallback().then((wasCallback) => {
+      if (!wasCallback) {
+        // Normal session check
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          console.log('[Auth] Session check:', session ? session.user?.email : 'none');
+          setUser(session?.user ?? null);
+          setAuthLoading(false);
+        });
+      }
     });
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('[Auth] Auth state changed:', event, session?.user?.email);
       setUser(session?.user ?? null);
       // Close auth modal on successful login (including OAuth callback)
       if (session?.user) {
@@ -2924,29 +2977,41 @@ function App() {
       let combinedFunds = [];
       const matchedFormDKeys = new Set();
 
-      // Add ADV funds with Form D enrichment (matching done client-side from batch data)
+      // Add ADV funds with Form D enrichment
+      // Server now provides pre-computed cross-reference data via has_form_d_match, form_d_* fields
+      // Also try client-side matching as fallback for any additional Form D filings in search results
       advResults.forEach(fund => {
-        const formD = findBestFormDMatch(fund.fund_name || '');
+        // Use server-provided cross-reference data if available, otherwise try client-side match
+        const serverHasFormD = fund.has_form_d_match;
+        const clientFormD = !serverHasFormD ? findBestFormDMatch(fund.fund_name || '') : null;
+        const hasMatch = serverHasFormD || !!clientFormD;
+
         combinedFunds.push({
           ...fund,
           source: 'adv',
           adv_filing_date: formatFilingDate(fund.updated_at ? fund.updated_at.split('T')[0] : null),
-          form_d_filing_date: formatFilingDate(formD?.filing_date || formD?.dateoffirstsale || null),
-          form_d_offering_amount: formD?.totalofferingamount || null,
-          form_d_cik: formD?.cik || null,
-          formd_entity_name: formD?.entityname || null,
-          has_form_d_match: !!formD,
+          // Use server Form D data if available, fall back to client-side match
+          form_d_filing_date: fund.form_d_filing_date
+            ? formatFilingDate(fund.form_d_filing_date)
+            : formatFilingDate(clientFormD?.filing_date || clientFormD?.dateoffirstsale || null),
+          form_d_offering_amount: fund.form_d_offering_amount || clientFormD?.totalofferingamount || null,
+          form_d_amount_sold: fund.form_d_amount_sold || clientFormD?.totalamountsold || null,
+          form_d_indefinite: fund.form_d_indefinite || clientFormD?.indefinite || false,
+          form_d_cik: clientFormD?.cik || null,
+          formd_entity_name: fund.form_d_entity_name || clientFormD?.entityname || null,
+          has_form_d_match: hasMatch,
           related_parties_count: (typeof fund.owners === 'string' && fund.owners) ? (fund.owners.match(/;/g) || []).length + 1 : (typeof fund.partner_names === 'string' && fund.partner_names ? fund.partner_names.split(',').length : 0),
-          sort_date: formatFilingDate(fund.updated_at || formD?.filing_date),
-          related_names: formD?.related_names || null,
-          related_roles: formD?.related_roles || null
+          sort_date: formatFilingDate(fund.updated_at || fund.form_d_filing_date || clientFormD?.filing_date),
+          related_names: clientFormD?.related_names || null,
+          related_roles: clientFormD?.related_roles || null
         });
         // Track matched Form D filings to avoid duplicates
-        if (formD) {
-          matchedFormDKeys.add(formD.entityname.toLowerCase().trim());
+        if (serverHasFormD && fund.form_d_entity_name) {
+          matchedFormDKeys.add(fund.form_d_entity_name.toLowerCase().trim());
         }
-        // Note: Unmatched ADV funds rely on pre-computed cross_reference_matches table
-        // which is refreshed periodically. No individual API lookups needed.
+        if (clientFormD) {
+          matchedFormDKeys.add(clientFormD.entityname.toLowerCase().trim());
+        }
       });
 
       // Add remaining Form D filings that didn't match ADV funds
@@ -2961,6 +3026,7 @@ function App() {
           form_d_filing_date: formatFilingDate(filing.filing_date),
           form_d_offering_amount: filing.totalofferingamount,
           form_d_amount_sold: filing.totalamountsold,
+          form_d_indefinite: filing.indefinite || false,
           formd_entity_name: filing.entityname,
           has_form_d_match: true,
           cik: filing.cik,
@@ -3236,6 +3302,18 @@ function App() {
         if (!aAmount && !bAmount) return 0;
         if (!aAmount) return 1; // a is N/A, put it after b
         if (!bAmount) return -1; // b is N/A, put it after a
+
+        aVal = aAmount;
+        bVal = bAmount;
+      } else if (fundsSortField === 'amount_sold') {
+        // Sort by Amount Sold
+        const aAmount = parseCurrency(a.form_d_amount_sold);
+        const bAmount = parseCurrency(b.form_d_amount_sold);
+
+        // Push N/A values to the bottom regardless of sort direction
+        if (!aAmount && !bAmount) return 0;
+        if (!aAmount) return 1;
+        if (!bAmount) return -1;
 
         aVal = aAmount;
         bVal = bAmount;
@@ -3610,6 +3688,9 @@ function App() {
                             <th onClick={() => handleFundsSort('aum_offering')} className="px-3 py-2.5 text-right text-[10px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
                               Form D Offering {fundsSortField === 'aum_offering' && (fundsSortOrder === 'desc' ? '↓' : '↑')}
                             </th>
+                            <th onClick={() => handleFundsSort('amount_sold')} className="px-3 py-2.5 text-right text-[10px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
+                              Amt Sold {fundsSortField === 'amount_sold' && (fundsSortOrder === 'desc' ? '↓' : '↑')}
+                            </th>
                             <th onClick={() => handleFundsSort('adv_aum')} className="px-3 py-2.5 text-right text-[10px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors">
                               ADV AUM {fundsSortField === 'adv_aum' && (fundsSortOrder === 'desc' ? '↓' : '↑')}
                             </th>
@@ -3695,8 +3776,17 @@ function App() {
                                 )}
                               </td>
                               <td className="px-3 py-2.5 text-right">
-                                {fund.form_d_offering_amount ? (
+                                {fund.form_d_indefinite ? (
+                                  <div className="text-[11px] text-amber-600 font-medium">Indefinite</div>
+                                ) : fund.form_d_offering_amount ? (
                                   <div className="text-[11px] text-gray-900 font-mono tabular-nums font-medium">{formatCurrency(parseCurrency(fund.form_d_offering_amount))}</div>
+                                ) : (
+                                  <span className="text-[11px] text-gray-400">—</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2.5 text-right">
+                                {fund.form_d_amount_sold ? (
+                                  <div className="text-[11px] text-gray-900 font-mono tabular-nums font-medium">{formatCurrency(parseCurrency(fund.form_d_amount_sold))}</div>
                                 ) : (
                                   <span className="text-[11px] text-gray-400">—</span>
                                 )}
