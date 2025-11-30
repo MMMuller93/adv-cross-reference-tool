@@ -409,7 +409,7 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
                 <TrendingUpIcon className="w-4 h-4 text-slate-700" />
               </div>
               <h3 className="text-sm font-semibold text-gray-900 mb-1">New Managers</h3>
-              <p className="text-xs text-gray-500 leading-relaxed">Identify emerging fund managers from first-time Form D filings</p>
+              <p className="text-xs text-gray-500 leading-relaxed">Identify emerging fund managers</p>
             </div>
             <div className="bg-slate-50 rounded-lg p-4 border border-slate-100">
               <div className="w-8 h-8 bg-slate-200 rounded-lg flex items-center justify-center mb-2">
