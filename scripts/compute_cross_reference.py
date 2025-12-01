@@ -168,38 +168,57 @@ def check_discrepancies(adv_fund, formd_filing):
     return issues
 
 
+def normalize_file_number(file_num):
+    """Normalize file number for matching (strip whitespace)."""
+    if not file_num:
+        return None
+    return str(file_num).strip()
+
+
 def compute_matches():
     """
-    Main matching algorithm - uses EXACT matching (case-insensitive, punctuation-normalized).
+    Main matching algorithm - uses TWO strategies:
+    1. PRIMARY: Match by file_num (100% accurate when ADV has form_d_file_number)
+    2. FALLBACK: Match by normalized name (for funds without file number)
+
     Each ADV fund gets at most ONE Form D match.
     """
     print("=" * 60)
-    print("CROSS-REFERENCE MATCHER (Exact Matching)")
+    print("CROSS-REFERENCE MATCHER (File Number + Name Matching)")
     print(f"Started at: {datetime.utcnow().isoformat()}")
     print("=" * 60)
 
-    # Fetch ALL Form D filings first and build lookup map
+    # Fetch ALL Form D filings first and build lookup maps
     print("\n1. Fetching Form D filings...")
     formd_filings = fetch_all_keyset(
         formd_client,
         'form_d_filings',
-        'accessionnumber,entityname,filing_date,totalofferingamount,investmentfundtype'
+        'accessionnumber,entityname,filing_date,totalofferingamount,totalamountsold,sale_date,investmentfundtype,file_num'
     )
 
-    # Build lookup map: normalized_name -> filing (keep most recent if duplicates)
-    print("  Building Form D lookup map...")
-    formd_map = {}
-    for filing in formd_filings:
-        entity_name = filing.get('entityname')
-        if not entity_name:
-            continue
-        normalized = normalize_name_for_match(entity_name)
-        if not normalized:
-            continue
-        # Keep the filing (if duplicate normalized names, later entries overwrite - typically more recent)
-        formd_map[normalized] = filing
+    # Build TWO lookup maps:
+    # 1. file_num -> filing (for direct file number matching)
+    # 2. normalized_name -> filing (for name matching fallback)
+    print("  Building Form D lookup maps...")
+    formd_file_num_map = {}  # Primary: file_num -> filing
+    formd_name_map = {}      # Fallback: normalized_name -> filing
 
-    print(f"  Indexed {len(formd_map)} unique Form D entities")
+    for filing in formd_filings:
+        # Index by file number (primary match)
+        file_num = normalize_file_number(filing.get('file_num'))
+        if file_num:
+            # Keep most recent filing for each file number
+            formd_file_num_map[file_num] = filing
+
+        # Index by normalized name (fallback match)
+        entity_name = filing.get('entityname')
+        if entity_name:
+            normalized = normalize_name_for_match(entity_name)
+            if normalized:
+                formd_name_map[normalized] = filing
+
+    print(f"  Indexed {len(formd_file_num_map)} Form D filings by file_num")
+    print(f"  Indexed {len(formd_name_map)} unique Form D entities by name")
 
     # Fetch ADV data (use reference_id for keyset pagination since no 'id' column)
     print("\n2. Fetching ADV funds...")
@@ -217,33 +236,45 @@ def compute_matches():
     adviser_map = {adv['crd']: adv for adv in advisers if adv.get('crd')}
     print(f"  Indexed {len(adviser_map)} advisers")
 
-    # Cross-reference using EXACT matching
-    print("\n4. Finding exact matches...")
+    # Cross-reference using FILE NUMBER (primary) + NAME (fallback)
+    print("\n4. Finding matches...")
     all_matches = []
-    matched_count = 0
+    file_num_match_count = 0
+    name_match_count = 0
     no_match_count = 0
 
     for i, adv_fund in enumerate(adv_funds):
         if (i + 1) % 10000 == 0:
-            print(f"  Processed {i + 1}/{len(adv_funds)}... ({matched_count} matches)")
+            total_matched = file_num_match_count + name_match_count
+            print(f"  Processed {i + 1}/{len(adv_funds)}... ({total_matched} matches: {file_num_match_count} by file#, {name_match_count} by name)")
 
         fund_name = adv_fund.get('fund_name')
         if not fund_name:
             continue
 
-        # Normalize ADV fund name
-        adv_normalized = normalize_name_for_match(fund_name)
-        if not adv_normalized or len(adv_normalized) < 3:
-            continue
+        formd_filing = None
+        match_method = None
 
-        # EXACT lookup in Form D map
-        formd_filing = formd_map.get(adv_normalized)
+        # PRIMARY: Try file number matching first (100% accurate)
+        adv_file_num = normalize_file_number(adv_fund.get('form_d_file_number'))
+        if adv_file_num:
+            formd_filing = formd_file_num_map.get(adv_file_num)
+            if formd_filing:
+                match_method = 'file_num'
+                file_num_match_count += 1
+
+        # FALLBACK: Try name matching if no file number match
+        if not formd_filing:
+            adv_normalized = normalize_name_for_match(fund_name)
+            if adv_normalized and len(adv_normalized) >= 3:
+                formd_filing = formd_name_map.get(adv_normalized)
+                if formd_filing:
+                    match_method = 'name'
+                    name_match_count += 1
 
         if not formd_filing:
             no_match_count += 1
             continue
-
-        matched_count += 1
 
         # Check for discrepancies
         issues = check_discrepancies(adv_fund, formd_filing)
@@ -262,13 +293,14 @@ def compute_matches():
             'formd_entity_name': formd_filing.get('entityname'),
             'formd_filing_date': formd_filing.get('filing_date'),
             'formd_offering_amount': formd_filing.get('totalofferingamount'),
+            # Note: formd_amount_sold, formd_sale_date, match_method removed - columns don't exist in table
             'adv_fund_id': adv_fund.get('fund_id'),
             'adv_fund_name': adv_fund.get('fund_name'),
             'adv_filing_date': adv_fund.get('updated_at'),
             'adv_gav': adv_fund.get('latest_gross_asset_value'),
             'adviser_entity_crd': adv_fund.get('adviser_entity_crd'),
             'adviser_entity_legal_name': adviser.get('adviser_name'),
-            'match_score': 1.0,  # Exact match
+            'match_score': 1.0,  # Both methods are exact matches
             'issues': ' | '.join(issues) if issues else '',
             'overdue_adv_flag': overdue,
             'latest_adv_year': latest_year,
@@ -277,9 +309,12 @@ def compute_matches():
 
         all_matches.append(match)
 
+    total_matched = file_num_match_count + name_match_count
     print(f"\n  Results:")
     print(f"    - Total ADV funds: {len(adv_funds)}")
-    print(f"    - Exact matches found: {matched_count}")
+    print(f"    - Matches found: {total_matched}")
+    print(f"      - By file number: {file_num_match_count} (100% accurate)")
+    print(f"      - By name: {name_match_count} (normalized exact match)")
     print(f"    - No match: {no_match_count}")
 
     return all_matches
@@ -289,25 +324,43 @@ def store_matches(matches):
     """Store matches in Form D database"""
     print("\n5. Storing results...")
 
-    # Clear existing data in batches to avoid timeout
-    print("  Clearing old matches (in batches)...")
-    deleted_total = 0
-    while True:
-        try:
-            # Delete a batch of rows
-            response = formd_client.table('cross_reference_matches').delete().neq('id', 0).limit(5000).execute()
-            if not response.data:
-                break
-            deleted_count = len(response.data)
-            deleted_total += deleted_count
-            print(f"    Deleted {deleted_total} rows...")
-            if deleted_count < 5000:
-                break
-        except Exception as e:
-            print(f"  Warning during delete: {e}")
-            break
+    # Clear existing data by fetching IDs and deleting by ID range
+    print("  Clearing old matches...")
 
-    print(f"  Cleared {deleted_total} old matches")
+    # First, check how many rows exist
+    count_response = formd_client.table('cross_reference_matches').select('id', count='exact').limit(1).execute()
+    total_to_delete = count_response.count or 0
+    print(f"    Found {total_to_delete} existing rows to delete")
+
+    if total_to_delete > 0:
+        deleted_total = 0
+
+        while True:
+            try:
+                # Fetch a batch of IDs (supabase-py allows limit on SELECT)
+                id_response = formd_client.table('cross_reference_matches').select('id').order('id').limit(500).execute()
+
+                if not id_response.data or len(id_response.data) == 0:
+                    break
+
+                ids_to_delete = [row['id'] for row in id_response.data]
+                min_id = min(ids_to_delete)
+                max_id = max(ids_to_delete)
+
+                # Delete by ID range (no .limit() needed)
+                formd_client.table('cross_reference_matches').delete().gte('id', min_id).lte('id', max_id).execute()
+                deleted_total += len(ids_to_delete)
+
+                if deleted_total % 5000 == 0:
+                    print(f"    Deleted {deleted_total}/{total_to_delete} rows...")
+
+            except Exception as e:
+                print(f"  Warning during delete: {e}")
+                import time
+                time.sleep(1)
+                continue
+
+        print(f"  Cleared {deleted_total} rows")
 
     # Insert new matches in batches
     print(f"  Inserting {len(matches)} new matches...")
