@@ -101,6 +101,9 @@ app.post('/api/stripe/create-checkout', async (req, res) => {
         },
         quantity: 1,
       }],
+      subscription_data: {
+        trial_period_days: 3,
+      },
       success_url: `${baseUrl}?subscription=success`,
       cancel_url: `${baseUrl}?subscription=cancelled`,
     });

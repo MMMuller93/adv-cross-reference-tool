@@ -722,11 +722,11 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
                     Processing...
                   </>
                 ) : (
-                  'Get Unlimited Searches — $30/mo'
+                  'Start 3-Day Free Trial — then $30/mo'
                 )}
               </button>
               <p className="text-center text-xs text-gray-400 mt-1">
-                Our team responds within 24 hours
+                Cancel anytime during trial, no charge
               </p>
             </div>
           )}
@@ -3176,8 +3176,8 @@ function App() {
           has_form_d_match: hasMatch,
           related_parties_count: (typeof fund.owners === 'string' && fund.owners) ? (fund.owners.match(/;/g) || []).length + 1 : (typeof fund.partner_names === 'string' && fund.partner_names ? fund.partner_names.split(',').length : 0),
           sort_date: formatFilingDate(fund.updated_at || fund.form_d_filing_date || clientFormD?.filing_date),
-          related_names: clientFormD?.related_names || null,
-          related_roles: clientFormD?.related_roles || null
+          related_names: fund.related_names || clientFormD?.related_names || null,
+          related_roles: fund.related_roles || clientFormD?.related_roles || null
         });
         // Track matched Form D filings to avoid duplicates
         if (serverHasFormD && fund.form_d_entity_name) {

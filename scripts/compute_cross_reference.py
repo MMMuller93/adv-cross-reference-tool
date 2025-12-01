@@ -293,7 +293,7 @@ def compute_matches():
             'formd_entity_name': formd_filing.get('entityname'),
             'formd_filing_date': formd_filing.get('filing_date'),
             'formd_offering_amount': formd_filing.get('totalofferingamount'),
-            # Note: formd_amount_sold, formd_sale_date, match_method removed - columns don't exist in table
+            # Note: related_names, related_roles, formd_amount_sold require adding columns to cross_reference_matches table
             'adv_fund_id': adv_fund.get('fund_id'),
             'adv_fund_name': adv_fund.get('fund_name'),
             'adv_filing_date': adv_fund.get('updated_at'),
