@@ -317,24 +317,34 @@ app.get('/api/funds/adv', async (req, res) => {
         try {
           // DIRECT LOOKUP: Query cross_reference_matches by exact fund names
           // Only return exact matches (match_score = 1.0) to filter out old fuzzy matches
-          // Query only columns that exist in cross_reference_matches table
-          const { data: matches, error: crossRefError } = await formdClient
-            .from('cross_reference_matches')
-            .select('adv_fund_name,formd_entity_name,formd_filing_date,formd_offering_amount,formd_accession,match_score')
-            .eq('match_score', 1)
-            .in('adv_fund_name', fundNames);
+          // BATCH queries to avoid Supabase URL length limit (fails with >50-100 items in .in())
+          const BATCH_SIZE = 50;
+          const allMatches = [];
 
-          if (crossRefError) {
-            console.error('[ADV Search] Cross-reference query error:', crossRefError.message);
-          } else if (matches && matches.length > 0) {
+          for (let i = 0; i < fundNames.length; i += BATCH_SIZE) {
+            const batch = fundNames.slice(i, i + BATCH_SIZE);
+            const { data: matches, error: crossRefError } = await formdClient
+              .from('cross_reference_matches')
+              .select('adv_fund_name,formd_entity_name,formd_filing_date,formd_offering_amount,formd_accession,match_score')
+              .eq('match_score', 1)
+              .in('adv_fund_name', batch);
+
+            if (crossRefError) {
+              console.error('[ADV Search] Cross-reference batch error:', crossRefError.message);
+            } else if (matches) {
+              allMatches.push(...matches);
+            }
+          }
+
+          if (allMatches.length > 0) {
             // Build map from adv_fund_name to match data (keep best match per fund)
-            matches.forEach(match => {
+            allMatches.forEach(match => {
               const key = match.adv_fund_name;
               if (!crossRefMap[key] || (match.match_score > (crossRefMap[key].match_score || 0))) {
                 crossRefMap[key] = match;
               }
             });
-            console.log(`[ADV Search] Direct lookup found ${matches.length} Form D matches for ${fundNames.length} funds, linked ${Object.keys(crossRefMap).length} unique`);
+            console.log(`[ADV Search] Direct lookup found ${allMatches.length} Form D matches for ${fundNames.length} funds, linked ${Object.keys(crossRefMap).length} unique`);
           } else {
             console.log(`[ADV Search] No Form D matches found for ${fundNames.length} funds`);
           }
