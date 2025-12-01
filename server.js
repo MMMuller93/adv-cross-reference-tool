@@ -6,15 +6,8 @@ const path = require('path');
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public', {
-  setHeaders: (res, path) => {
-    if (path.endsWith('.js') || path.endsWith('.html')) {
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    }
-  }
-}));
 
-// Supabase clients (same as original)
+// Supabase clients (needed for redirects)
 const advClient = createClient(
   'https://ezuqwwffjgfzymqxsctq.supabase.co',
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6dXF3d2ZmamdmenltcXhzY3RxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMzMjY0NDAsImV4cCI6MjA3ODkwMjQ0MH0.RGMhIb7yMXmOQpysiPgazxJzflGKNCdzRZ8XBgPDCAE'
@@ -24,6 +17,42 @@ const formdClient = createClient(
   'https://ltdalxkhbbhmkimmogyq.supabase.co',
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0ZGFseGtoYmJobWtpbW1vZ3lxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1OTg3NTMsImV4cCI6MjA3NTE3NDc1M30.TS9uNMRqPKcthHCSMKAcFfhFEP-7Q6XbDHQNujBDOtc'
 );
+
+// SEO slug utility (used in redirects)
+function generateSlug(name) {
+  if (!name) return '';
+  return name.toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .substring(0, 80);
+}
+
+// 301 redirects from old query param URLs to new SEO URLs (MUST be before static middleware)
+app.get('/', async (req, res, next) => {
+  if (req.query.adviser) {
+    const crd = req.query.adviser;
+    try {
+      const { data } = await advClient
+        .from('advisers_enriched')
+        .select('adviser_name')
+        .eq('crd', crd)
+        .single();
+      const slug = data ? `${crd}-${generateSlug(data.adviser_name)}` : crd;
+      return res.redirect(301, `/adviser/${slug}`);
+    } catch (e) {
+      return res.redirect(301, `/adviser/${crd}`);
+    }
+  }
+  next();
+});
+
+app.use(express.static('public', {
+  setHeaders: (res, path) => {
+    if (path.endsWith('.js') || path.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+  }
+}));
 
 // Helper functions
 function normalizeName(name) {
@@ -288,7 +317,7 @@ app.get('/api/funds/adv', async (req, res) => {
         try {
           // DIRECT LOOKUP: Query cross_reference_matches by exact fund names
           // Only return exact matches (match_score = 1.0) to filter out old fuzzy matches
-          // NOTE: Table only has formd_offering_amount (not formd_amount_sold or formd_indefinite)
+          // Query only columns that exist in cross_reference_matches table
           const { data: matches, error: crossRefError } = await formdClient
             .from('cross_reference_matches')
             .select('adv_fund_name,formd_entity_name,formd_filing_date,formd_offering_amount,formd_accession,match_score')
@@ -323,7 +352,7 @@ app.get('/api/funds/adv', async (req, res) => {
         ...fund,
         source: 'adv',
         // Add Form D data from pre-computed cross-reference matches
-        // NOTE: cross_reference_matches only has formd_offering_amount (not amount_sold or indefinite)
+        // Note: Only using columns that exist in cross_reference_matches table
         form_d_entity_name: crossRef?.formd_entity_name || null,
         form_d_filing_date: crossRef?.formd_filing_date || null,
         form_d_offering_amount: crossRef?.formd_offering_amount || null,
@@ -1053,6 +1082,19 @@ app.get('/api/managers/:managerId/portfolio', async (req, res) => {
       error: error.message
     });
   }
+});
+
+// ============================================
+// SEO-FRIENDLY URL ROUTES
+// ============================================
+// SEO routes - serve index.html for client-side routing
+// Format: /adviser/{crd}-{slug} or /fund/{id}-{slug}
+app.get('/adviser/:slug', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.get('/fund/:slug', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 const PORT = process.env.PORT || 3009;

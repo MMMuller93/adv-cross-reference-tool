@@ -113,6 +113,39 @@ const incrementSearchCount = () => {
 const getRemainingSearches = () => SEARCH_LIMIT - getSearchCount();
 
 // ============================================================================
+// SEO URL UTILITIES
+// ============================================================================
+const generateSlug = (name) => {
+  if (!name) return '';
+  return name.toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .substring(0, 80);
+};
+
+const parseIdFromSlug = (slug) => {
+  const match = slug.match(/^(\d+)-/);
+  return match ? match[1] : slug;
+};
+
+const getAdviserUrl = (crd, name) => `/adviser/${crd}-${generateSlug(name)}`;
+const getFundUrl = (fundId, name) => `/fund/${fundId || 'f'}-${generateSlug(name)}`;
+
+// Parse SEO-friendly path URLs: /adviser/{crd}-{slug} or /fund/{id}-{slug}
+const parseSEOPath = () => {
+  const path = window.location.pathname;
+  const adviserMatch = path.match(/^\/adviser\/(.+)$/);
+  if (adviserMatch) {
+    return { type: 'adviser', id: parseIdFromSlug(adviserMatch[1]) };
+  }
+  const fundMatch = path.match(/^\/fund\/(.+)$/);
+  if (fundMatch) {
+    return { type: 'fund', id: parseIdFromSlug(fundMatch[1]) };
+  }
+  return null;
+};
+
+// ============================================================================
 // URL STATE SERIALIZATION
 // ============================================================================
 // Read state from URL query parameters (for shareable links)
@@ -120,6 +153,7 @@ const getStateFromURL = () => {
   const params = new URLSearchParams(window.location.search);
   const sixMonthsAgo = new Date();
   sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  const seoPath = parseSEOPath();
 
   return {
     tab: params.get('tab') || 'advisers',
@@ -137,8 +171,10 @@ const getStateFromURL = () => {
     nmFundType: params.get('nmType') || '',
     nmState: params.get('nmState') || '',
     nmHasAdv: params.get('nmHasAdv') || '',
-    // Individual entity view
-    adviser: params.get('adviser') || ''
+    // Individual entity view (supports both old query param and new SEO path)
+    adviser: seoPath?.type === 'adviser' ? seoPath.id : (params.get('adviser') || ''),
+    fund: seoPath?.type === 'fund' ? seoPath.id : '',
+    seoPath: seoPath
   };
 };
 
@@ -1997,11 +2033,11 @@ const FundDetailView = ({ fund, onBack, onNavigateToAdviser }) => {
   const secEdgarUrl = effectiveCik ? `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${effectiveCik}&type=D&dateb=&owner=include&count=40` : null;
   const iapdUrl = fund.adviser_entity_crd ? `https://adviserinfo.sec.gov/firm/summary/${fund.adviser_entity_crd}` : null;
 
-  // Form D data (from match if available)
-  const formDOfferingAmount = fund.form_d_offering_amount || formDMatch?.totalamountsold || formDMatch?.totalofferingamount;
+  // Form D data (from cross-reference match or direct formDMatch fallback)
+  const formDOfferingAmount = fund.form_d_amount_sold || fund.form_d_offering_amount || formDMatch?.totalamountsold || formDMatch?.totalofferingamount;
   const formDFilingDate = fund.form_d_filing_date || formDMatch?.filing_date;
   const formDExemptions = fund.form_d_exemptions || formDMatch?.federalexemptions_items_list;
-  const formDSaleDate = fund.first_sale_date || formDMatch?.sale_date;
+  const formDSaleDate = fund.form_d_sale_date || fund.first_sale_date || formDMatch?.sale_date;
 
   return (
     <div className="flex flex-col h-full bg-white overflow-y-auto custom-scrollbar">
@@ -2417,27 +2453,62 @@ function App() {
     });
   }, [activeTab, searchTerm, filters.state, filters.type, filters.exemption, filters.minAum, filters.maxAum, filters.strategy, filters.hasAdv, nmStartDate, nmEndDate, nmFundType, nmState, nmHasAdv, selectedAdviser]);
 
-  // Auto-load adviser from URL param on initial load
-  const urlAdviserLoadedRef = useRef(false);
+  // Auto-load adviser or fund from URL on initial load (supports SEO URLs)
+  const urlEntityLoadedRef = useRef(false);
   useEffect(() => {
-    const loadAdviserFromURL = async () => {
-      if (urlAdviserLoadedRef.current) return;
-      const adviserCrd = initialURLState.adviser;
-      if (!adviserCrd) return;
+    const loadEntityFromURL = async () => {
+      if (urlEntityLoadedRef.current) return;
+      urlEntityLoadedRef.current = true;
 
-      urlAdviserLoadedRef.current = true;
-      try {
-        const res = await fetch(`${SUPABASE_ADV_URL}/rest/v1/advisers_enriched?crd=eq.${adviserCrd}&select=*`, { headers: advHeaders });
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setSelectedAdviser(data[0]);
-          setView('adviser_detail');
+      // Handle adviser URL (/adviser/{crd}-{slug} or ?adviser={crd})
+      const adviserCrd = initialURLState.adviser;
+      if (adviserCrd) {
+        try {
+          const res = await fetch(`${SUPABASE_ADV_URL}/rest/v1/advisers_enriched?crd=eq.${adviserCrd}&select=*`, { headers: advHeaders });
+          const data = await res.json();
+          if (data && data.length > 0) {
+            setSelectedAdviser(data[0]);
+            setView('adviser_detail');
+          }
+        } catch (err) {
+          console.error('Error loading adviser from URL:', err);
         }
-      } catch (err) {
-        console.error('Error loading adviser from URL:', err);
+        return;
+      }
+
+      // Handle fund URL (/fund/{id}-{slug})
+      const fundId = initialURLState.fund;
+      if (fundId) {
+        try {
+          // Try to load fund by reference_id
+          const res = await fetch(`${SUPABASE_ADV_URL}/rest/v1/funds_enriched?reference_id=eq.${fundId}&select=*`, { headers: advHeaders });
+          const data = await res.json();
+          if (data && data.length > 0) {
+            setSelectedFund(data[0]);
+            setView('fund_detail');
+          }
+        } catch (err) {
+          console.error('Error loading fund from URL:', err);
+        }
       }
     };
-    loadAdviserFromURL();
+    loadEntityFromURL();
+  }, []);
+
+  // Handle browser back/forward buttons
+  useEffect(() => {
+    const handlePopState = () => {
+      const seoPath = parseSEOPath();
+      if (!seoPath) {
+        // Back to dashboard
+        setView('dashboard');
+        setSelectedAdviser(null);
+        setSelectedFund(null);
+      }
+      // For SEO paths, page will reload and initialURLState handles it
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   // Auth handlers
@@ -3160,6 +3231,17 @@ function App() {
       // Only update if this is still the latest request
       if (myVersion === searchVersionRef.current.funds) {
         console.log('[searchFunds] Setting funds state with', finalFunds.length, 'funds, version:', myVersion);
+        // DEBUG: Log first fund's Form D data
+        if (finalFunds.length > 0) {
+          const f = finalFunds[0];
+          console.log('[DEBUG] First fund Form D data:', {
+            name: f.fund_name,
+            form_d_offering_amount: f.form_d_offering_amount,
+            form_d_filing_date: f.form_d_filing_date,
+            form_d_entity_name: f.form_d_entity_name,
+            has_form_d_match: f.has_form_d_match
+          });
+        }
         setFunds(finalFunds);
         setLoading(false);
       } else {
@@ -3401,12 +3483,19 @@ function App() {
       const data = await res.json();
       if (data && data.length > 0) {
         setSelectedAdviser(data[0]);
+        // Update URL to SEO-friendly format
+        const url = getAdviserUrl(data[0].crd, data[0].adviser_name || data[0].adviser_entity_legal_name);
+        window.history.pushState({}, '', url);
       } else {
-        setSelectedAdviser(adviser); // Fallback to list data
+        setSelectedAdviser(adviser);
+        const url = getAdviserUrl(adviser.crd, adviser.adviser_name || adviser.adviser_entity_legal_name);
+        window.history.pushState({}, '', url);
       }
     } catch (err) {
       console.error('Error fetching adviser details:', err);
       setSelectedAdviser(adviser);
+      const url = getAdviserUrl(adviser.crd, adviser.adviser_name || adviser.adviser_entity_legal_name);
+      window.history.pushState({}, '', url);
     }
     setView('adviser_detail');
   };
@@ -3414,6 +3503,9 @@ function App() {
   // Navigate to fund detail
   const handleFundClick = (fund) => {
     setSelectedFund(fund);
+    // Update URL to SEO-friendly format
+    const url = getFundUrl(fund.reference_id || fund.fund_id, fund.fund_name);
+    window.history.pushState({}, '', url);
     setView('fund_detail');
   };
 
@@ -3422,6 +3514,8 @@ function App() {
     setView('dashboard');
     setSelectedAdviser(null);
     setSelectedFund(null);
+    // Reset URL to home
+    window.history.pushState({}, '', '/');
   };
 
   // Reset filters
@@ -3451,6 +3545,9 @@ function App() {
       const data = await res.json();
       if (data && data.length > 0) {
         setSelectedAdviser(data[0]);
+        // Update URL to SEO-friendly format
+        const url = getAdviserUrl(data[0].crd, data[0].adviser_name || data[0].adviser_entity_legal_name);
+        window.history.pushState({}, '', url);
         setView('adviser_detail');
       }
     } catch (err) {
