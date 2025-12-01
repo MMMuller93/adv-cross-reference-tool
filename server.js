@@ -3,17 +3,25 @@ const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const path = require('path');
 
-// Stripe setup
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY; // Set in Railway environment variables
+// Stripe setup - only initialize if key is present
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
-const STRIPE_PRICE_ID = process.env.STRIPE_PRICE_ID || ''; // Set this after creating price in Stripe
-const stripe = require('stripe')(STRIPE_SECRET_KEY);
+const STRIPE_PRICE_ID = process.env.STRIPE_PRICE_ID || '';
+const stripe = STRIPE_SECRET_KEY ? require('stripe')(STRIPE_SECRET_KEY) : null;
+
+if (!STRIPE_SECRET_KEY) {
+  console.warn('[Stripe] STRIPE_SECRET_KEY not set - billing features disabled');
+}
 
 const app = express();
 app.use(cors());
 
 // Stripe webhook needs raw body - must be before express.json()
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  if (!stripe) {
+    return res.status(503).json({ error: 'Billing not configured' });
+  }
+
   const sig = req.headers['stripe-signature'];
   let event;
 
@@ -51,6 +59,10 @@ app.use(express.json());
 
 // Stripe: Create checkout session for $30/month subscription
 app.post('/api/stripe/create-checkout', async (req, res) => {
+  if (!stripe) {
+    return res.status(503).json({ error: 'Billing not configured' });
+  }
+
   try {
     const { email, successUrl, cancelUrl } = req.body;
 
@@ -103,6 +115,10 @@ app.post('/api/stripe/create-checkout', async (req, res) => {
 
 // Stripe: Check subscription status by email
 app.get('/api/stripe/subscription-status', async (req, res) => {
+  if (!stripe) {
+    return res.json({ hasSubscription: false });
+  }
+
   try {
     const { email } = req.query;
 
@@ -139,6 +155,10 @@ app.get('/api/stripe/subscription-status', async (req, res) => {
 
 // Stripe: Create customer portal session (for managing subscription)
 app.post('/api/stripe/customer-portal', async (req, res) => {
+  if (!stripe) {
+    return res.status(503).json({ error: 'Billing not configured' });
+  }
+
   try {
     const { email } = req.body;
 
@@ -547,6 +567,9 @@ app.get('/api/funds/adv', async (req, res) => {
         form_d_match_score: crossRef?.match_score || null,
         form_d_related_names: crossRef?.related_names || null,
         form_d_related_roles: crossRef?.related_roles || null,
+        // Also include without prefix for frontend compatibility
+        related_names: crossRef?.related_names || null,
+        related_roles: crossRef?.related_roles || null,
         has_form_d_match: !!crossRef
       };
     });
