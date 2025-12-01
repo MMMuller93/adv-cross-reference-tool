@@ -619,7 +619,7 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-white font-serif">Upgrade to Professional</h2>
-                <p className="text-slate-300 text-xs mt-0.5">Unlock unlimited searches</p>
+                <p className="text-slate-300 text-xs mt-0.5">Paid subscription required for this feature</p>
               </div>
             </div>
             <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
@@ -629,10 +629,33 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
         </div>
 
         <div className="p-6">
-          {/* Pricing */}
-          <div className="text-center mb-6">
-            <div className="text-4xl font-bold text-gray-900">$30<span className="text-lg font-normal text-gray-500">/month</span></div>
-            <p className="text-sm text-gray-500 mt-1">Cancel anytime</p>
+          {/* Feature Grid - Professional Features */}
+          <div className="grid grid-cols-2 gap-3 mb-6">
+            <div className="bg-slate-50 rounded-lg p-4 border border-slate-100">
+              <div className="w-8 h-8 bg-slate-200 rounded-lg flex items-center justify-center mb-2">
+                <TrendingUpIcon className="w-4 h-4 text-slate-700" />
+              </div>
+              <h3 className="text-sm font-semibold text-gray-900 mb-1">New Managers</h3>
+              <p className="text-xs text-gray-500 leading-relaxed">Identify emerging fund managers</p>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-4 border border-slate-100">
+              <div className="w-8 h-8 bg-slate-200 rounded-lg flex items-center justify-center mb-2">
+                <FileWarningIcon className="w-4 h-4 text-slate-700" />
+              </div>
+              <h3 className="text-sm font-semibold text-gray-900 mb-1">Intelligence Radar</h3>
+              <p className="text-xs text-gray-500 leading-relaxed">Cross-reference ADV and Form D for compliance insights</p>
+            </div>
+          </div>
+
+          {/* Professional Contact */}
+          <div className="bg-slate-50 rounded-lg p-4 mb-4 border border-slate-200">
+            <div className="text-center">
+              <div className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Professional Access</div>
+              <p className="text-sm text-gray-600">Contact us for pricing and enterprise options</p>
+              <a href="mailto:contact@strategicfundpartners.com" className="text-sm font-medium text-slate-800 hover:text-slate-600 mt-1 inline-block">
+                contact@strategicfundpartners.com
+              </a>
+            </div>
           </div>
 
           {/* Benefits List */}
@@ -640,9 +663,11 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
             <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">What's Included</div>
             <div className="grid grid-cols-2 gap-2">
               {[
+                'New Managers Discovery',
+                'Intelligence Radar',
                 'Unlimited searches',
-                'No daily limits',
                 'CSV & JSON exports',
+                'Saved search alerts',
                 'Priority support'
               ].map((feature, i) => (
                 <div key={i} className="flex items-center gap-2 text-xs text-gray-700">
@@ -651,14 +676,6 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
                 </div>
               ))}
             </div>
-          </div>
-
-          {/* Premium Features Note */}
-          <div className="bg-amber-50 rounded-lg p-3 mb-6 border border-amber-200">
-            <p className="text-xs text-amber-800">
-              <strong>Note:</strong> New Managers & Intelligence Radar require separate Professional access.{' '}
-              <a href="mailto:contact@strategicfundpartners.com" className="underline">Contact us</a> for pricing.
-            </p>
           </div>
 
           {error && (
@@ -674,21 +691,27 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
                 onClick={() => { onClose(); onOpenAuth('signup'); }}
                 className="w-full py-3 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors text-sm"
               >
-                Create Account to Subscribe
+                Create Free Account
               </button>
               <button
                 onClick={() => { onClose(); onOpenAuth('login'); }}
                 className="w-full py-2.5 border border-gray-200 text-gray-600 rounded-lg font-medium hover:bg-gray-50 transition-colors text-sm"
               >
-                Already have an account? Sign In
+                Already have access? Sign In
               </button>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2">
+              <a
+                href="mailto:contact@strategicfundpartners.com?subject=Professional%20Access%20Request&body=Hi%2C%0A%0AI%27m%20interested%20in%20Professional%20access%20to%20Private%20Fund%20Radar.%0A%0AName%3A%20%0ACompany%3A%20%0AUse%20Case%3A%20%0A%0APlease%20let%20me%20know%20the%20pricing%20and%20next%20steps.%0A%0AThank%20you!"
+                className="w-full py-3 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors text-sm flex items-center justify-center gap-2"
+              >
+                Request Professional Access
+              </a>
               <button
                 onClick={handleSubscribe}
                 disabled={loading}
-                className="w-full py-3 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors text-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 transition-colors text-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (
                   <>
@@ -699,11 +722,11 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
                     Processing...
                   </>
                 ) : (
-                  'Subscribe for $30/month'
+                  'Get Unlimited Searches — $30/mo'
                 )}
               </button>
-              <p className="text-center text-xs text-gray-500">
-                Secure payment via Stripe
+              <p className="text-center text-xs text-gray-400 mt-1">
+                Our team responds within 24 hours
               </p>
             </div>
           )}
@@ -837,7 +860,7 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, user, hasPremiumAccess, onL
                   className="w-full py-2.5 px-4 bg-slate-800 text-white rounded-md font-medium hover:bg-slate-700 transition-colors text-sm flex items-center justify-center gap-2"
                 >
                   <TrendingUpIcon className="w-4 h-4" />
-                  Upgrade to Professional — $30/mo
+                  Upgrade to Professional
                 </button>
               )}
               <button
