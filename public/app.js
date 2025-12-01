@@ -723,7 +723,7 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
 // ============================================================================
 // AUTH MODAL COMPONENT
 // ============================================================================
-const AuthModal = ({ isOpen, onClose, mode, setMode, user, hasPremiumAccess, onLogout }) => {
+const AuthModal = ({ isOpen, onClose, mode, setMode, user, hasPremiumAccess, onLogout, onShowPaywall }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -832,13 +832,13 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, user, hasPremiumAccess, onL
             {/* Account Actions */}
             <div className="space-y-2">
               {!hasPremiumAccess && (
-                <a
-                  href="mailto:contact@strategicfundpartners.com?subject=Professional%20Access%20Request&body=Hi%2C%0A%0AI%27m%20interested%20in%20Professional%20access%20to%20Private%20Fund%20Radar.%0A%0AName%3A%20%0ACompany%3A%20%0AUse%20Case%3A%20%0A%0APlease%20let%20me%20know%20the%20pricing%20and%20next%20steps.%0A%0AThank%20you!"
+                <button
+                  onClick={() => { onClose(); onShowPaywall && onShowPaywall(); }}
                   className="w-full py-2.5 px-4 bg-slate-800 text-white rounded-md font-medium hover:bg-slate-700 transition-colors text-sm flex items-center justify-center gap-2"
                 >
                   <TrendingUpIcon className="w-4 h-4" />
-                  Upgrade to Professional
-                </a>
+                  Upgrade to Professional — $30/mo
+                </button>
               )}
               <button
                 onClick={handleLogout}
@@ -3631,6 +3631,7 @@ function App() {
         user={user}
         hasPremiumAccess={hasPremiumAccess}
         onLogout={handleLogout}
+        onShowPaywall={() => setShowPaywallModal(true)}
       />
 
       {/* Paywall Modal */}
