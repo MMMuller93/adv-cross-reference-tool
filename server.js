@@ -344,6 +344,32 @@ app.get('/api/funds/adv', async (req, res) => {
                 crossRefMap[key] = match;
               }
             });
+
+            // Fetch related_names from form_d_filings using accession numbers
+            const accessions = [...new Set(allMatches.map(m => m.formd_accession).filter(Boolean))];
+            if (accessions.length > 0) {
+              const relatedMap = {};
+              for (let i = 0; i < accessions.length; i += BATCH_SIZE) {
+                const batch = accessions.slice(i, i + BATCH_SIZE);
+                const { data: filings } = await formdClient
+                  .from('form_d_filings')
+                  .select('accessionnumber,related_names,related_roles')
+                  .in('accessionnumber', batch);
+                if (filings) {
+                  filings.forEach(f => {
+                    relatedMap[f.accessionnumber] = { related_names: f.related_names, related_roles: f.related_roles };
+                  });
+                }
+              }
+              // Add related_names to crossRefMap
+              Object.values(crossRefMap).forEach(match => {
+                if (match.formd_accession && relatedMap[match.formd_accession]) {
+                  match.related_names = relatedMap[match.formd_accession].related_names;
+                  match.related_roles = relatedMap[match.formd_accession].related_roles;
+                }
+              });
+            }
+
             console.log(`[ADV Search] Direct lookup found ${allMatches.length} Form D matches for ${fundNames.length} funds, linked ${Object.keys(crossRefMap).length} unique`);
           } else {
             console.log(`[ADV Search] No Form D matches found for ${fundNames.length} funds`);
@@ -362,12 +388,13 @@ app.get('/api/funds/adv', async (req, res) => {
         ...fund,
         source: 'adv',
         // Add Form D data from pre-computed cross-reference matches
-        // Note: Only using columns that exist in cross_reference_matches table
         form_d_entity_name: crossRef?.formd_entity_name || null,
         form_d_filing_date: crossRef?.formd_filing_date || null,
         form_d_offering_amount: crossRef?.formd_offering_amount || null,
         form_d_accession: crossRef?.formd_accession || null,
         form_d_match_score: crossRef?.match_score || null,
+        form_d_related_names: crossRef?.related_names || null,
+        form_d_related_roles: crossRef?.related_roles || null,
         has_form_d_match: !!crossRef
       };
     });
