@@ -3,9 +3,161 @@ const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const path = require('path');
 
+// Stripe setup
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY; // Set in Railway environment variables
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
+const STRIPE_PRICE_ID = process.env.STRIPE_PRICE_ID || ''; // Set this after creating price in Stripe
+const stripe = require('stripe')(STRIPE_SECRET_KEY);
+
 const app = express();
 app.use(cors());
+
+// Stripe webhook needs raw body - must be before express.json()
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+
+  try {
+    if (STRIPE_WEBHOOK_SECRET) {
+      event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
+    } else {
+      event = JSON.parse(req.body);
+    }
+  } catch (err) {
+    console.error('[Stripe Webhook] Signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  console.log('[Stripe Webhook] Event:', event.type);
+
+  // Handle subscription events
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    const customerEmail = session.customer_email || session.customer_details?.email;
+    console.log('[Stripe] Checkout completed for:', customerEmail);
+    // Store subscription in Supabase user metadata or subscriptions table
+    // For now, we'll check Stripe directly for subscription status
+  }
+
+  if (event.type === 'customer.subscription.deleted') {
+    const subscription = event.data.object;
+    console.log('[Stripe] Subscription cancelled:', subscription.id);
+  }
+
+  res.json({ received: true });
+});
+
 app.use(express.json());
+
+// Stripe: Create checkout session for $30/month subscription
+app.post('/api/stripe/create-checkout', async (req, res) => {
+  try {
+    const { email, successUrl, cancelUrl } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email required' });
+    }
+
+    // Check if customer already exists
+    const customers = await stripe.customers.list({ email, limit: 1 });
+    let customerId;
+
+    if (customers.data.length > 0) {
+      customerId = customers.data[0].id;
+      // Check if they already have an active subscription
+      const subs = await stripe.subscriptions.list({ customer: customerId, status: 'active', limit: 1 });
+      if (subs.data.length > 0) {
+        return res.status(400).json({ error: 'Already subscribed', subscriptionId: subs.data[0].id });
+      }
+    }
+
+    const baseUrl = successUrl?.split('?')[0]?.replace('/success', '') || 'https://privatemarket.info';
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      customer: customerId,
+      customer_email: customerId ? undefined : email,
+      line_items: [{
+        price_data: {
+          currency: 'usd',
+          product_data: {
+            name: 'Private Markets Premium',
+            description: 'Unlimited searches on Private Markets Intelligence Platform',
+          },
+          unit_amount: 3000, // $30.00
+          recurring: { interval: 'month' },
+        },
+        quantity: 1,
+      }],
+      success_url: `${baseUrl}?subscription=success`,
+      cancel_url: `${baseUrl}?subscription=cancelled`,
+    });
+
+    console.log('[Stripe] Checkout session created for:', email);
+    res.json({ url: session.url, sessionId: session.id });
+  } catch (err) {
+    console.error('[Stripe] Checkout error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Stripe: Check subscription status by email
+app.get('/api/stripe/subscription-status', async (req, res) => {
+  try {
+    const { email } = req.query;
+
+    if (!email) {
+      return res.json({ hasSubscription: false });
+    }
+
+    const customers = await stripe.customers.list({ email, limit: 1 });
+
+    if (customers.data.length === 0) {
+      return res.json({ hasSubscription: false });
+    }
+
+    const subs = await stripe.subscriptions.list({
+      customer: customers.data[0].id,
+      status: 'active',
+      limit: 1
+    });
+
+    const hasSubscription = subs.data.length > 0;
+    const subscription = hasSubscription ? {
+      id: subs.data[0].id,
+      status: subs.data[0].status,
+      currentPeriodEnd: subs.data[0].current_period_end,
+    } : null;
+
+    console.log('[Stripe] Subscription check for', email, ':', hasSubscription);
+    res.json({ hasSubscription, subscription });
+  } catch (err) {
+    console.error('[Stripe] Subscription check error:', err.message);
+    res.json({ hasSubscription: false, error: err.message });
+  }
+});
+
+// Stripe: Create customer portal session (for managing subscription)
+app.post('/api/stripe/customer-portal', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const customers = await stripe.customers.list({ email, limit: 1 });
+    if (customers.data.length === 0) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    const session = await stripe.billingPortal.sessions.create({
+      customer: customers.data[0].id,
+      return_url: req.body.returnUrl || 'https://privatemarket.info',
+    });
+
+    res.json({ url: session.url });
+  } catch (err) {
+    console.error('[Stripe] Portal error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Supabase clients (needed for redirects)
 const advClient = createClient(

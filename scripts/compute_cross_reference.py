@@ -38,8 +38,6 @@ def normalize_name_for_match(name):
     2. Punctuation: Remove commas, periods, quotes, parens, hyphens, slashes
        - "FUND, L.P." → "FUND L P"
     3. Whitespace: Collapse multiple spaces → single space
-    3.5. Leading "THE": Remove "THE " prefix (ADV uses "THE FOUNDERS FUND" but Form D uses "Founders Fund")
-       - "THE FOUNDERS FUND VIII" → "FOUNDERS FUND VIII"
     4. Entity suffixes: Remove trailing LLC, LP, L P, L L C, INC, LTD, etc.
        - "TIGER FUND LP" → "TIGER FUND"
        - "TIGER FUND L P" → "TIGER FUND" (handles "L.P." → "L P" after punctuation removal)
@@ -74,10 +72,6 @@ def normalize_name_for_match(name):
 
     # 3. Collapse whitespace
     normalized = re.sub(r'\s+', ' ', normalized).strip()
-
-    # 3.5. Remove leading "THE " prefix (ADV uses "THE FOUNDERS FUND" but Form D uses "Founders Fund")
-    if normalized.startswith('THE '):
-        normalized = normalized[4:]
 
     # 4. Remove suffix WORDS at the end (handles "L P" from "L.P.", "L L C" from "L.L.C.")
     # Process multiple times to handle compound suffixes

@@ -558,6 +558,50 @@ const CheckIcon = (p) => <Icon {...p}><path d="M20 6 9 17l-5-5"/></Icon>;
 // PAYWALL MODAL COMPONENT
 // ============================================================================
 const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
+
+  const handleSubscribe = async () => {
+    if (!user?.email) {
+      onClose();
+      onOpenAuth('signup');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/stripe/create-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: user.email,
+          successUrl: window.location.href,
+          cancelUrl: window.location.href,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.error === 'Already subscribed') {
+        setError('You already have an active subscription!');
+        setLoading(false);
+        return;
+      }
+
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setError(data.error || 'Failed to create checkout session');
+        setLoading(false);
+      }
+    } catch (err) {
+      setError('Failed to connect to payment system');
+      setLoading(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -575,7 +619,7 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-white font-serif">Upgrade to Professional</h2>
-                <p className="text-slate-300 text-xs mt-0.5">Paid subscription required for this feature</p>
+                <p className="text-slate-300 text-xs mt-0.5">Unlock unlimited searches</p>
               </div>
             </div>
             <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
@@ -585,33 +629,10 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
         </div>
 
         <div className="p-6">
-          {/* Feature Grid */}
-          <div className="grid grid-cols-2 gap-3 mb-6">
-            <div className="bg-slate-50 rounded-lg p-4 border border-slate-100">
-              <div className="w-8 h-8 bg-slate-200 rounded-lg flex items-center justify-center mb-2">
-                <TrendingUpIcon className="w-4 h-4 text-slate-700" />
-              </div>
-              <h3 className="text-sm font-semibold text-gray-900 mb-1">New Managers</h3>
-              <p className="text-xs text-gray-500 leading-relaxed">Identify emerging fund managers</p>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-4 border border-slate-100">
-              <div className="w-8 h-8 bg-slate-200 rounded-lg flex items-center justify-center mb-2">
-                <FileWarningIcon className="w-4 h-4 text-slate-700" />
-              </div>
-              <h3 className="text-sm font-semibold text-gray-900 mb-1">Intelligence Radar</h3>
-              <p className="text-xs text-gray-500 leading-relaxed">Cross-reference ADV and Form D for compliance insights</p>
-            </div>
-          </div>
-
-          {/* Contact for Access */}
-          <div className="bg-slate-50 rounded-lg p-4 mb-4 border border-slate-200">
-            <div className="text-center">
-              <div className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Professional Access</div>
-              <p className="text-sm text-gray-600">Contact us for pricing and enterprise options</p>
-              <a href="mailto:contact@strategicfundpartners.com" className="text-sm font-medium text-slate-800 hover:text-slate-600 mt-1 inline-block">
-                contact@strategicfundpartners.com
-              </a>
-            </div>
+          {/* Pricing */}
+          <div className="text-center mb-6">
+            <div className="text-4xl font-bold text-gray-900">$30<span className="text-lg font-normal text-gray-500">/month</span></div>
+            <p className="text-sm text-gray-500 mt-1">Cancel anytime</p>
           </div>
 
           {/* Benefits List */}
@@ -619,11 +640,9 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
             <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">What's Included</div>
             <div className="grid grid-cols-2 gap-2">
               {[
-                'New Managers Discovery',
-                'Intelligence Radar',
                 'Unlimited searches',
+                'No daily limits',
                 'CSV & JSON exports',
-                'Saved search alerts',
                 'Priority support'
               ].map((feature, i) => (
                 <div key={i} className="flex items-center gap-2 text-xs text-gray-700">
@@ -634,6 +653,20 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
             </div>
           </div>
 
+          {/* Premium Features Note */}
+          <div className="bg-amber-50 rounded-lg p-3 mb-6 border border-amber-200">
+            <p className="text-xs text-amber-800">
+              <strong>Note:</strong> New Managers & Intelligence Radar require separate Professional access.{' '}
+              <a href="mailto:contact@strategicfundpartners.com" className="underline">Contact us</a> for pricing.
+            </p>
+          </div>
+
+          {error && (
+            <div className="bg-red-50 text-red-700 text-sm p-3 rounded-lg mb-4">
+              {error}
+            </div>
+          )}
+
           {/* CTA Buttons */}
           {!user ? (
             <div className="space-y-2">
@@ -641,25 +674,36 @@ const PaywallModal = ({ isOpen, onClose, onOpenAuth, user }) => {
                 onClick={() => { onClose(); onOpenAuth('signup'); }}
                 className="w-full py-3 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors text-sm"
               >
-                Create Free Account
+                Create Account to Subscribe
               </button>
               <button
                 onClick={() => { onClose(); onOpenAuth('login'); }}
                 className="w-full py-2.5 border border-gray-200 text-gray-600 rounded-lg font-medium hover:bg-gray-50 transition-colors text-sm"
               >
-                Already have access? Sign In
+                Already have an account? Sign In
               </button>
             </div>
           ) : (
             <div className="space-y-3">
-              <a
-                href="mailto:contact@strategicfundpartners.com?subject=Professional%20Access%20Request&body=Hi%2C%0A%0AI%27m%20interested%20in%20Professional%20access%20to%20Private%20Fund%20Radar.%0A%0AName%3A%20%0ACompany%3A%20%0AUse%20Case%3A%20%0A%0APlease%20let%20me%20know%20the%20pricing%20and%20next%20steps.%0A%0AThank%20you!"
-                className="w-full py-3 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors text-sm flex items-center justify-center gap-2"
+              <button
+                onClick={handleSubscribe}
+                disabled={loading}
+                className="w-full py-3 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors text-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Request Access
-              </a>
+                {loading ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Processing...
+                  </>
+                ) : (
+                  'Subscribe for $30/month'
+                )}
+              </button>
               <p className="text-center text-xs text-gray-500">
-                Our team will respond within 24 hours
+                Secure payment via Stripe
               </p>
             </div>
           )}
@@ -2423,13 +2467,32 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Check premium access when user changes
+  // Check premium access when user changes (via Stripe subscription)
   useEffect(() => {
-    if (user?.email && PREMIUM_USERS.includes(user.email.toLowerCase())) {
-      setHasPremiumAccess(true);
-    } else {
-      setHasPremiumAccess(false);
-    }
+    const checkSubscription = async () => {
+      // Whitelist for admins
+      if (user?.email && PREMIUM_USERS.includes(user.email.toLowerCase())) {
+        setHasPremiumAccess(true);
+        return;
+      }
+
+      if (!user?.email) {
+        setHasPremiumAccess(false);
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/stripe/subscription-status?email=${encodeURIComponent(user.email)}`);
+        const data = await response.json();
+        setHasPremiumAccess(data.hasSubscription);
+        console.log('[Stripe] Subscription status:', data.hasSubscription);
+      } catch (err) {
+        console.error('[Stripe] Error checking subscription:', err);
+        setHasPremiumAccess(false);
+      }
+    };
+
+    checkSubscription();
   }, [user]);
 
   // Sync state to URL (for shareable links)
