@@ -2005,7 +2005,11 @@ const AdviserDetailView = ({ adviser, onBack, onNavigateToFund }) => {
                           </span>
                         </td>
                         <td className="px-3 py-3">
-                          <span className="text-[11px] text-slate-600">{fund.fund_type || 'HF'}</span>
+                          <div className="flex flex-wrap items-center gap-1">
+                            {fund.exclusion_3c1 === 'Y' && <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[9px] font-semibold">3(c)(1)</span>}
+                            {fund.exclusion_3c7 === 'Y' && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[9px] font-semibold">3(c)(7)</span>}
+                            {fund.exclusion_3c1 !== 'Y' && fund.exclusion_3c7 !== 'Y' && <span className="text-[11px] text-slate-600">{fund.fund_type || 'HF'}</span>}
+                          </div>
                         </td>
                         <td className="px-3 py-3">
                           <ChevronRightIcon className="w-4 h-4 text-slate-300 group-hover:text-slate-500 transition-colors" />
@@ -2859,7 +2863,7 @@ function App() {
     setShowExportMenu(false);
   };
 
-  // Helper: Get primary fund type from manager's funds
+  // Helper: Get primary fund type from manager's funds (Form D data only for consistent naming)
   const getPrimaryFundType = (manager) => {
     if (!manager.funds || manager.funds.length === 0) return null;
     const types = manager.funds.map(f => f.investmentfundtype).filter(Boolean);
@@ -3918,12 +3922,19 @@ function App() {
                                 </div>
                               </td>
                               <td className="px-3 py-2.5">
-                                <div className="text-[11px] text-gray-700">{fund.fund_type || fund.investment_fund_type || '—'}</div>
-                                <div className="flex gap-1 mt-0.5">
-                                  {fund.exclusion_3c1 === 'Y' && <span className="px-1.5 py-0.5 text-[9px] rounded font-semibold bg-slate-100 text-slate-700">3(c)(1)</span>}
-                                  {fund.exclusion_3c7 === 'Y' && <span className="px-1.5 py-0.5 text-[9px] rounded font-semibold bg-slate-100 text-slate-700">3(c)(7)</span>}
-                                </div>
-                                {fund.federal_exemptions && <div className="text-[9px] text-gray-400 truncate max-w-[80px]" title={formatExemptions(fund.federal_exemptions)}>{formatExemptions(fund.federal_exemptions)}</div>}
+                                {(() => {
+                                  // Check both ADV fields (exclusion_3c1/3c7) and Form D field (federal_exemptions containing "3C.1" or "3C.7")
+                                  const exemptions = fund.federal_exemptions || '';
+                                  const has3c1 = fund.exclusion_3c1 === 'Y' || /3C\.?1\b/i.test(exemptions);
+                                  const has3c7 = fund.exclusion_3c7 === 'Y' || /3C\.?7\b/i.test(exemptions);
+                                  return (
+                                    <div className="flex flex-wrap items-center gap-1">
+                                      {has3c1 && <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[9px] font-semibold">3(c)(1)</span>}
+                                      {has3c7 && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[9px] font-semibold">3(c)(7)</span>}
+                                      {!has3c1 && !has3c7 && <span className="text-[11px] text-gray-700">{fund.fund_type || fund.investment_fund_type || '—'}</span>}
+                                    </div>
+                                  );
+                                })()}
                               </td>
                               <td className="px-3 py-2.5">
                                 {fund.adviser_entity_legal_name && fund.adviser_entity_crd ? (
@@ -4244,14 +4255,6 @@ function App() {
                                                   <div className="text-gray-900 font-mono">{formatCurrency(manager.adv_data.aum)}</div>
                                                 </div>
                                               )}
-                                              {manager.adv_data.website && (
-                                                <div>
-                                                  <div className="text-gray-500">Website:</div>
-                                                  <a href={manager.adv_data.website} target="_blank" rel="noopener noreferrer" className="text-gray-700 hover:text-gray-900 hover:underline">
-                                                    {manager.adv_data.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
-                                                  </a>
-                                                </div>
-                                              )}
                                             </div>
                                           </div>
                                           <div className="flex gap-2">
@@ -4274,58 +4277,6 @@ function App() {
                                               <span>SEC IAPD</span>
                                               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                                             </a>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                )}
-                                {isExpanded && manager.enrichment_data && manager.enrichment_data.is_published && (
-                                  <tr className="bg-blue-50/50 border-l-2 border-blue-400">
-                                    <td colSpan="5" className="px-6 py-3">
-                                      <div className="ml-6">
-                                        <div className="flex items-start justify-between">
-                                          <div>
-                                            <div className="flex items-center gap-2 mb-2">
-                                              <span className="inline-flex items-center px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide rounded bg-blue-100 text-blue-700">
-                                                ✓ Enriched Data
-                                              </span>
-                                              {manager.enrichment_data.confidence && (
-                                                <span className="text-[10px] text-gray-500">
-                                                  {Math.round(manager.enrichment_data.confidence * 100)}% confidence
-                                                </span>
-                                              )}
-                                            </div>
-                                            <div className="grid grid-cols-4 gap-4 text-[11px]">
-                                              {manager.enrichment_data.fund_type && (
-                                                <div>
-                                                  <div className="text-gray-500">Fund Type:</div>
-                                                  <div className="text-gray-900 font-medium">{manager.enrichment_data.fund_type}</div>
-                                                </div>
-                                              )}
-                                              {manager.enrichment_data.investment_stage && (
-                                                <div>
-                                                  <div className="text-gray-500">Investment Stage:</div>
-                                                  <div className="text-gray-900">{manager.enrichment_data.investment_stage}</div>
-                                                </div>
-                                              )}
-                                              {manager.enrichment_data.website && (
-                                                <div>
-                                                  <div className="text-gray-500">Website:</div>
-                                                  <a href={manager.enrichment_data.website} target="_blank" rel="noopener noreferrer" className="text-gray-700 hover:text-gray-900 hover:underline">
-                                                    {manager.enrichment_data.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
-                                                  </a>
-                                                </div>
-                                              )}
-                                              {manager.enrichment_data.linkedin && (
-                                                <div>
-                                                  <div className="text-gray-500">LinkedIn:</div>
-                                                  <a href={manager.enrichment_data.linkedin} target="_blank" rel="noopener noreferrer" className="text-gray-700 hover:text-gray-900 hover:underline">
-                                                    View Profile
-                                                  </a>
-                                                </div>
-                                              )}
-                                            </div>
                                           </div>
                                         </div>
                                       </div>
@@ -4369,32 +4320,10 @@ function App() {
                                             )}
                                           </div>
                                         </div>
-                                        {/* Contact Information */}
+                                        {/* Contact Buttons */}
                                         <div>
-                                          <div className="font-semibold text-gray-900 mb-2 text-[11px] uppercase tracking-wide">Contact Information</div>
-                                          <div className="space-y-2 text-[11px]">
-                                            {/* Phone */}
-                                            {fund.issuerphonenumber && (
-                                              <div className="flex items-center gap-2">
-                                                <PhoneIcon className="w-3.5 h-3.5 text-slate-400" />
-                                                <a href={`tel:${fund.issuerphonenumber}`} className="text-slate-700 hover:text-slate-900">{formatPhone(fund.issuerphonenumber)}</a>
-                                              </div>
-                                            )}
-                                            {/* Address */}
-                                            {(fund.street1 || fund.city) && (
-                                              <div className="flex items-start gap-2">
-                                                <MapPinIcon className="w-3.5 h-3.5 text-slate-400 mt-0.5" />
-                                                <div className="text-gray-700">
-                                                  {fund.street1 && <div>{fund.street1}</div>}
-                                                  {fund.street2 && <div>{fund.street2}</div>}
-                                                  {(fund.city || fund.stateorcountry || fund.zipcode) && (
-                                                    <div>{[fund.city, fund.stateorcountry, fund.zipcode].filter(Boolean).join(', ')}</div>
-                                                  )}
-                                                </div>
-                                              </div>
-                                            )}
-                                            {/* Contact Action Buttons - always visible, disabled state when no data */}
-                                            <div className="flex flex-wrap gap-2 pt-2">
+                                          <div className="font-semibold text-gray-900 mb-2 text-[11px] uppercase tracking-wide">Contact</div>
+                                          <div className="flex flex-wrap gap-2">
                                               {/* Website Button */}
                                               {(manager.enrichment_data?.website || manager.adv_data?.primary_website) ? (
                                                 <a
@@ -4453,7 +4382,6 @@ function App() {
                                                   <svg className="w-3 h-3 absolute -top-1 -right-1 text-gray-400" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="white" stroke="currentColor" strokeWidth="1.5"/><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
                                                 </span>
                                               )}
-                                            </div>
                                           </div>
                                         </div>
                                         {/* Related Parties */}

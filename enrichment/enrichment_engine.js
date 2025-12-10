@@ -18,6 +18,9 @@ const OpenAI = require('openai');
 // ============================================================================
 
 const BRAVE_SEARCH_API_KEY = process.env.BRAVE_SEARCH_API_KEY || null;
+const SERPER_API_KEY = process.env.SERPER_API_KEY || null; // Google via serper.dev (2500 free)
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || null; // Google Custom Search (100/day = 3000/month free)
+const GOOGLE_CX = process.env.GOOGLE_CX || null; // Google Custom Search Engine ID
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || null;
 
 // Form D database (where enriched managers are stored)
@@ -45,18 +48,33 @@ const advClient = createClient(ADV_URL, ADV_KEY);
 const supabase = formdClient;
 
 // ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+/**
+ * Delay helper for rate limiting
+ */
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ============================================================================
 // SEARCH FUNCTIONS
 // ============================================================================
 
 /**
  * Search the web for fund information
  * Uses Brave Search API (free tier: 2,000/month)
+ * Includes retry logic for rate limits (429 errors)
  */
-async function webSearch(query) {
+async function webSearch(query, retryCount = 0) {
   if (!BRAVE_SEARCH_API_KEY) {
     console.warn('No Brave Search API key configured');
     return null;
   }
+
+  const MAX_RETRIES = 2;
+  const RETRY_DELAY_MS = 5000; // 5 seconds wait on rate limit
 
   try {
     const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}`;
@@ -67,6 +85,18 @@ async function webSearch(query) {
       }
     });
 
+    if (response.status === 429) {
+      // Rate limited - wait and retry
+      if (retryCount < MAX_RETRIES) {
+        console.log(`[Search] Rate limited (429), waiting ${RETRY_DELAY_MS/1000}s before retry ${retryCount + 1}/${MAX_RETRIES}...`);
+        await delay(RETRY_DELAY_MS);
+        return webSearch(query, retryCount + 1);
+      } else {
+        console.error('[Search] Rate limit exceeded after retries');
+        return null;
+      }
+    }
+
     if (!response.ok) {
       throw new Error(`Brave Search API error: ${response.status}`);
     }
@@ -76,6 +106,120 @@ async function webSearch(query) {
     console.error('Web search error:', error.message);
     return null;
   }
+}
+
+/**
+ * Search using Google Custom Search API (official)
+ * Free tier: 100 queries/day = 3,000/month
+ * Best quality - actual Google results
+ */
+async function googleSearch(query) {
+  if (!GOOGLE_API_KEY || !GOOGLE_CX) {
+    return null;
+  }
+
+  try {
+    const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CX}&q=${encodeURIComponent(query)}`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      console.error(`[Google] API error: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+
+    return {
+      web: {
+        results: (data.items || []).map(r => ({
+          title: r.title,
+          url: r.link,
+          description: r.snippet
+        }))
+      }
+    };
+  } catch (error) {
+    console.error('[Google] Search error:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Search using Serper.dev (Google results)
+ * Free tier: 2,500 credits
+ * High quality Google search results
+ */
+async function serperSearch(query) {
+  if (!SERPER_API_KEY) {
+    return null;
+  }
+
+  try {
+    const response = await fetch('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: {
+        'X-API-KEY': SERPER_API_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        q: query,
+        num: 10
+      })
+    });
+
+    if (!response.ok) {
+      console.error(`[Serper] API error: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+
+    // Convert Serper format to Brave-like format for compatibility
+    return {
+      web: {
+        results: (data.organic || []).map(r => ({
+          title: r.title,
+          url: r.link,
+          description: r.snippet
+        }))
+      }
+    };
+  } catch (error) {
+    console.error('[Serper] Search error:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Unified search - tries multiple providers with fallback
+ * Priority: Google Custom Search > Serper > Brave
+ */
+async function search(query) {
+  let results;
+
+  // 1. Google Custom Search (100/day = 3000/month, best quality)
+  if (GOOGLE_API_KEY && GOOGLE_CX) {
+    results = await googleSearch(query);
+    if (results && results.web && results.web.results && results.web.results.length > 0) {
+      return results;
+    }
+  }
+
+  // 2. Serper.dev (2500 free, Google results)
+  if (SERPER_API_KEY) {
+    results = await serperSearch(query);
+    if (results && results.web && results.web.results && results.web.results.length > 0) {
+      return results;
+    }
+  }
+
+  // 3. Brave Search (2000/month)
+  results = await webSearch(query);
+  if (results && results.web && results.web.results && results.web.results.length > 0) {
+    return results;
+  }
+
+  return null;
 }
 
 /**
@@ -102,7 +246,7 @@ async function extractPortfolioCompanies(websiteUrl, fundName) {
 
     // Search for portfolio page on the website
     const portfolioQuery = `site:${websiteUrl.replace(/^https?:\/\//, '').replace(/\/$/, '')} portfolio OR investments`;
-    const searchResults = await webSearch(portfolioQuery);
+    const searchResults = await search(portfolioQuery);
 
     if (!searchResults || !searchResults.web || !searchResults.web.results) {
       console.log(`[Portfolio] No portfolio page found via search`);
@@ -299,28 +443,26 @@ function parseFundName(name) {
 
 /**
  * Detect platform SPVs (Hiive, AngelList, Sydecar, etc.)
+ * Only flags if the FUND NAME indicates it's an SPV platform vehicle
+ * NOT if search results just mention AngelList (many real VCs have AngelList pages)
  */
-function isPlatformSPV(name, searchResults) {
-  const platformPatterns = [
-    /HII\s+/i, // Hiive
-    /Sydecar/i,
-    /AngelList/i,
-    /Republic/i,
+function isPlatformSPV(name) {
+  // Platform patterns - only check fund NAME, not search results
+  // Many real VCs have AngelList syndicates, so we shouldn't flag them
+  const platformNamePatterns = [
+    /^HII\s+/i, // Hiive vehicles start with "HII "
+    /Sydecar/i, // Sydecar SPVs
+    /^AngelList[- ]/i, // AngelList platform vehicles (not funds that use AngelList)
+    /AngelList[- ]GP[- ]Funds/i, // AngelList GP Funds
+    /AngelList[- ].*[- ]Funds/i, // AngelList X Funds
     /Roll[- ]?up Vehicles/i,
-    /Multimodal Ventures/i
+    /Multimodal Ventures/i,
+    /MV Funds/i
   ];
 
-  // Check fund name
-  for (const pattern of platformPatterns) {
+  // Check fund name only - search results having "angellist" just means they have a syndicate page
+  for (const pattern of platformNamePatterns) {
     if (pattern.test(name)) return true;
-  }
-
-  // Check search results if available
-  if (searchResults && searchResults.web && searchResults.web.results) {
-    const text = JSON.stringify(searchResults.web.results).toLowerCase();
-    if (text.includes('hiive') || text.includes('angellist') || text.includes('sydecar')) {
-      return true;
-    }
   }
 
   return false;
@@ -391,6 +533,145 @@ function extractLinkedIn(searchResults) {
 }
 
 /**
+ * Search specifically for LinkedIn company page
+ */
+async function searchLinkedIn(fundName) {
+  const query = `site:linkedin.com/company "${fundName}"`;
+  const results = await search(query);
+  return extractLinkedIn(results);
+}
+
+/**
+ * Search for team members via LinkedIn profile search
+ * LinkedIn blocks direct access, but search engines show profile snippets
+ */
+async function searchLinkedInPeople(fundName) {
+  const query = `site:linkedin.com/in "${fundName}" partner OR founder OR managing`;
+  const results = await search(query);
+
+  if (!results || !results.web || !results.web.results) {
+    return [];
+  }
+
+  // Extract names and titles from LinkedIn profile search results
+  const people = [];
+  for (const result of results.web.results.slice(0, 10)) {
+    // LinkedIn titles show as "Name - Title - Company | LinkedIn"
+    const titleMatch = result.title.match(/^([^-]+)\s*-\s*([^|]+)/);
+    if (titleMatch && result.url.includes('linkedin.com/in/')) {
+      const name = titleMatch[1].trim();
+      const titlePart = titleMatch[2].trim();
+
+      // Skip if it's just a company page or search result
+      if (name.length > 2 && name.length < 50 && !name.includes('LinkedIn')) {
+        people.push({
+          name: name,
+          title: titlePart,
+          linkedin_url: result.url,
+          source: 'linkedin_search'
+        });
+      }
+    }
+  }
+
+  return people;
+}
+
+/**
+ * Extract team members using AI from website content or search results
+ */
+async function extractTeamMembersAI(websiteUrl, fundName, searchResults) {
+  // First try LinkedIn people search (doesn't require AI)
+  const linkedInPeople = await searchLinkedInPeople(fundName);
+  if (linkedInPeople.length >= 2) {
+    console.log(`[Team] Found ${linkedInPeople.length} people via LinkedIn search`);
+    return linkedInPeople;
+  }
+
+  if (!openai) {
+    console.log(`[Team] OpenAI not configured, returning LinkedIn results only`);
+    return linkedInPeople;
+  }
+
+  try {
+    let content = '';
+
+    // Try to get team page from website
+    if (websiteUrl) {
+      const teamPages = ['/team', '/about', '/people', '/about-us', '/our-team'];
+      for (const path of teamPages) {
+        try {
+          const baseUrl = websiteUrl.replace(/\/$/, '');
+          const response = await fetch(baseUrl + path, { timeout: 5000 });
+          if (response.ok) {
+            const html = await response.text();
+            if (html.includes('Partner') || html.includes('Managing') || html.includes('Founder')) {
+              content = html.slice(0, 10000);
+              console.log(`[Team AI] Found team page at ${path}`);
+              break;
+            }
+          }
+        } catch (e) {
+          // Continue to next path
+        }
+      }
+    }
+
+    // Fall back to search results descriptions
+    if (!content && searchResults && searchResults.web && searchResults.web.results) {
+      content = searchResults.web.results
+        .slice(0, 8)
+        .map(r => `${r.title}: ${r.description || ''}`)
+        .join('\n');
+    }
+
+    if (!content || content.length < 100) {
+      console.log(`[Team AI] Not enough content to extract team`);
+      return [];
+    }
+
+    console.log(`[Team AI] Extracting team from ${content.length} chars...`);
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: "Extract investment team members from the content. Focus on Managing Partners, General Partners, Partners, Principals. Return JSON array with name, title, and email (if found). Ignore lawyers, accountants, and administrative staff."
+        },
+        {
+          role: "user",
+          content: `Extract team members from ${fundName}:\n\n${content}\n\nReturn JSON: [{"name": "John Smith", "title": "Managing Partner", "email": "john@fund.com"}, ...]`
+        }
+      ],
+      temperature: 0,
+      max_tokens: 500
+    });
+
+    const aiResponse = completion.choices[0].message.content.trim();
+
+    // Parse JSON
+    let team = [];
+    try {
+      team = JSON.parse(aiResponse);
+    } catch (e) {
+      const jsonMatch = aiResponse.match(/\[.*\]/s);
+      if (jsonMatch) team = JSON.parse(jsonMatch[0]);
+    }
+
+    if (Array.isArray(team) && team.length > 0) {
+      console.log(`[Team AI] Found ${team.length} team members`);
+      return team.slice(0, 10); // Limit to 10
+    }
+
+    return [];
+  } catch (error) {
+    console.error(`[Team AI] Error:`, error.message);
+    return [];
+  }
+}
+
+/**
  * Classify fund type based on search results
  * Simple pattern matching (Phase 1)
  * Phase 2: Replace with AI classification
@@ -401,7 +682,7 @@ function classifyFundType(name, searchResults) {
   }
 
   // Check if platform SPV
-  if (isPlatformSPV(name, searchResults)) {
+  if (isPlatformSPV(name)) {
     return 'SPV Platform';
   }
 
@@ -541,7 +822,7 @@ async function enrichManager(name) {
 
   try {
     // Check if platform SPV first
-    if (isPlatformSPV(name, null)) {
+    if (isPlatformSPV(name)) {
       console.log(`[Enrichment] ${name} identified as platform SPV`);
       enrichmentData.fundType = 'SPV Platform';
       enrichmentData.enrichmentStatus = 'platform_spv';
@@ -588,7 +869,16 @@ async function enrichManager(name) {
     enrichmentData.searchQueries.push(query1);
     console.log(`[Enrichment] Search query: ${query1}`);
 
-    const searchResults = await webSearch(query1);
+    let searchResults = await search(query1);
+
+    // Fallback: try simpler search if first fails
+    if (!searchResults || !searchResults.web || searchResults.web.results.length === 0) {
+      console.log(`[Enrichment] First search failed, trying simpler query...`);
+      await delay(1000); // Rate limit protection
+      const query2 = `"${parsedName}"`;
+      enrichmentData.searchQueries.push(query2);
+      searchResults = await search(query2);
+    }
 
     if (!searchResults || !searchResults.web || searchResults.web.results.length === 0) {
       console.log(`[Enrichment] No search results found for ${name}`);
@@ -605,9 +895,29 @@ async function enrichManager(name) {
     enrichmentData.fundType = classifyFundType(name, searchResults);
     enrichmentData.investmentStage = extractInvestmentStage(searchResults);
 
+    // If no LinkedIn found in main search, do dedicated LinkedIn search
+    if (!enrichmentData.linkedinUrl && enrichmentData.website) {
+      console.log(`[Enrichment] Searching LinkedIn specifically...`);
+      await delay(1000); // Rate limit protection
+      enrichmentData.linkedinUrl = await searchLinkedIn(parsedName);
+      if (enrichmentData.linkedinUrl) {
+        console.log(`[Enrichment] ✓ Found LinkedIn: ${enrichmentData.linkedinUrl}`);
+      }
+    }
+
+    // Extract team members if we have website or good search results
+    if (enrichmentData.website || enrichmentData.confidence >= 0.5) {
+      console.log(`[Enrichment] Extracting team members...`);
+      enrichmentData.teamMembers = await extractTeamMembersAI(enrichmentData.website, parsedName, searchResults);
+      if (enrichmentData.teamMembers && enrichmentData.teamMembers.length > 0) {
+        console.log(`[Enrichment] ✓ Found ${enrichmentData.teamMembers.length} team members`);
+      }
+    }
+
     // Build data sources list
     if (enrichmentData.website) enrichmentData.dataSources.push('website');
     if (enrichmentData.linkedinUrl) enrichmentData.dataSources.push('linkedin');
+    if (enrichmentData.teamMembers && enrichmentData.teamMembers.length > 0) enrichmentData.dataSources.push('team_extracted');
     if (searchResults.web.results.some(r => r.url.includes('crunchbase'))) {
       enrichmentData.dataSources.push('crunchbase');
     }
@@ -681,11 +991,13 @@ async function saveEnrichment(data) {
         data_sources: data.dataSources,
         raw_search_results: data.rawSearchResults,
         flagged_issues: data.flaggedIssues,
+        // Note: team_members column doesn't exist in DB - team data extracted but not persisted
         is_published: data.enrichmentStatus === 'auto_enriched' && data.confidence >= CONFIDENCE_THRESHOLD,
         published_at: (data.enrichmentStatus === 'auto_enriched' && data.confidence >= CONFIDENCE_THRESHOLD) ? new Date().toISOString() : null
       }, {
         onConflict: 'series_master_llc'
-      });
+      })
+      .select();
 
     if (error) throw error;
 

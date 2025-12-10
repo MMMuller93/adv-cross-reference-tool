@@ -945,12 +945,14 @@ app.get('/api/funds/new-managers', async (req, res) => {
       const enrichedData = enrichedManagersMap[manager.series_master_llc.toLowerCase()];
       if (enrichedData) {
         enrichedManager.enrichment_data = {
-          website: enrichedData.website_url,
+          website: enrichedData.website_url || enrichedData.website,
           fund_type: enrichedData.fund_type,
           investment_stage: enrichedData.investment_stage,
-          linkedin: enrichedData.linkedin_company_url,
+          linkedin: enrichedData.linkedin_company_url || enrichedData.linkedin_url,
           is_published: enrichedData.is_published,
-          confidence: enrichedData.confidence_score
+          confidence: enrichedData.confidence_score,
+          team_members: enrichedData.team_members || [],
+          portfolio_companies: enrichedData.portfolio_companies || []
         };
       }
 

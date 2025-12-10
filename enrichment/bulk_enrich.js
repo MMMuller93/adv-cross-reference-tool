@@ -20,8 +20,8 @@ const SUPABASE_FORMD_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXB
 const enrichedClient = createClient(SUPABASE_FORMD_URL, SUPABASE_FORMD_KEY);
 const formdClient = createClient(SUPABASE_FORMD_URL, SUPABASE_FORMD_KEY);
 
-const BATCH_SIZE = 20; // Process 20 at a time
-const DELAY_BETWEEN_REQUESTS_MS = 500; // Rate limiting
+const BATCH_SIZE = 10; // Process 10 at a time
+const DELAY_BETWEEN_REQUESTS_MS = 1500; // 1.5s delay - faster with fallback search providers
 
 // ============================================================================
 // FETCH NEW MANAGERS FROM EXISTING DATABASE
@@ -30,19 +30,40 @@ const DELAY_BETWEEN_REQUESTS_MS = 500; // Rate limiting
 /**
  * Get all new managers from Form D database
  * (Same logic as /api/funds/new-managers endpoint)
+ * Uses keyset pagination to get all results (Supabase has 1000 row limit)
  */
 async function getNewManagers() {
   console.log('[Fetch] Fetching new managers from Form D database...');
 
   try {
-    // Fetch all Form D filings with "a series of" pattern
-    const { data: filings, error } = await formdClient
-      .from('form_d_filings')
-      .select('*')
-      .ilike('entityname', '%a series of%')
-      .order('filing_date', { ascending: false });
+    // Fetch all Form D filings with "a series of" pattern using keyset pagination
+    const allFilings = [];
+    const BATCH_SIZE = 1000;
+    let lastId = 0;
 
-    if (error) throw error;
+    while (true) {
+      const { data: batch, error } = await formdClient
+        .from('form_d_filings')
+        .select('*')
+        .ilike('entityname', '%a series of%')
+        .gt('id', lastId)
+        .order('id', { ascending: true })
+        .limit(BATCH_SIZE);
+
+      if (error) throw error;
+      if (!batch || batch.length === 0) break;
+
+      allFilings.push(...batch);
+      lastId = batch[batch.length - 1].id;
+      console.log(`[Fetch] Fetched ${allFilings.length} filings so far...`);
+
+      if (batch.length < BATCH_SIZE) break;
+    }
+
+    // Sort by filing_date descending for processing order
+    const filings = allFilings.sort((a, b) =>
+      new Date(b.filing_date) - new Date(a.filing_date)
+    );
 
     console.log(`[Fetch] Found ${filings.length} Form D filings with series pattern`);
 
