@@ -2406,7 +2406,10 @@ function App() {
   // Initialize state from URL params (for shareable links)
   const initialURLState = getStateFromURL();
 
-  const [view, setView] = useState('dashboard');
+  // If URL has adviser or fund, start in loading state until we fetch the data
+  const initialView = initialURLState.adviser ? 'loading_adviser' :
+                      initialURLState.fund ? 'loading_fund' : 'dashboard';
+  const [view, setView] = useState(initialView);
   const [activeTab, setActiveTab] = useState(initialURLState.tab);
   const [selectedAdviser, setSelectedAdviser] = useState(null);
   const [selectedFund, setSelectedFund] = useState(null);
@@ -2591,15 +2594,21 @@ function App() {
       // Handle adviser URL (/adviser/{crd}-{slug} or ?adviser={crd})
       const adviserCrd = initialURLState.adviser;
       if (adviserCrd) {
+        console.log('[URL Load] Loading adviser CRD:', adviserCrd);
         try {
           const res = await fetch(`${SUPABASE_ADV_URL}/rest/v1/advisers_enriched?crd=eq.${adviserCrd}&select=*`, { headers: advHeaders });
           const data = await res.json();
           if (data && data.length > 0) {
+            console.log('[URL Load] Adviser found:', data[0].adviser_name);
             setSelectedAdviser(data[0]);
             setView('adviser_detail');
+          } else {
+            console.warn('[URL Load] Adviser not found for CRD:', adviserCrd);
+            setView('dashboard'); // Fall back to dashboard if not found
           }
         } catch (err) {
-          console.error('Error loading adviser from URL:', err);
+          console.error('[URL Load] Error loading adviser:', err);
+          setView('dashboard'); // Fall back to dashboard on error
         }
         return;
       }
@@ -2607,16 +2616,22 @@ function App() {
       // Handle fund URL (/fund/{id}-{slug})
       const fundId = initialURLState.fund;
       if (fundId) {
+        console.log('[URL Load] Loading fund ID:', fundId);
         try {
           // Try to load fund by reference_id
           const res = await fetch(`${SUPABASE_ADV_URL}/rest/v1/funds_enriched?reference_id=eq.${fundId}&select=*`, { headers: advHeaders });
           const data = await res.json();
           if (data && data.length > 0) {
+            console.log('[URL Load] Fund found:', data[0].fund_name);
             setSelectedFund(data[0]);
             setView('fund_detail');
+          } else {
+            console.warn('[URL Load] Fund not found for ID:', fundId);
+            setView('dashboard'); // Fall back to dashboard if not found
           }
         } catch (err) {
-          console.error('Error loading fund from URL:', err);
+          console.error('[URL Load] Error loading fund:', err);
+          setView('dashboard'); // Fall back to dashboard on error
         }
       }
     };
@@ -4189,6 +4204,34 @@ function App() {
                                 <td className="px-6 py-3">
                                   <div className="text-[11px] text-gray-600 leading-relaxed max-w-md">
                                     {match.description || match.issues || 'No description available'}
+                                    {/* Show fund types for VC exemption violations */}
+                                    {match.type === 'vc_exemption_violation' && match.metadata?.sample_non_vc_funds?.length > 0 && (
+                                      <div className="mt-1.5 flex flex-wrap gap-1">
+                                        {match.metadata.sample_non_vc_funds.slice(0, 3).map((fund, i) => (
+                                          <span key={i} className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium bg-amber-50 text-amber-700 rounded border border-amber-200">
+                                            {fund.type || 'Unknown Type'}
+                                          </span>
+                                        ))}
+                                        {match.metadata.sample_non_vc_funds.length > 3 && (
+                                          <span className="text-[9px] text-gray-400">+{match.metadata.sample_non_vc_funds.length - 3} more</span>
+                                        )}
+                                      </div>
+                                    )}
+                                    {/* Show fund type mismatch details */}
+                                    {match.type === 'fund_type_mismatch' && match.metadata && (
+                                      <div className="mt-1.5 flex items-center gap-1 text-[9px]">
+                                        <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded border border-blue-200">ADV: {match.metadata.adv_fund_type}</span>
+                                        <span className="text-gray-400">vs</span>
+                                        <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded border border-purple-200">Form D: {match.metadata.formd_fund_type}</span>
+                                      </div>
+                                    )}
+                                    {/* Show exemption mismatch details */}
+                                    {match.type === 'exemption_mismatch' && match.metadata && (
+                                      <div className="mt-1.5 text-[9px] text-gray-500">
+                                        ADV: 3(c)(1)={match.metadata.adv_3c1 ? 'Y' : 'N'}, 3(c)(7)={match.metadata.adv_3c7 ? 'Y' : 'N'} |
+                                        Form D: 3(c)(1)={match.metadata.formd_3c1 ? 'Y' : 'N'}, 3(c)(7)={match.metadata.formd_3c7 ? 'Y' : 'N'}
+                                      </div>
+                                    )}
                                   </div>
                                 </td>
                                 <td className="px-6 py-3">
@@ -4228,9 +4271,13 @@ function App() {
                                     ) : (
                                       <span className="text-[10px] text-gray-300">IAPD</span>
                                     )}
-                                    {match.form_d_cik ? (
+                                    {/* EDGAR link - support CIK or accession number */}
+                                    {match.form_d_cik || match.metadata?.formd_accession ? (
                                       <a
-                                        href={`https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${match.form_d_cik}&type=D&dateb=&owner=include&count=40`}
+                                        href={match.form_d_cik
+                                          ? `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${match.form_d_cik}&type=D&dateb=&owner=include&count=40`
+                                          : `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&filenum=${match.metadata.formd_accession}&type=D&dateb=&owner=include&count=40`
+                                        }
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="text-[10px] font-medium text-blue-600 hover:text-blue-800 hover:underline"
@@ -4639,6 +4686,14 @@ function App() {
         )}
         {view === 'fund_detail' && selectedFund && (
           <FundDetailView fund={selectedFund} onBack={handleBack} onNavigateToAdviser={handleNavigateToAdviserFromFund} />
+        )}
+
+        {/* Loading States for URL-based navigation */}
+        {(view === 'loading_adviser' || view === 'loading_fund') && (
+          <div className="flex-1 flex flex-col items-center justify-center bg-white">
+            <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-200 border-t-slate-600 mb-4"></div>
+            <p className="text-sm text-gray-500">Loading {view === 'loading_adviser' ? 'adviser' : 'fund'} details...</p>
+          </div>
         )}
       </main>
     </div>
