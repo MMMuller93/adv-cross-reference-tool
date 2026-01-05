@@ -670,10 +670,6 @@ app.get('/api/funds/formd', async (req, res) => {
     const { query, limit = 1000, startDate, endDate, state } = req.query;
     console.log(`[Gemini] Searching Form D: ${query || '(all)'}`);
 
-    if (query && query.length < 5) {
-      return res.json({ success: true, results: [], message: 'Search query must be at least 5 characters' });
-    }
-
     let dbQuery = formdClient
       .from('form_d_filings')
       .select('accessionnumber,entityname,cik,filing_date,stateorcountry,federalexemptions_items_list,investmentfundtype,related_names,related_roles,totalofferingamount,totalamountsold');
@@ -727,7 +723,7 @@ app.get('/api/funds/formd', async (req, res) => {
     }
 
     // Apply limit after deduplication and normalize field names for frontend
-    const results = Array.from(fundMap.values()).slice(0, parseInt(limit)).map(fund => ({
+    let results = Array.from(fundMap.values()).slice(0, parseInt(limit)).map(fund => ({
       ...fund,
       fund_name: fund.entityname,
       form_d_cik: fund.cik,
@@ -738,6 +734,81 @@ app.get('/api/funds/formd', async (req, res) => {
       form_d_amount_sold: fund.totalamountsold,
       source: 'formd'
     }));
+
+    // Enrich with adviser data by matching related_names to advisers_enriched
+    // Extract adviser names from related_names (format: "ADVISER NAME | PERSON NAME")
+    const adviserNamesToLookup = new Set();
+    results.forEach(fund => {
+      if (fund.related_names) {
+        const names = fund.related_names.split('|').map(n => n.trim());
+        const roles = (fund.related_roles || '').split('|').map(r => r.trim());
+
+        // Find names with "Promoter" or first name if no promoter
+        const promoterIdx = roles.findIndex(r => r.toLowerCase().includes('promoter'));
+        const adviserName = promoterIdx >= 0 ? names[promoterIdx] : names[0];
+
+        if (adviserName && adviserName !== 'N/A' && !adviserName.match(/^\d+$/)) {
+          adviserNamesToLookup.add(adviserName);
+        }
+      }
+    });
+
+    // Batch lookup advisers from ADV database
+    if (adviserNamesToLookup.size > 0) {
+      try {
+        const adviserNameArray = Array.from(adviserNamesToLookup);
+        const adviserMatches = new Map();
+
+        // Query in batches of 50
+        for (let i = 0; i < adviserNameArray.length; i += 50) {
+          const batch = adviserNameArray.slice(i, i + 50);
+          const orConditions = batch.map(name =>
+            `adviser_name.ilike.%${name.substring(0, 30)}%,adviser_entity_legal_name.ilike.%${name.substring(0, 30)}%`
+          ).join(',');
+
+          const { data } = await advClient
+            .from('advisers_enriched')
+            .select('crd,adviser_name,adviser_entity_legal_name')
+            .or(orConditions)
+            .limit(batch.length * 2);
+
+          if (data) {
+            data.forEach(adviser => {
+              const key = adviser.adviser_name || adviser.adviser_entity_legal_name;
+              if (!adviserMatches.has(key)) {
+                adviserMatches.set(key, adviser);
+              }
+            });
+          }
+        }
+
+        // Attach adviser data to funds
+        results = results.map(fund => {
+          if (fund.related_names) {
+            const names = fund.related_names.split('|').map(n => n.trim());
+            const roles = (fund.related_roles || '').split('|').map(r => r.trim());
+            const promoterIdx = roles.findIndex(r => r.toLowerCase().includes('promoter'));
+            const adviserName = promoterIdx >= 0 ? names[promoterIdx] : names[0];
+
+            // Try to find matching adviser
+            for (const [key, adviser] of adviserMatches) {
+              const nameMatch = adviserName.toLowerCase().includes(key.toLowerCase()) ||
+                               key.toLowerCase().includes(adviserName.toLowerCase());
+              if (nameMatch) {
+                return {
+                  ...fund,
+                  adviser_entity_crd: adviser.crd,
+                  adviser_entity_legal_name: adviser.adviser_entity_legal_name || adviser.adviser_name
+                };
+              }
+            }
+          }
+          return fund;
+        });
+      } catch (err) {
+        console.error('[Form D] Adviser enrichment error:', err.message);
+      }
+    }
 
     res.json({ success: true, results });
   } catch (error) {
@@ -883,18 +954,28 @@ app.get('/api/funds/new-managers', async (req, res) => {
     });
     console.log(`  Loaded ${enrichedManagersData.length} enriched managers for matching`);
 
-    // Batch fetch all advisers for matching
+    // Batch fetch all advisers for matching (include AUM years to detect defunct advisers)
     const advisersData = await fetchAllResultsPaginated((from, to) => {
       return advClient
         .from('advisers_enriched')
-        .select('crd, adviser_name, adviser_entity_legal_name, primary_website, total_aum')
+        .select('crd, adviser_name, adviser_entity_legal_name, primary_website, total_aum, aum_2023, aum_2024, aum_2025')
         .range(from, to);
     });
 
-    // Create lookup structures for advisers
+    // Helper to check if adviser is active (has AUM data in recent years)
+    const isAdviserActive = (adv) => {
+      return adv.aum_2023 || adv.aum_2024 || adv.aum_2025 || adv.total_aum;
+    };
+
+    // Create lookup structures for advisers (only active advisers)
     const advisersByNameExact = {};
     const advisersByNamePrefix = [];
+    let activeCount = 0;
     advisersData.forEach(adv => {
+      // Skip defunct advisers (no recent AUM data)
+      if (!isAdviserActive(adv)) return;
+      activeCount++;
+
       const name1 = (adv.adviser_name || '').toLowerCase();
       const name2 = (adv.adviser_entity_legal_name || '').toLowerCase();
       if (name1) advisersByNameExact[name1] = adv;
@@ -904,7 +985,7 @@ app.get('/api/funds/new-managers', async (req, res) => {
         adv
       });
     });
-    console.log(`  Loaded ${advisersData.length} advisers for matching`);
+    console.log(`  Loaded ${advisersData.length} advisers, ${activeCount} active for matching`);
 
     // Helper to parse fund name
     const parseFundName = (name) => {
@@ -1231,6 +1312,11 @@ app.get('/api/advisers/unified/:identifier', async (req, res) => {
       portfolioCompanies = portfolio || [];
     }
 
+    // Check if adviser is active (has recent AUM data - not defunct)
+    const isAdviserActive = adviserData && (
+      adviserData.aum_2023 || adviserData.aum_2024 || adviserData.aum_2025 || adviserData.total_aum
+    );
+
     // Merge the data
     const unifiedData = {
       // Basic info (prefer ADV data if available)
@@ -1238,11 +1324,13 @@ app.get('/api/advisers/unified/:identifier', async (req, res) => {
       crd: adviserData?.crd || enrichedData?.linked_crd,
       website: enrichedData?.website_url || adviserData?.primary_website,
 
-      // Form ADV specific
-      hasFormADV: !!adviserData,
+      // Form ADV specific (only show as having Form ADV if adviser is currently active)
+      hasFormADV: !!isAdviserActive,
+      isAdviserDefunct: adviserData && !isAdviserActive,
       advData: adviserData ? {
         aum: adviserData.total_aum,
-        crd: adviserData.crd
+        crd: adviserData.crd,
+        isDefunct: !isAdviserActive
       } : null,
 
       // Enriched data specific
