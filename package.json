@@ -4,7 +4,10 @@
   "description": "Gemini-styled Form D & ADV Cross-Reference Visualizer",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "start:with-enrichment": "bash start.sh",
+    "enrichment:daemon": "node enrichment/realtime_enrichment.js daemon",
+    "enrichment:once": "node enrichment/realtime_enrichment.js once"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",

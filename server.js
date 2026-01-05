@@ -1390,6 +1390,12 @@ app.get('/api/managers/:managerId/portfolio', async (req, res) => {
 });
 
 // ============================================
+// ENRICHMENT & DISCREPANCY DETECTION ROUTES
+// ============================================
+const enrichmentRoutes = require('./routes/enrichment_routes');
+app.use('/api', enrichmentRoutes);
+
+// ============================================
 // SEO-FRIENDLY URL ROUTES
 // ============================================
 // SEO routes - serve index.html for client-side routing

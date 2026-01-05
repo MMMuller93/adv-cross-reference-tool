@@ -3351,15 +3351,45 @@ function App() {
       // Parse search query for modifiers
       const parsedQuery = parseSearchQuery(currentSearchTerm);
 
-      const params = new URLSearchParams({ limit: '10000' });
+      // Use new discrepancy detection API
+      const params = new URLSearchParams({ limit: '1000' });
       if (parsedQuery.apiQuery) {
         params.append('searchTerm', parsedQuery.apiQuery);
       }
-      if (currentFilters.discrepanciesOnly) params.append('discrepanciesOnly', 'true');
-      if (currentFilters.overdueAdvOnly) params.append('overdueAdvOnly', 'true');
+      if (currentFilters.discrepanciesOnly) params.append('severity', 'high,critical');
+      if (currentFilters.overdueAdvOnly) params.append('type', 'OVERDUE_ANNUAL_ADV,NEEDS_INITIAL_ADV');
 
-      const response = await fetch(`/api/browse-computed?${params}`);
-      const result = await response.json();
+      // Try new API first, fallback to old API
+      let response, result;
+      try {
+        response = await fetch(`/api/discrepancies?${params}`);
+        result = await response.json();
+        // Transform new API format to match old format
+        if (result.discrepancies) {
+          result = {
+            success: true,
+            matches: result.discrepancies.map(d => ({
+              adv_fund_name: d.fund_name || d.entity_name,
+              formd_entity_name: d.fund_name || d.entity_name,
+              adviser_entity_legal_name: d.entity_name,
+              adviser_entity_crd: d.crd,
+              issues: d.details?.description || d.type,
+              discrepancy_type: d.type,
+              severity: d.severity,
+              contact_info: d.contact_info
+            }))
+          };
+        }
+      } catch (err) {
+        console.log('[Intelligence Radar] New API failed, using fallback:', err);
+        // Fallback to old API
+        const oldParams = new URLSearchParams({ limit: '10000' });
+        if (parsedQuery.apiQuery) oldParams.append('searchTerm', parsedQuery.apiQuery);
+        if (currentFilters.discrepanciesOnly) oldParams.append('discrepanciesOnly', 'true');
+        if (currentFilters.overdueAdvOnly) oldParams.append('overdueAdvOnly', 'true');
+        response = await fetch(`/api/browse-computed?${oldParams}`);
+        result = await response.json();
+      }
       if (myVersion === searchVersionRef.current.crossRef) {
         if (result.success) {
           // Apply client-side filtering for exclusions and exact phrases
