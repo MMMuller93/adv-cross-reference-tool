@@ -339,7 +339,7 @@ async function saveIssues(issues) {
 
     console.log(`\nSaving ${issues.length} issues to database...`);
 
-    const { data, error } = await advDb
+    const { data, error } = await formDDb
         .from('compliance_issues')
         .insert(issues)
         .select();
