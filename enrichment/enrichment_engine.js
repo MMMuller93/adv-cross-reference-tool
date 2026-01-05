@@ -7,8 +7,9 @@
  * Phase 3: + Continuous operation with monitoring
  */
 
-// Load environment variables
-require('dotenv').config();
+// Load environment variables (from parent directory where .env lives)
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const { createClient } = require('@supabase/supabase-js');
 const OpenAI = require('openai');
@@ -474,6 +475,8 @@ function isPlatformSPV(name) {
 
 /**
  * Extract website URL from search results
+ * Filters out aggregator sites, news articles, and Form D databases
+ * We want the manager's actual company website homepage
  */
 function extractWebsite(searchResults) {
   if (!searchResults || !searchResults.web || !searchResults.web.results) {
@@ -482,31 +485,119 @@ function extractWebsite(searchResults) {
 
   const results = searchResults.web.results;
 
-  for (const result of results.slice(0, 5)) {
-    const url = result.url;
+  // Sites to skip - these are aggregators, not manager websites
+  const skipDomains = [
+    // Data aggregators
+    'crunchbase.com', 'pitchbook.com', 'linkedin.com', 'bloomberg.com',
+    'tracxn.com', 'cbinsights.com', 'signal.nfx.com', 'dealroom.co',
+    'golden.com', 'owler.com', 'zoominfo.com', 'apollo.io',
+    // Form D aggregators - NOT manager websites
+    'formds.com', 'disclosurequest.com', 'aum13f.com', 'whalewisdom.com',
+    'fundz.net', 'sec.gov', 'sec.report', 'advfn.com', 'openfilings.com',
+    // Platform/syndicate pages (not the manager's own site)
+    'venture.angellist.com', 'republic.com', 'wefunder.com', 'seedinvest.com',
+    'startengine.com', 'fundable.com',
+    // News/press/media sites
+    'crowdfundinsider.com', 'techcrunch.com', 'prnewswire.com', 'businesswire.com',
+    'forbes.com', 'wsj.com', 'nytimes.com', 'reuters.com', 'bloomberg.com',
+    'venturebeat.com', 'axios.com', 'theinformation.com', 'fortune.com',
+    'inc.com', 'entrepreneur.com', 'fastcompany.com', 'wired.com',
+    'medium.com', 'substack.com', 'twitter.com', 'x.com', 'facebook.com',
+    // Foundation/nonprofit news (NOT fund manager sites)
+    'kresge.org', 'gatesfoundation.org', 'fordfoundation.org', 'philanthropy.com',
+    // Wikipedia
+    'wikipedia.org',
+    // PDF links
+    '.pdf'
+  ];
 
-    // Skip aggregator sites
-    const skipDomains = ['crunchbase.com', 'pitchbook.com', 'linkedin.com', 'bloomberg.com',
-                        'tracxn.com', 'cbinsights.com', 'signal.nfx.com'];
-    if (skipDomains.some(domain => url.includes(domain))) {
+  // URL path patterns that indicate news/articles (not company homepages)
+  const skipPathPatterns = [
+    '/news/', '/news-', '/article/', '/articles/', '/blog/', '/blogs/',
+    '/press/', '/press-release/', '/pressrelease/', '/media/',
+    '/story/', '/stories/', '/post/', '/posts/', '/view/',
+    '/2024/', '/2025/', '/2023/', '/2022/', '/2021/', '/2020/', // Date patterns in URLs = articles
+    '/category/', '/tag/', '/topics/', '/search'
+  ];
+
+  // Helper to check if URL looks like an article page
+  const isArticlePage = (url) => {
+    const lowerUrl = url.toLowerCase();
+    // Check path patterns
+    if (skipPathPatterns.some(pattern => lowerUrl.includes(pattern))) {
+      return true;
+    }
+    // Very long URLs with many segments are usually articles
+    const pathSegments = new URL(url).pathname.split('/').filter(s => s);
+    if (pathSegments.length > 3) {
+      return true; // /news/2024/03/15/article-title = 5 segments
+    }
+    // URLs with long slugs are usually articles
+    if (pathSegments.some(seg => seg.length > 50)) {
+      return true;
+    }
+    return false;
+  };
+
+  // Helper to check if URL is a homepage or simple page
+  const isLikelyHomepage = (url) => {
+    try {
+      const parsed = new URL(url);
+      const path = parsed.pathname;
+      // Root, /about, /team, /portfolio are acceptable
+      return path === '/' ||
+             path === '' ||
+             /^\/(about|team|portfolio|contact|invest|investments|companies)?\/?$/.test(path);
+    } catch {
+      return false;
+    }
+  };
+
+  for (const result of results.slice(0, 8)) {
+    const url = result.url;
+    const lowerUrl = url.toLowerCase();
+
+    // Skip aggregator/news domains
+    if (skipDomains.some(domain => lowerUrl.includes(domain))) {
       continue;
     }
 
-    // Look for likely fund website
-    if (result.title && (
-      result.title.toLowerCase().includes('venture') ||
-      result.title.toLowerCase().includes('capital') ||
-      result.title.toLowerCase().includes('fund')
-    )) {
-      return url;
+    // Skip article pages
+    if (isArticlePage(url)) {
+      continue;
+    }
+
+    // Prefer homepages or simple paths that look like fund websites
+    if (isLikelyHomepage(url)) {
+      // Extra validation: title should match fund-related keywords OR be short (company name)
+      const title = (result.title || '').toLowerCase();
+      if (title.includes('venture') || title.includes('capital') ||
+          title.includes('fund') || title.includes('partners') ||
+          title.includes('investment') || title.length < 50) {
+        return url;
+      }
     }
   }
 
-  // If no match, return first non-aggregator result
-  for (const result of results.slice(0, 3)) {
+  // Second pass: accept non-homepage URLs if they're clearly fund-related
+  for (const result of results.slice(0, 5)) {
     const url = result.url;
-    const skipDomains = ['crunchbase.com', 'pitchbook.com', 'linkedin.com', 'bloomberg.com'];
-    if (!skipDomains.some(domain => url.includes(domain))) {
+    const lowerUrl = url.toLowerCase();
+
+    // Skip aggregator/news domains
+    if (skipDomains.some(domain => lowerUrl.includes(domain))) {
+      continue;
+    }
+
+    // Skip article pages
+    if (isArticlePage(url)) {
+      continue;
+    }
+
+    // Must have fund-related keyword in title
+    const title = (result.title || '').toLowerCase();
+    if (title.includes('venture') || title.includes('capital') ||
+        title.includes('fund') || title.includes('partners')) {
       return url;
     }
   }
