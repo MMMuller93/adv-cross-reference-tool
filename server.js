@@ -905,7 +905,7 @@ app.get('/api/discrepancies', async (req, res) => {
       try {
         const { data: advisers, error: advError } = await advClient
           .from('advisers_enriched')
-          .select('crd, adviser_name, legal_name, website, contact_email, contact_phone')
+          .select('crd, adviser_name, adviser_entity_legal_name, primary_website, phone_number, regulatory_contact_email')
           .in('crd', crdList);
 
         if (!advError && advisers) {
@@ -932,12 +932,12 @@ app.get('/api/discrepancies', async (req, res) => {
         detected_date: issue.detected_date,
         resolved_date: issue.resolved_date,
         // Adviser details
-        entity_name: adviser?.adviser_name || adviser?.legal_name || issue.metadata?.entity_name || 'Unknown',
-        fund_name: issue.metadata?.fund_name,
+        entity_name: adviser?.adviser_name || adviser?.adviser_entity_legal_name || issue.metadata?.entity_name || 'Unknown',
+        fund_name: issue.metadata?.sample_non_vc_funds?.[0]?.name || issue.metadata?.fund_name,
         contact_info: {
-          email: adviser?.contact_email || issue.metadata?.contact_email,
-          phone: adviser?.contact_phone || issue.metadata?.contact_phone,
-          website: adviser?.website
+          email: adviser?.regulatory_contact_email || issue.metadata?.contact_email,
+          phone: adviser?.phone_number || issue.metadata?.contact_phone,
+          website: adviser?.primary_website
         }
       };
     });
