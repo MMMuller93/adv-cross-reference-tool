@@ -854,6 +854,106 @@ app.get('/api/browse-computed', async (req, res) => {
   }
 });
 
+// API: Compliance Discrepancies - Intelligence Radar
+app.get('/api/discrepancies', async (req, res) => {
+  try {
+    const { limit = 1000, offset = 0, severity, type, searchTerm, status = 'active' } = req.query;
+    console.log(`[Intelligence Radar] Fetching compliance issues - severity: ${severity || 'all'}, type: ${type || 'all'}, search: ${searchTerm || 'none'}`);
+
+    let query = formdClient
+      .from('compliance_issues')
+      .select('*', { count: 'estimated' });
+
+    // Filter by status (default: active only)
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    // Filter by severity (comma-separated: e.g., "high,critical")
+    if (severity) {
+      const severities = severity.split(',').map(s => s.trim());
+      query = query.in('severity', severities);
+    }
+
+    // Filter by discrepancy type (comma-separated)
+    if (type) {
+      const types = type.split(',').map(t => t.trim());
+      query = query.in('discrepancy_type', types);
+    }
+
+    // Search across fund names, entity names, and descriptions
+    if (searchTerm && searchTerm.trim().length > 0) {
+      query = query.or(`description.ilike.%${searchTerm}%,metadata->>fund_name.ilike.%${searchTerm}%,metadata->>entity_name.ilike.%${searchTerm}%`);
+    }
+
+    query = query
+      .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1)
+      .order('severity', { ascending: false })
+      .order('detected_date', { ascending: false });
+
+    const { data: issues, error, count } = await query;
+    if (error) {
+      console.error('[Intelligence Radar] Query error:', error);
+      throw error;
+    }
+
+    // Fetch adviser details from ADV database (cross-database lookup)
+    const crdList = [...new Set((issues || []).map(i => i.adviser_crd).filter(Boolean))];
+    let adviserMap = new Map();
+
+    if (crdList.length > 0) {
+      try {
+        const { data: advisers, error: advError } = await advClient
+          .from('advisers_enriched')
+          .select('crd, adviser_name, legal_name, website, contact_email, contact_phone')
+          .in('crd', crdList);
+
+        if (!advError && advisers) {
+          advisers.forEach(adv => adviserMap.set(adv.crd, adv));
+        }
+      } catch (err) {
+        console.warn('[Intelligence Radar] Adviser lookup failed:', err.message);
+      }
+    }
+
+    // Transform to frontend format
+    const discrepancies = (issues || []).map(issue => {
+      const adviser = adviserMap.get(issue.adviser_crd);
+      return {
+        id: issue.id,
+        fund_reference_id: issue.fund_reference_id,
+        crd: issue.adviser_crd,
+        form_d_cik: issue.form_d_cik,
+        type: issue.discrepancy_type,
+        severity: issue.severity,
+        status: issue.status,
+        description: issue.description,
+        metadata: issue.metadata || {},
+        detected_date: issue.detected_date,
+        resolved_date: issue.resolved_date,
+        // Adviser details
+        entity_name: adviser?.adviser_name || adviser?.legal_name || issue.metadata?.entity_name || 'Unknown',
+        fund_name: issue.metadata?.fund_name,
+        contact_info: {
+          email: adviser?.contact_email || issue.metadata?.contact_email,
+          phone: adviser?.contact_phone || issue.metadata?.contact_phone,
+          website: adviser?.website
+        }
+      };
+    });
+
+    res.json({
+      success: true,
+      discrepancies,
+      total: count || discrepancies.length,
+      filters: { severity, type, status }
+    });
+  } catch (error) {
+    console.error('[Intelligence Radar] Error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // API: New Managers
 app.get('/api/funds/new-managers', async (req, res) => {
   try {

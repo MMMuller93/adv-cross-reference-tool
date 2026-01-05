@@ -1351,17 +1351,55 @@ const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters,
             </div>
           )}
 
-          {/* Cross Reference Filters */}
+          {/* Cross Reference / Intelligence Radar Filters */}
           {activeTab === 'cross_reference' && (
             <div className="space-y-4 px-1">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input type="checkbox" className="h-4 w-4 text-slate-800 border-slate-300 rounded" checked={filters.discrepanciesOnly} onChange={(e) => setFilters(f => ({ ...f, discrepanciesOnly: e.target.checked }))} />
-                <span className="text-[11px] text-slate-700">Discrepancies Only</span>
-              </label>
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input type="checkbox" className="h-4 w-4 text-slate-800 border-slate-300 rounded" checked={filters.overdueAdvOnly} onChange={(e) => setFilters(f => ({ ...f, overdueAdvOnly: e.target.checked }))} />
-                <span className="text-[11px] text-slate-700">Compliance Gaps</span>
-              </label>
+              <div className="space-y-2">
+                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">DISCREPANCY TYPE</label>
+                <select
+                  className="w-full px-2.5 py-1.5 text-[11px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-slate-400 text-slate-700 bg-white"
+                  value={filters.discrepancyType || ''}
+                  onChange={(e) => setFilters(f => ({ ...f, discrepancyType: e.target.value }))}
+                >
+                  <option value="">All Types</option>
+                  <option value="needs_initial_adv_filing">Needs Initial ADV Filing</option>
+                  <option value="overdue_annual_amendment">Overdue Annual Amendment</option>
+                  <option value="vc_exemption_violation">VC Exemption Violation</option>
+                  <option value="fund_type_mismatch">Fund Type Mismatch</option>
+                  <option value="missing_fund_in_adv">Missing Fund in ADV</option>
+                  <option value="exemption_mismatch">Exemption Mismatch</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">SEVERITY</label>
+                <select
+                  className="w-full px-2.5 py-1.5 text-[11px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-slate-400 text-slate-700 bg-white"
+                  value={filters.complianceSeverity || ''}
+                  onChange={(e) => setFilters(f => ({ ...f, complianceSeverity: e.target.value }))}
+                >
+                  <option value="">All Severities</option>
+                  <option value="critical">Critical</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">STATUS</label>
+                <select
+                  className="w-full px-2.5 py-1.5 text-[11px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-slate-400 text-slate-700 bg-white"
+                  value={filters.complianceStatus || 'active'}
+                  onChange={(e) => setFilters(f => ({ ...f, complianceStatus: e.target.value }))}
+                >
+                  <option value="">All Statuses</option>
+                  <option value="active">Active</option>
+                  <option value="resolved">Resolved</option>
+                  <option value="reviewing">Reviewing</option>
+                  <option value="ignored">Ignored</option>
+                </select>
+              </div>
             </div>
           )}
         </div>
@@ -3356,8 +3394,21 @@ function App() {
       if (parsedQuery.apiQuery) {
         params.append('searchTerm', parsedQuery.apiQuery);
       }
+
+      // New filter system
+      if (currentFilters.discrepancyType) {
+        params.append('type', currentFilters.discrepancyType);
+      }
+      if (currentFilters.complianceSeverity) {
+        params.append('severity', currentFilters.complianceSeverity);
+      }
+      if (currentFilters.complianceStatus) {
+        params.append('status', currentFilters.complianceStatus);
+      }
+
+      // Legacy filters for backward compatibility
       if (currentFilters.discrepanciesOnly) params.append('severity', 'high,critical');
-      if (currentFilters.overdueAdvOnly) params.append('type', 'OVERDUE_ANNUAL_ADV,NEEDS_INITIAL_ADV');
+      if (currentFilters.overdueAdvOnly) params.append('type', 'overdue_annual_amendment,needs_initial_adv_filing');
 
       // Try new API first, fallback to old API
       let response, result;
@@ -3587,7 +3638,7 @@ function App() {
     // Search/filter changed - debounce to avoid excessive API calls while typing
     const timeoutId = setTimeout(triggerSearch, 300);
     return () => clearTimeout(timeoutId);
-  }, [activeTab, view, searchTerm, filters.state, filters.type, filters.exemption, filters.minAum, filters.maxAum, filters.strategy, filters.minOffering, filters.maxOffering, filters.startDate, filters.endDate, filters.hasAdv, filters.hasWebsite, filters.discrepanciesOnly, filters.overdueAdvOnly]);
+  }, [activeTab, view, searchTerm, filters.state, filters.type, filters.exemption, filters.minAum, filters.maxAum, filters.strategy, filters.minOffering, filters.maxOffering, filters.startDate, filters.endDate, filters.hasAdv, filters.hasWebsite, filters.discrepanciesOnly, filters.overdueAdvOnly, filters.discrepancyType, filters.complianceSeverity, filters.complianceStatus]);
 
   // New managers filter effect
   useEffect(() => {
@@ -4061,45 +4112,152 @@ function App() {
                   </div>
                 )}
 
-                {/* Cross Reference Table */}
+                {/* Intelligence Radar - Compliance Issues Table */}
                 {activeTab === 'cross_reference' && (
                   <div className="min-w-full inline-block align-middle px-6 pb-12">
                     <div className="border border-gray-200 rounded-lg overflow-hidden shadow-xs">
                       <table className="min-w-full divide-y divide-gray-100">
                         <thead className="bg-gray-50/50">
                           <tr>
-                            <th className="px-6 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider w-[30%] border-b border-gray-200">ADV Fund Name</th>
-                            <th className="px-6 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-200">Form D Match</th>
-                            <th className="px-6 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-200">Issues</th>
-                            <th className="px-6 py-2.5 text-right text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-200">Match Score</th>
+                            <th className="px-6 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-200">Manager / Fund</th>
+                            <th className="px-6 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-200">Discrepancy Type</th>
+                            <th className="px-6 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-200">Description</th>
+                            <th className="px-6 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-200">Contact</th>
+                            <th className="px-6 py-2.5 text-center text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-200">Links</th>
+                            <th className="px-6 py-2.5 text-center text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-200">Detected</th>
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-50">
-                          {crossRefMatches.map((match, idx) => (
-                            <tr key={idx} className="group hover:bg-gray-50 cursor-pointer transition-colors">
-                              <td className="px-6 py-3 whitespace-nowrap">
-                                <div className="text-[13px] font-medium text-gray-900 group-hover:text-slate-700 transition-colors tracking-tight truncate max-w-[250px]">{match.adv_fund_name}</div>
-                                <div className="text-[10px] text-gray-400 mt-0.5">{match.adviser_entity_legal_name}</div>
-                              </td>
-                              <td className="px-6 py-3 whitespace-nowrap">
-                                <div className="text-[12px] text-gray-600 truncate max-w-[200px]">{match.formd_entity_name || 'N/A'}</div>
-                              </td>
-                              <td className="px-6 py-3 whitespace-nowrap">
-                                {match.issues ? (
-                                  <span className="inline-flex items-center text-[10px] text-red-700 font-medium">
-                                    <AlertTriangleIcon className="w-3 h-3 mr-1.5 text-red-500" />{match.issues}
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] text-gray-400">None</span>
-                                )}
-                              </td>
-                              <td className="px-6 py-3 whitespace-nowrap text-right">
-                                <span className="text-[11px] font-mono text-gray-500">{match.match_score ? `${(match.match_score * 100).toFixed(0)}%` : 'N/A'}</span>
-                              </td>
-                            </tr>
-                          ))}
+                          {crossRefMatches.map((match, idx) => {
+                            const getSeverityColor = (severity) => {
+                              switch(severity?.toLowerCase()) {
+                                case 'critical': return 'bg-red-100 text-red-800 border-red-300';
+                                case 'high': return 'bg-orange-100 text-orange-800 border-orange-300';
+                                case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+                                case 'low': return 'bg-blue-100 text-blue-800 border-blue-300';
+                                default: return 'bg-gray-100 text-gray-800 border-gray-300';
+                              }
+                            };
+
+                            const getTypeLabel = (type) => {
+                              const labels = {
+                                'needs_initial_adv_filing': 'Initial ADV Filing',
+                                'overdue_annual_amendment': 'Overdue Amendment',
+                                'vc_exemption_violation': 'VC Exemption Issue',
+                                'fund_type_mismatch': 'Type Mismatch',
+                                'missing_fund_in_adv': 'Missing Fund',
+                                'exemption_mismatch': 'Exemption Mismatch'
+                              };
+                              return labels[type] || type;
+                            };
+
+                            return (
+                              <tr key={match.id || idx} className="group hover:bg-gray-50 transition-colors">
+                                <td className="px-6 py-3">
+                                  <div className="flex flex-col">
+                                    {match.crd || match.adviser_entity_crd ? (
+                                      <a
+                                        href={getAdviserUrl(match.crd || match.adviser_entity_crd, match.entity_name || match.adviser_entity_legal_name)}
+                                        className="text-[13px] font-medium text-gray-900 hover:text-slate-700 transition-colors tracking-tight"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        {match.entity_name || match.adviser_entity_legal_name || 'Unknown Manager'}
+                                      </a>
+                                    ) : (
+                                      <div className="text-[13px] font-medium text-gray-900">{match.entity_name || 'Unknown Manager'}</div>
+                                    )}
+                                    {match.fund_name && (
+                                      <div className="text-[10px] text-gray-500 mt-0.5">{match.fund_name}</div>
+                                    )}
+                                    <div className="flex items-center gap-1.5 mt-1">
+                                      <span className={`inline-block px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide rounded border ${getSeverityColor(match.severity)}`}>
+                                        {match.severity || 'N/A'}
+                                      </span>
+                                      {match.status && match.status !== 'active' && (
+                                        <span className="inline-block px-1.5 py-0.5 text-[9px] font-medium text-gray-600 bg-gray-100 rounded">
+                                          {match.status}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-6 py-3">
+                                  <div className="text-[11px] font-medium text-gray-700">
+                                    {getTypeLabel(match.type || match.discrepancy_type)}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-3">
+                                  <div className="text-[11px] text-gray-600 leading-relaxed max-w-md">
+                                    {match.description || match.issues || 'No description available'}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-3">
+                                  <div className="flex flex-col gap-1 text-[10px]">
+                                    {match.contact_info?.email && (
+                                      <a href={`mailto:${match.contact_info.email}`} className="text-blue-600 hover:text-blue-800 hover:underline" onClick={(e) => e.stopPropagation()}>
+                                        {match.contact_info.email}
+                                      </a>
+                                    )}
+                                    {match.contact_info?.phone && (
+                                      <a href={`tel:${match.contact_info.phone}`} className="text-gray-600 hover:text-gray-800" onClick={(e) => e.stopPropagation()}>
+                                        {match.contact_info.phone}
+                                      </a>
+                                    )}
+                                    {match.contact_info?.website && (
+                                      <a href={match.contact_info.website} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 hover:underline truncate max-w-[150px]" onClick={(e) => e.stopPropagation()}>
+                                        {match.contact_info.website.replace(/^https?:\/\/(www\.)?/, '')}
+                                      </a>
+                                    )}
+                                    {!match.contact_info?.email && !match.contact_info?.phone && !match.contact_info?.website && (
+                                      <span className="text-gray-400">No contact info</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-3">
+                                  <div className="flex justify-center items-center gap-2">
+                                    {match.crd || match.adviser_entity_crd ? (
+                                      <a
+                                        href={`https://adviserinfo.sec.gov/firm/summary/${match.crd || match.adviser_entity_crd}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-[10px] font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        IAPD
+                                      </a>
+                                    ) : (
+                                      <span className="text-[10px] text-gray-300">IAPD</span>
+                                    )}
+                                    {match.form_d_cik ? (
+                                      <a
+                                        href={`https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${match.form_d_cik}&type=D&dateb=&owner=include&count=40`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-[10px] font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        EDGAR
+                                      </a>
+                                    ) : (
+                                      <span className="text-[10px] text-gray-300">EDGAR</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-3 text-center">
+                                  <div className="text-[10px] text-gray-500 font-mono">
+                                    {match.detected_date ? formatDateDisplay(match.detected_date) : 'N/A'}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
+                      {crossRefMatches.length === 0 && (
+                        <div className="px-6 py-12 text-center">
+                          <div className="text-gray-400 text-sm">No compliance issues found matching your filters</div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

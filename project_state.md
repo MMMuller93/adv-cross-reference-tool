@@ -461,6 +461,44 @@ None currently
 
 ## Session Log (Last 5)
 
+### Session 8 - 2026-01-05 (Continued)
+
+- **Focus:** Intelligence Radar implementation - Compliance discrepancy detection system
+- **Completed:**
+  - ✅ Created `compliance_issues` table schema with RLS policies (migration ready)
+  - ✅ Implemented 6 discrepancy detection algorithms in detect_compliance_issues.js:
+    1. Needs Initial ADV Filing (60-day grace period)
+    2. Overdue Annual Amendment (April 1 + 90 days)
+    3. VC Exemption Violation (non-VC funds with VC exemption)
+    4. Fund Type Mismatch (Form D ≠ Form ADV)
+    5. Missing Fund in ADV (Form D filed but not in ADV)
+    6. Exemption Mismatch (3(c)(1) vs 3(c)(7) differences)
+  - ✅ Added `/api/discrepancies` endpoint with cross-database adviser lookups
+  - ✅ Built Intelligence Radar UI with filters (discrepancy type, severity, status)
+  - ✅ Enhanced table display with:
+    - Manager name with clickable links to detail page
+    - Color-coded severity badges (critical/high/medium/low)
+    - Factual descriptions (no editorialization)
+    - Contact information (email, phone, website)
+    - Links to Form ADV (IAPD) and Form D (EDGAR)
+    - Detected date
+  - ✅ Created comprehensive documentation (INTELLIGENCE_RADAR_IMPLEMENTATION.md)
+- **Technical Decisions:**
+  - New compliance_issues table vs existing cross_reference_matches.issues column
+  - Rationale: Better schema, indexes, status tracking, scalability
+  - Cross-database joins handled in application layer (formdClient + advClient)
+- **Next Steps:**
+  1. Run migration to create compliance_issues table in Form D database
+  2. Execute detect_compliance_issues.js to populate initial data
+  3. Test in browser at localhost:3009
+  4. Schedule daily detection runs (cron job or Supabase Edge Function)
+- **Files Modified:**
+  - Created: migrations/create_compliance_issues_table.sql
+  - Created: detect_compliance_issues.js
+  - Created: INTELLIGENCE_RADAR_IMPLEMENTATION.md
+  - Modified: server.js (added /api/discrepancies endpoint)
+  - Modified: public/app.js (filters, table, fetch logic)
+
 ### Session 7 - 2026-01-05
 - **Focus:** Bug investigation for Founders Fund "incorrect" funds issue
 - **Completed:**
