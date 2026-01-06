@@ -504,6 +504,152 @@ async function searchLinkedIn(fundName) {
 }
 
 /**
+ * Search for team members via LinkedIn when website extraction fails
+ * Uses search API to find "[Fund Name] team linkedin" profiles
+ */
+async function searchTeamLinkedIn(fundName) {
+  const parsedName = parseFundName(fundName);
+  const teamMembers = [];
+
+  // Search for team members on LinkedIn
+  const queries = [
+    `site:linkedin.com/in "${parsedName}" founder OR partner OR managing`,
+    `site:linkedin.com/in "${parsedName}" principal OR director`
+  ];
+
+  for (const query of queries) {
+    const results = await search(query);
+    if (!results?.web?.results) continue;
+
+    for (const result of results.web.results) {
+      const url = result.url;
+      if (!url?.includes('linkedin.com/in/')) continue;
+
+      // Extract name from title (usually "Name - Title - Company | LinkedIn")
+      const title = result.title || '';
+      const namePart = title.split(' - ')[0]?.trim();
+      const rolePart = title.split(' - ')[1]?.trim();
+
+      // Skip if name looks like search results or company pages
+      if (!namePart || namePart.includes('LinkedIn') || namePart.length > 50) continue;
+
+      // Check if this person is associated with the fund (name appears in title)
+      const lowerTitle = title.toLowerCase();
+      const lowerParsedName = parsedName.toLowerCase();
+      const nameWords = lowerParsedName.split(' ').filter(w => w.length > 3);
+      const isRelated = nameWords.some(word => lowerTitle.includes(word));
+
+      if (!isRelated) continue;
+
+      // Dedupe by LinkedIn username
+      const username = url.split('/in/')[1]?.split(/[?/]/)[0]?.toLowerCase();
+      if (username && !teamMembers.some(m => m.linkedin?.toLowerCase().includes(username))) {
+        teamMembers.push({
+          name: namePart,
+          title: rolePart || null,
+          email: null,
+          linkedin: url.split('?')[0] // Clean URL
+        });
+
+        console.log(`[LinkedIn Search] Found: ${namePart} - ${rolePart || 'Unknown role'}`);
+      }
+
+      // Limit to 5 team members from search
+      if (teamMembers.length >= 5) break;
+    }
+
+    if (teamMembers.length >= 5) break;
+    await delay(RATE_LIMIT_DELAY_MS);
+  }
+
+  return teamMembers;
+}
+
+/**
+ * Extract related parties from Form D filings for a given series_master_llc
+ * Returns structured team members from the related_names/related_roles fields
+ *
+ * Note: Form D related parties are often limited - may include fund admins
+ * rather than actual investment team. Use as fallback, not primary source.
+ */
+async function extractRelatedPartiesFromFormD(seriesMasterLlc) {
+  if (!seriesMasterLlc) return [];
+
+  try {
+    // Get Form D filings for this master LLC
+    const { data: filings, error } = await formdClient
+      .from('form_d_filings')
+      .select('related_names, related_roles, entityname')
+      .eq('series_master_llc', seriesMasterLlc)
+      .not('related_names', 'is', null)
+      .limit(10);
+
+    if (error || !filings?.length) return [];
+
+    const teamMap = new Map();
+
+    // Roles that indicate actual team members (not service providers)
+    const investmentRoles = [
+      'managing member', 'manager', 'general partner', 'executive officer',
+      'director', 'founder', 'principal', 'partner', 'ceo', 'cio', 'cfo',
+      'president', 'chief', 'portfolio manager'
+    ];
+
+    // Roles that indicate service providers (filter out)
+    const serviceProviderRoles = [
+      'administrator', 'fund admin', 'custodian', 'legal', 'counsel',
+      'accountant', 'auditor', 'compliance', 'secretary'
+    ];
+
+    for (const filing of filings) {
+      const names = (filing.related_names || '').split('|').map(n => n.trim()).filter(Boolean);
+      const roles = (filing.related_roles || '').split('|').map(r => r.trim()).filter(Boolean);
+
+      for (let i = 0; i < names.length; i++) {
+        const name = names[i];
+        const role = roles[i] || '';
+        const roleLower = role.toLowerCase();
+
+        // Skip service providers
+        if (serviceProviderRoles.some(sp => roleLower.includes(sp))) continue;
+
+        // Skip if name looks like a company, not a person
+        if (name.includes('LLC') || name.includes('LP') || name.includes('Inc') ||
+            name.includes('Corp') || name.includes('Ltd') || name.includes('Fund')) continue;
+
+        // Check if this looks like an investment team member
+        const isInvestmentTeam = investmentRoles.some(ir => roleLower.includes(ir));
+
+        // Add to map (dedupe by name)
+        const nameKey = name.toLowerCase();
+        if (!teamMap.has(nameKey)) {
+          teamMap.set(nameKey, {
+            name: name,
+            title: role || null,
+            email: null,
+            linkedin: null,
+            source: 'form_d',
+            isInvestmentTeam: isInvestmentTeam
+          });
+        }
+      }
+    }
+
+    // Sort: investment team first, then others
+    const results = Array.from(teamMap.values())
+      .sort((a, b) => (b.isInvestmentTeam ? 1 : 0) - (a.isInvestmentTeam ? 1 : 0))
+      .slice(0, 10); // Limit to 10
+
+    console.log(`[Form D] Found ${results.length} related parties for ${seriesMasterLlc}`);
+    return results;
+
+  } catch (error) {
+    console.error('[Form D] Error extracting related parties:', error.message);
+    return [];
+  }
+}
+
+/**
  * Search for Twitter/X handle
  */
 async function searchTwitter(fundName) {
@@ -1025,7 +1171,54 @@ async function enrichManager(name, options = {}) {
       console.log(`[Enrichment] Found ${enrichmentData.team_members.length} team members total`);
     }
   }
-  
+
+  // FALLBACK 1: If no team members from website, search LinkedIn for team
+  if (enrichmentData.team_members.length === 0) {
+    console.log(`[Enrichment] No team from website - trying LinkedIn search fallback...`);
+    await delay(RATE_LIMIT_DELAY_MS);
+    const linkedInTeam = await searchTeamLinkedIn(name);
+    if (linkedInTeam.length > 0) {
+      enrichmentData.team_members = linkedInTeam;
+      enrichmentData.data_sources.push('team_linkedin_search');
+      console.log(`[Enrichment] Found ${linkedInTeam.length} team members via LinkedIn search`);
+    }
+  }
+
+  // FALLBACK 2: Cross-reference with Form D related parties
+  console.log(`[Enrichment] Cross-referencing with Form D related parties...`);
+  const formDRelatedParties = await extractRelatedPartiesFromFormD(name);
+
+  if (formDRelatedParties.length > 0) {
+    // Merge with existing team (Form D as supplementary, not replacement)
+    const existingNames = new Set(enrichmentData.team_members.map(m => m.name?.toLowerCase()));
+
+    for (const formDPerson of formDRelatedParties) {
+      const nameKey = formDPerson.name?.toLowerCase();
+      if (nameKey && !existingNames.has(nameKey)) {
+        // Add Form D person to team
+        enrichmentData.team_members.push({
+          name: formDPerson.name,
+          title: formDPerson.title,
+          email: null,
+          linkedin: null,
+          source: 'form_d'
+        });
+        existingNames.add(nameKey);
+      } else if (nameKey && existingNames.has(nameKey)) {
+        // Fill in title from Form D if missing
+        const existing = enrichmentData.team_members.find(m => m.name?.toLowerCase() === nameKey);
+        if (existing && !existing.title && formDPerson.title) {
+          existing.title = formDPerson.title;
+        }
+      }
+    }
+
+    if (!enrichmentData.data_sources.includes('form_d_related')) {
+      enrichmentData.data_sources.push('form_d_related');
+    }
+    console.log(`[Enrichment] Team after Form D merge: ${enrichmentData.team_members.length} members`);
+  }
+
   // Classify fund type
   const classification = await classifyFundTypeWithAI(name, searchResults);
   enrichmentData.fund_type = classification.fundType;
@@ -1184,8 +1377,10 @@ module.exports = {
   validateWebsiteWithAI,
   searchTwitter,
   searchLinkedIn,
+  searchTeamLinkedIn,
   extractLinkedInFromWebsite,
-  extractCompanyLinkedInFromProfile
+  extractCompanyLinkedInFromProfile,
+  extractRelatedPartiesFromFormD
 };
 
 // ============================================================================
