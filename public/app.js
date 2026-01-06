@@ -3763,6 +3763,37 @@ function App() {
     }
   };
 
+  // Navigate to fund by name or reference_id (for compliance issues that don't have full fund object)
+  const handleFundClickByName = async (fundName, referenceId = null) => {
+    try {
+      let query = `${SUPABASE_ADV_URL}/rest/v1/funds_enriched?select=*&limit=1`;
+      if (referenceId) {
+        query += `&reference_id=eq.${referenceId}`;
+      } else if (fundName) {
+        query += `&fund_name=ilike.${encodeURIComponent(fundName)}`;
+      } else {
+        console.warn('No fund name or reference_id provided');
+        return;
+      }
+
+      const res = await fetch(query, { headers: advHeaders });
+      const data = await res.json();
+      if (data && data.length > 0) {
+        setSelectedFund(data[0]);
+        const url = getFundUrl(data[0].reference_id || data[0].fund_id, data[0].fund_name);
+        window.history.pushState({}, '', url);
+        setView('fund_detail');
+      } else {
+        console.warn('Fund not found:', fundName || referenceId);
+        // Still navigate but show not found state
+        setSelectedFund(null);
+        setView('fund_detail');
+      }
+    } catch (err) {
+      console.error('Error fetching fund:', err);
+    }
+  };
+
   const activeCount = activeTab === 'advisers' ? advisers.length : activeTab === 'funds' ? funds.length : activeTab === 'new_managers' ? newManagers.length : crossRefMatches.length;
 
   return (
@@ -4193,18 +4224,32 @@ function App() {
                                 <td className="px-6 py-3">
                                   <div className="flex flex-col">
                                     {match.crd || match.adviser_entity_crd ? (
-                                      <a
-                                        href={getAdviserUrl(match.crd || match.adviser_entity_crd, match.entity_name || match.adviser_entity_legal_name)}
-                                        className="text-[13px] font-medium text-gray-900 hover:text-slate-700 transition-colors tracking-tight"
-                                        onClick={(e) => e.stopPropagation()}
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          // Navigate to adviser detail using React state (not page reload)
+                                          handleAdviserClick({ crd: match.crd || match.adviser_entity_crd, adviser_name: match.entity_name || match.adviser_entity_legal_name });
+                                        }}
+                                        className="text-[13px] font-medium text-gray-900 hover:text-slate-700 transition-colors tracking-tight text-left"
                                       >
                                         {match.entity_name || match.adviser_entity_legal_name || 'Unknown Manager'}
-                                      </a>
+                                      </button>
                                     ) : (
                                       <div className="text-[13px] font-medium text-gray-900">{match.entity_name || 'Unknown Manager'}</div>
                                     )}
-                                    {match.fund_name && (
-                                      <div className="text-[10px] text-gray-500 mt-0.5">{match.fund_name}</div>
+                                    {/* Show clickable fund name - from direct field or metadata */}
+                                    {(match.fund_name || match.metadata?.primary_fund_name || match.metadata?.adv_fund_name || match.metadata?.fund_name) && (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          const fundName = match.fund_name || match.metadata?.primary_fund_name || match.metadata?.adv_fund_name || match.metadata?.fund_name;
+                                          const refId = match.fund_reference_id || match.metadata?.primary_fund_reference_id || match.metadata?.adv_fund_reference_id;
+                                          handleFundClickByName(fundName, refId);
+                                        }}
+                                        className="text-[10px] text-blue-600 hover:text-blue-800 hover:underline mt-0.5 text-left"
+                                      >
+                                        {match.fund_name || match.metadata?.primary_fund_name || match.metadata?.adv_fund_name || match.metadata?.fund_name}
+                                      </button>
                                     )}
                                     <div className="flex items-center gap-1.5 mt-1">
                                       <span className={`inline-block px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide rounded border ${getSeverityColor(match.severity)}`}>
@@ -4226,29 +4271,95 @@ function App() {
                                 <td className="px-6 py-3">
                                   <div className="text-[11px] text-gray-600 leading-relaxed max-w-md">
                                     {match.description || match.issues || 'No description available'}
-                                    {/* Show fund types for VC exemption violations */}
-                                    {match.type === 'vc_exemption_violation' && match.metadata?.sample_non_vc_funds?.length > 0 && (
+
+                                    {/* Show clickable fund links for VC exemption violations */}
+                                    {(match.type === 'vc_exemption_violation' || match.discrepancy_type === 'vc_exemption_violation') && match.metadata?.sample_non_vc_funds?.length > 0 && (
                                       <div className="mt-1.5 flex flex-wrap gap-1">
                                         {match.metadata.sample_non_vc_funds.slice(0, 3).map((fund, i) => (
-                                          <span key={i} className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium bg-amber-50 text-amber-700 rounded border border-amber-200">
-                                            {fund.type || 'Unknown Type'}
-                                          </span>
+                                          <button
+                                            key={i}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              if (fund.reference_id) {
+                                                handleFundClickByName(fund.name, fund.reference_id);
+                                              }
+                                            }}
+                                            className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium bg-amber-50 text-amber-700 rounded border border-amber-200 ${fund.reference_id ? 'hover:bg-amber-100 cursor-pointer' : 'cursor-default'}`}
+                                          >
+                                            {fund.name?.substring(0, 30)}{fund.name?.length > 30 ? '...' : ''} ({fund.type || 'Unknown'})
+                                          </button>
                                         ))}
                                         {match.metadata.sample_non_vc_funds.length > 3 && (
                                           <span className="text-[9px] text-gray-400">+{match.metadata.sample_non_vc_funds.length - 3} more</span>
                                         )}
                                       </div>
                                     )}
-                                    {/* Show fund type mismatch details */}
-                                    {match.type === 'fund_type_mismatch' && match.metadata && (
-                                      <div className="mt-1.5 flex items-center gap-1 text-[9px]">
-                                        <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded border border-blue-200">ADV: {match.metadata.adv_fund_type}</span>
-                                        <span className="text-gray-400">vs</span>
-                                        <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded border border-purple-200">Form D: {match.metadata.formd_fund_type}</span>
+
+                                    {/* Show fund type mismatch details with clickable fund */}
+                                    {(match.type === 'fund_type_mismatch' || match.discrepancy_type === 'fund_type_mismatch') && match.metadata && (
+                                      <div className="mt-1.5 space-y-1">
+                                        <div className="flex items-center gap-1 text-[9px]">
+                                          <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded border border-blue-200">ADV: {match.metadata.adv_fund_type}</span>
+                                          <span className="text-gray-400">vs</span>
+                                          <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded border border-purple-200">Form D: {match.metadata.formd_fund_type}</span>
+                                        </div>
+                                        {match.metadata.formd_filing_date && (
+                                          <div className="text-[9px] text-gray-400">
+                                            Form D filed: {formatDateDisplay(match.metadata.formd_filing_date)}
+                                          </div>
+                                        )}
                                       </div>
                                     )}
+
+                                    {/* Show overdue amendment with Form D filings */}
+                                    {(match.type === 'overdue_annual_amendment' || match.discrepancy_type === 'overdue_annual_amendment') && match.metadata?.form_d_filings_after_adv?.length > 0 && (
+                                      <div className="mt-1.5 space-y-1">
+                                        <div className="text-[9px] text-gray-500 font-medium">Form Ds filed since last ADV:</div>
+                                        {match.metadata.form_d_filings_after_adv.slice(0, 3).map((filing, i) => (
+                                          <div key={i} className="text-[9px] flex items-center gap-1">
+                                            <span className="text-gray-600">{filing.entity_name?.substring(0, 35)}{filing.entity_name?.length > 35 ? '...' : ''}</span>
+                                            {filing.filing_date && (
+                                              <span className="text-gray-400">({formatDateDisplay(filing.filing_date)})</span>
+                                            )}
+                                            {filing.cik && (
+                                              <a
+                                                href={`https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${filing.cik}&type=D&dateb=&owner=include&count=10`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-blue-600 hover:underline"
+                                                onClick={(e) => e.stopPropagation()}
+                                              >
+                                                EDGAR
+                                              </a>
+                                            )}
+                                          </div>
+                                        ))}
+                                        {match.metadata.form_d_filings_after_adv.length > 3 && (
+                                          <div className="text-[9px] text-gray-400">+{match.metadata.form_d_filings_after_adv.length - 3} more filings</div>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {/* Show missing fund details with Form D filing date */}
+                                    {(match.type === 'missing_fund_in_adv' || match.discrepancy_type === 'missing_fund_in_adv') && match.metadata && (
+                                      <div className="mt-1.5 space-y-1">
+                                        <div className="text-[9px] text-amber-700 font-medium">
+                                          Fund: {match.metadata.fund_name}
+                                        </div>
+                                        {match.metadata.formd_filing_date && (
+                                          <div className="text-[9px] text-gray-500">
+                                            Form D filed: {formatDateDisplay(match.metadata.formd_filing_date)}
+                                            {match.metadata.offering_amount && ` | $${Number(match.metadata.offering_amount).toLocaleString()}`}
+                                          </div>
+                                        )}
+                                        <div className="text-[9px] text-gray-400">
+                                          Latest ADV: {match.metadata.latest_adv_year || 'Unknown'}
+                                        </div>
+                                      </div>
+                                    )}
+
                                     {/* Show exemption mismatch details */}
-                                    {match.type === 'exemption_mismatch' && match.metadata && (
+                                    {(match.type === 'exemption_mismatch' || match.discrepancy_type === 'exemption_mismatch') && match.metadata && (
                                       <div className="mt-1.5 text-[9px] text-gray-500">
                                         ADV: 3(c)(1)={match.metadata.adv_3c1 ? 'Y' : 'N'}, 3(c)(7)={match.metadata.adv_3c7 ? 'Y' : 'N'} |
                                         Form D: 3(c)(1)={match.metadata.formd_3c1 ? 'Y' : 'N'}, 3(c)(7)={match.metadata.formd_3c7 ? 'Y' : 'N'}

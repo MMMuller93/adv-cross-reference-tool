@@ -5,6 +5,75 @@
 
 ---
 
+## Quick Commands
+
+```bash
+# Dev
+npm start                        # Start server on port 3009
+
+# Test / Verify
+curl http://localhost:3009/health       # Server health check
+curl http://localhost:3009/api/funds/adv?search=founders&limit=5  # Quick API test
+
+# Lint / Type check
+node -c server.js                # Check syntax errors
+node -c public/app.js            # Check frontend syntax
+
+# Deploy
+git push origin master           # Deploy to GitHub (production is privatefundsradar.com)
+```
+
+---
+
+## Complexity Assessment (DO THIS FOR EVERY REQUEST)
+
+Before implementing anything, classify the request:
+
+### Quick Fix (No Approval Needed)
+- Typos, one-line changes, simple bug fixes
+- Clear, localized scope
+- **Action**: Implement immediately, test, commit
+
+### Standard Feature (Wait for Approval)
+- Multi-file changes, new UI components, new endpoints
+- Requires design decisions
+- **Action**: Present plan with:
+  - Files to modify
+  - Approach summary
+  - Edge cases considered
+  - Rollback plan if something breaks
+- **Wait for**: "go", "ship it", "approved", or "do it"
+
+### Complex Project (Full Tracking Required)
+- Multi-day work, architectural changes, cross-system modifications
+- **Action**: Create/update `claude-progress.txt` with:
+  - Task breakdown with checkboxes
+  - Current phase
+  - Blocked items
+  - Test commands
+- **Wait for**: Explicit approval before each major phase
+
+---
+
+## Core Rules (ALWAYS FOLLOW)
+
+1. **One feature at a time** - Complete fully before starting another
+2. **Smallest viable diff** - Don't refactor unrelated code
+3. **Smoke test before commit** - Verify the change works end-to-end
+4. **Rollback plan** - Know how to revert if something breaks
+5. **Update state files** - project_state.md after every session
+
+---
+
+## Push Back / Escalate When
+
+- Request is vague: Ask "What does 'done' look like?"
+- Change could break production: Flag risk, propose safer alternative
+- Scope creeping: "This is becoming Complex. Let me create a progress file."
+- Missing context: "I need to see [X] before implementing this safely."
+
+---
+
 ## Session Startup Protocol (EXECUTE FIRST)
 
 Before doing ANY work, run these commands in order:

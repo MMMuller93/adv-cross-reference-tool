@@ -32,13 +32,14 @@ const formDDb = createClient(FORM_D_URL, FORM_D_KEY);
 // Detection configuration
 const DETECTION_CONFIG = {
     initialFilingGracePeriodDays: 60,  // Days after Form D to file initial ADV
-    annualAmendmentDeadline: '2025-04-01',  // Current year deadline
+    annualAmendmentDeadline: '2026-04-01',  // Current year deadline
     batchSize: 1000,  // Supabase default limit is 1000 rows per request
     maxRecords: 100000,  // Process up to 100k records total
     enabledDetectors: [
         'overdue_annual_amendment',  // Uses overdue_adv_flag from cross_reference_matches
         'vc_exemption_violation',
         'fund_type_mismatch',
+        'missing_fund_in_adv',  // Enabled: Form D exists but fund not in ADV
         'exemption_mismatch'
         // 'needs_initial_adv_filing'  // Disabled - requires comparing Form D to ADV at entity level
     ]
@@ -103,6 +104,7 @@ async function detectNeedsInitialADVFiling() {
  * Detector 2: Overdue Annual ADV Amendment
  * Uses pre-computed overdue_adv_flag from cross_reference_matches
  * Flags advisers whose latest ADV filing is not current year
+ * Enhanced: Includes Form D filings filed after the last ADV
  */
 async function detectOverdueAnnualAmendment() {
     console.log('\n[2/6] Detecting: Overdue Annual ADV Amendment...');
@@ -110,11 +112,12 @@ async function detectOverdueAnnualAmendment() {
     const issues = [];
     let offset = 0;
     const seenAdvisers = new Set(); // Deduplicate by adviser
+    const adviserFormDs = new Map(); // Collect Form D filings per adviser
 
     while (offset < DETECTION_CONFIG.maxRecords) {
         const { data: matches, error } = await formDDb
             .from('cross_reference_matches')
-            .select('adviser_entity_crd, adviser_entity_legal_name, latest_adv_year, overdue_adv_flag, adv_fund_name')
+            .select('adviser_entity_crd, adviser_entity_legal_name, latest_adv_year, overdue_adv_flag, adv_fund_name, formd_accession, formd_entity_name')
             .eq('overdue_adv_flag', true)
             .range(offset, offset + DETECTION_CONFIG.batchSize - 1);
 
@@ -122,29 +125,89 @@ async function detectOverdueAnnualAmendment() {
         if (!matches || matches.length === 0) break;
 
         for (const match of matches) {
-            // Deduplicate by adviser CRD
-            if (!match.adviser_entity_crd || seenAdvisers.has(match.adviser_entity_crd)) continue;
-            seenAdvisers.add(match.adviser_entity_crd);
+            if (!match.adviser_entity_crd) continue;
 
-            issues.push({
-                adviser_crd: match.adviser_entity_crd,
-                discrepancy_type: 'overdue_annual_amendment',
-                severity: 'high',
-                description: `Manager "${match.adviser_entity_legal_name}" has not filed current year ADV amendment (last filing: ${match.latest_adv_year || 'unknown'})`,
-                metadata: {
+            // Collect Form D filings for each adviser
+            if (!adviserFormDs.has(match.adviser_entity_crd)) {
+                adviserFormDs.set(match.adviser_entity_crd, {
                     adviser_name: match.adviser_entity_legal_name,
                     latest_adv_year: match.latest_adv_year,
-                    sample_fund: match.adv_fund_name
-                }
-            });
+                    form_d_filings: []
+                });
+            }
+
+            if (match.formd_accession) {
+                adviserFormDs.get(match.adviser_entity_crd).form_d_filings.push({
+                    accession: match.formd_accession,
+                    entity_name: match.formd_entity_name
+                });
+            }
         }
 
         offset += DETECTION_CONFIG.batchSize;
         if (matches.length < DETECTION_CONFIG.batchSize) break;
 
         if (offset % 10000 === 0) {
-            console.log(`    Processed ${offset} records, found ${issues.length} overdue advisers...`);
+            console.log(`    Processed ${offset} records...`);
         }
+    }
+
+    // Now fetch Form D filing dates for all relevant accessions
+    const allAccessions = [];
+    for (const [crd, data] of adviserFormDs) {
+        allAccessions.push(...data.form_d_filings.map(f => f.accession));
+    }
+
+    // Batch fetch Form D filing dates
+    const filingDates = new Map();
+    for (let i = 0; i < allAccessions.length; i += 100) {
+        const batch = allAccessions.slice(i, i + 100);
+        const { data: filings } = await formDDb
+            .from('form_d_filings')
+            .select('accessionnumber, filing_date, entityname, cik')
+            .in('accessionnumber', batch);
+
+        for (const f of (filings || [])) {
+            filingDates.set(f.accessionnumber, {
+                filing_date: f.filing_date,
+                cik: f.cik
+            });
+        }
+    }
+
+    // Build issues with Form D details
+    for (const [crd, data] of adviserFormDs) {
+        // Find Form D filings after the last ADV year
+        const formDsAfterAdv = data.form_d_filings
+            .filter(f => {
+                const filingInfo = filingDates.get(f.accession);
+                if (!filingInfo) return false;
+                const filingYear = new Date(filingInfo.filing_date).getFullYear();
+                return filingYear > (data.latest_adv_year || 0);
+            })
+            .map(f => ({
+                ...f,
+                filing_date: filingDates.get(f.accession)?.filing_date,
+                cik: filingDates.get(f.accession)?.cik
+            }));
+
+        issues.push({
+            adviser_crd: crd,
+            discrepancy_type: 'overdue_annual_amendment',
+            severity: 'high',
+            description: `Manager "${data.adviser_name}" has not filed current year ADV amendment (last filing: ${data.latest_adv_year || 'unknown'})${formDsAfterAdv.length > 0 ? `. ${formDsAfterAdv.length} Form D filings since then.` : ''}`,
+            metadata: {
+                adviser_name: data.adviser_name,
+                latest_adv_year: data.latest_adv_year,
+                form_d_count_after_adv: formDsAfterAdv.length,
+                form_d_filings_after_adv: formDsAfterAdv.slice(0, 5).map(f => ({
+                    accession: f.accession,
+                    entity_name: f.entity_name,
+                    filing_date: f.filing_date,
+                    cik: f.cik
+                }))
+            }
+        });
     }
 
     console.log(`  Found ${issues.length} issues (unique advisers with overdue ADV)`);
@@ -154,6 +217,7 @@ async function detectOverdueAnnualAmendment() {
 /**
  * Detector 3: VC Exemption Violation
  * Manager claims venture capital exemption but manages non-VC funds
+ * Enhanced: Includes fund reference_id for direct linking
  */
 async function detectVCExemptionViolation() {
     console.log('\n[3/6] Detecting: VC Exemption Violation...');
@@ -182,17 +246,25 @@ async function detectVCExemptionViolation() {
         });
 
         if (nonVCFunds.length > 0) {
+            // Pick the first non-VC fund as the "primary" fund for this issue
+            const primaryFund = nonVCFunds[0];
+
             issues.push({
                 adviser_crd: adviser.crd,
+                fund_reference_id: primaryFund.reference_id,  // For linking to fund detail
                 discrepancy_type: 'vc_exemption_violation',
                 severity: 'high',
                 description: `Manager "${adviser.adviser_name}" claims venture capital exemption but manages ${nonVCFunds.length} non-VC funds`,
                 metadata: {
                     exemption_2b2: 'Y',
                     non_vc_fund_count: nonVCFunds.length,
+                    primary_fund_name: primaryFund.fund_name,
+                    primary_fund_type: primaryFund.fund_type,
+                    primary_fund_reference_id: primaryFund.reference_id,
                     sample_non_vc_funds: nonVCFunds.slice(0, 5).map(f => ({
                         name: f.fund_name,
-                        type: f.fund_type
+                        type: f.fund_type,
+                        reference_id: f.reference_id  // Include for each fund
                     }))
                 }
             });
@@ -206,7 +278,7 @@ async function detectVCExemptionViolation() {
 /**
  * Detector 4: Fund Type Mismatch
  * Fund type in Form D differs from Form ADV
- * Paginates through ALL cross_reference_matches to find mismatches
+ * Enhanced: Includes reference_id for fund linking, filing dates
  */
 async function detectFundTypeMismatch() {
     console.log('\n[4/6] Detecting: Fund Type Mismatch...');
@@ -232,48 +304,57 @@ async function detectFundTypeMismatch() {
         for (let i = 0; i < matches.length; i += apiBatchSize) {
             const batch = matches.slice(i, i + apiBatchSize);
 
-            // Get ADV fund types for this batch
+            // Get ADV fund types and reference_ids for this batch
             const advFundIds = batch.map(m => m.adv_fund_id).filter(Boolean);
             const { data: advFunds } = await advDb
                 .from('funds_enriched')
-                .select('fund_id, fund_type')
+                .select('fund_id, fund_type, reference_id')
                 .in('fund_id', advFundIds);
 
-            const advFundMap = new Map((advFunds || []).map(f => [f.fund_id, f.fund_type]));
+            const advFundMap = new Map((advFunds || []).map(f => [f.fund_id, { type: f.fund_type, reference_id: f.reference_id }]));
 
-            // Get Form D fund types for this batch
+            // Get Form D fund types and CIK for this batch
             const accessions = batch.map(m => m.formd_accession).filter(Boolean);
             const { data: formDFilings } = await formDDb
                 .from('form_d_filings')
-                .select('accessionnumber, investmentfundtype')
+                .select('accessionnumber, investmentfundtype, cik, filing_date')
                 .in('accessionnumber', accessions);
 
-            const formDMap = new Map((formDFilings || []).map(f => [f.accessionnumber, f.investmentfundtype]));
+            const formDMap = new Map((formDFilings || []).map(f => [f.accessionnumber, {
+                type: f.investmentfundtype,
+                cik: f.cik,
+                filing_date: f.filing_date
+            }]));
 
             // Compare types
             for (const match of batch) {
-                const advType = advFundMap.get(match.adv_fund_id) || '';
-                const formDType = formDMap.get(match.formd_accession) || '';
+                const advInfo = advFundMap.get(match.adv_fund_id) || {};
+                const formDInfo = formDMap.get(match.formd_accession) || {};
 
                 // Skip if either type is empty
-                if (!advType || !formDType) continue;
+                if (!advInfo.type || !formDInfo.type) continue;
 
-                const advTypeLower = advType.toLowerCase().trim();
-                const formDTypeLower = formDType.toLowerCase().trim();
+                const advTypeLower = advInfo.type.toLowerCase().trim();
+                const formDTypeLower = formDInfo.type.toLowerCase().trim();
 
                 // Check if types are significantly different
                 if (!areTypesEquivalent(advTypeLower, formDTypeLower)) {
                     issues.push({
                         adviser_crd: match.adviser_entity_crd,
+                        fund_reference_id: advInfo.reference_id,  // For linking to fund detail
+                        form_d_cik: formDInfo.cik,  // For EDGAR link
                         discrepancy_type: 'fund_type_mismatch',
                         severity: 'medium',
-                        description: `Fund type mismatch for "${match.adv_fund_name}": ADV reports "${advType}", Form D reports "${formDType}"`,
+                        description: `Fund type mismatch for "${match.adv_fund_name}": ADV reports "${advInfo.type}", Form D reports "${formDInfo.type}"`,
                         metadata: {
                             adv_fund_name: match.adv_fund_name,
+                            adv_fund_reference_id: advInfo.reference_id,
                             formd_entity_name: match.formd_entity_name,
-                            adv_fund_type: advType,
-                            formd_fund_type: formDType,
+                            adv_fund_type: advInfo.type,
+                            formd_fund_type: formDInfo.type,
                             formd_accession: match.formd_accession,
+                            formd_filing_date: formDInfo.filing_date,
+                            formd_cik: formDInfo.cik,
                             adviser_name: match.adviser_entity_legal_name
                         }
                     });
@@ -299,36 +380,86 @@ async function detectFundTypeMismatch() {
 /**
  * Detector 5: Missing Fund in ADV
  * Form D filing exists but fund not found in latest ADV
+ * Enhanced: Includes Form D filing date, CIK for EDGAR link, and filters by timing
+ * Per user: "This mostly applies to Form Ds filed in a previous year, not reflected in ADV filed after"
  */
 async function detectMissingFundInADV() {
     console.log('\n[5/6] Detecting: Missing Fund in ADV...');
 
+    // Get cross-reference matches where Form D exists but no ADV match
     const { data: matches, error } = await formDDb
         .from('cross_reference_matches')
-        .select('formd_entity_name, formd_accession, adviser_crd, match_score')
+        .select('formd_entity_name, formd_accession, adviser_entity_crd, adviser_entity_legal_name, match_score, latest_adv_year')
         .is('adv_fund_name', null)  // Form D exists but no ADV match
-        .not('adviser_crd', 'is', null)
+        .not('adviser_entity_crd', 'is', null)
         .limit(DETECTION_CONFIG.batchSize);
 
     if (error) throw error;
 
-    const issues = [];
+    // Fetch Form D filing dates for these matches
+    const accessions = matches.map(m => m.formd_accession).filter(Boolean);
+    const filingDates = new Map();
 
-    for (const match of matches) {
-        issues.push({
-            adviser_crd: match.adviser_crd,
-            discrepancy_type: 'missing_fund_in_adv',
-            severity: 'medium',
-            description: `Fund "${match.formd_entity_name}" appears in Form D but not in latest Form ADV`,
-            metadata: {
-                fund_name: match.formd_entity_name,
-                formd_accession: match.formd_accession,
-                match_score: match.match_score
-            }
-        });
+    for (let i = 0; i < accessions.length; i += 100) {
+        const batch = accessions.slice(i, i + 100);
+        const { data: filings } = await formDDb
+            .from('form_d_filings')
+            .select('accessionnumber, filing_date, cik, totalofferingamount')
+            .in('accessionnumber', batch);
+
+        for (const f of (filings || [])) {
+            filingDates.set(f.accessionnumber, {
+                filing_date: f.filing_date,
+                cik: f.cik,
+                offering_amount: f.totalofferingamount
+            });
+        }
     }
 
-    console.log(`  Found ${issues.length} issues`);
+    const issues = [];
+    const currentYear = new Date().getFullYear();
+
+    for (const match of matches) {
+        const filingInfo = filingDates.get(match.formd_accession);
+        if (!filingInfo) continue;
+
+        const filingDate = new Date(filingInfo.filing_date);
+        const filingYear = filingDate.getFullYear();
+        const latestAdvYear = match.latest_adv_year || currentYear;
+
+        // Per user request: Flag mostly Form Ds filed in previous year not reflected in ADV filed after
+        // Skip if Form D was filed in current year and ADV hasn't been due yet (grace period)
+        // ADV annual amendment is typically due around April 1
+        const advDeadlinePassed = (new Date().getMonth() >= 3); // After April
+
+        // Include if:
+        // 1. Form D was filed in year before the latest ADV year (should have been included)
+        // 2. Or Form D was filed in previous year and current year's ADV deadline has passed
+        const shouldHaveBeenInADV = (filingYear < latestAdvYear) ||
+            (filingYear < currentYear && advDeadlinePassed);
+
+        if (shouldHaveBeenInADV) {
+            issues.push({
+                adviser_crd: match.adviser_entity_crd,
+                form_d_cik: filingInfo.cik,  // For EDGAR link
+                discrepancy_type: 'missing_fund_in_adv',
+                severity: 'medium',
+                description: `Fund "${match.formd_entity_name}" filed Form D on ${filingInfo.filing_date} but not in latest Form ADV (${latestAdvYear})`,
+                metadata: {
+                    fund_name: match.formd_entity_name,
+                    formd_accession: match.formd_accession,
+                    formd_filing_date: filingInfo.filing_date,
+                    formd_cik: filingInfo.cik,
+                    offering_amount: filingInfo.offering_amount,
+                    latest_adv_year: latestAdvYear,
+                    adviser_name: match.adviser_entity_legal_name,
+                    match_score: match.match_score
+                }
+            });
+        }
+    }
+
+    console.log(`  Found ${issues.length} issues (filtered by timing relevance)`);
     return issues;
 }
 

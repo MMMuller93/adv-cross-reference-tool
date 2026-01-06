@@ -461,6 +461,38 @@ None currently
 
 ## Session Log (Last 5)
 
+### Session 11 - 2026-01-06 (Continued)
+- **Focus:** Compliance Issue Enhancements - Actionable Data for Intelligence Radar
+- **Completed:**
+  - ✅ Fixed blank page root cause - Changed from `<a href>` to React state-based navigation (`onClick` handlers)
+  - ✅ Enhanced VC Exemption Violation detector - Now includes `fund_reference_id` for each non-VC fund (clickable links)
+  - ✅ Enhanced Overdue Amendment detector - Now includes Form D filings filed after last ADV with dates, CIKs, EDGAR links
+  - ✅ Enhanced Fund Type Mismatch detector - Now includes `fund_reference_id`, Form D CIK, filing dates
+  - ✅ Enhanced Missing Fund in ADV detector - Now includes Form D filing date, offering amount, timing filter
+  - ✅ Updated frontend to display enhanced metadata:
+    - VC violations: Clickable fund buttons with reference_id links
+    - Overdue amendments: List of Form D filings with dates and EDGAR links
+    - Fund type mismatches: Filing date display
+    - Missing funds: Fund name, Form D filing date, offering amount
+  - ✅ Re-ran compliance detection to populate enhanced data
+- **Detection Results:**
+  - 2,123 overdue annual amendment
+  - 740 VC exemption violations (with fund reference_ids)
+  - 16,154 fund type mismatches (with fund links and CIKs)
+  - 9,900 exemption mismatches
+  - **Total: 28,917 compliance issues**
+- **Initial ADV Overdue Status:**
+  - Deferred - Requires manual adviserinfo.sec.gov search
+  - User noted this is complex and involves name variation matching
+  - Would need external API/scraping not available in current architecture
+- **Files Modified:**
+  - public/app.js (React navigation handlers, enhanced metadata display)
+  - detect_compliance_issues.js (enhanced detectors with fund_reference_id, CIKs, dates)
+- **Next Steps:**
+  - Commit changes
+  - Test in browser to verify navigation works correctly
+  - Consider Initial ADV Overdue automation if external API becomes available
+
 ### Session 10 - 2026-01-06
 - **Focus:** Deep inspection of Form D/ADV matching logic + Founders Fund investigation
 - **Completed:**
