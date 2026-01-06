@@ -317,12 +317,18 @@ function isValidHomepage(url) {
   if (!url) return false;
   try {
     const parsed = new URL(url);
-    const path = parsed.pathname;
+    const path = parsed.pathname.toLowerCase();
     // Homepage or short path
-    if (path === '/' || path === '' || path.length < 15) return true;
-    // Common valid subpaths
-    const validPaths = ['/about', '/team', '/contact', '/portfolio', '/investments', '/home'];
-    if (validPaths.some(p => path.toLowerCase().startsWith(p))) return true;
+    if (path === '/' || path === '' || path.length < 20) return true;
+    // Common valid subpaths for VC/PE firms
+    const validPaths = [
+      '/about', '/team', '/contact', '/portfolio', '/investments', '/home',
+      '/our-firm', '/our-team', '/people', '/leadership', '/partners',
+      '/venture', '/private-equity', '/technology', '/companies', '/focus'
+    ];
+    if (validPaths.some(p => path.startsWith(p))) return true;
+    // Accept any path that's just one level deep (e.g., /ventures, /equity)
+    if (path.split('/').filter(Boolean).length === 1) return true;
     return false;
   } catch {
     return false;
@@ -512,10 +518,25 @@ async function searchLinkedIn(fundName) {
 /**
  * Search for team members via LinkedIn when website extraction fails
  * Uses search API to find "[Fund Name] team linkedin" profiles
+ *
+ * STRICT VALIDATION: Only accepts profiles that mention the FULL fund name
+ * (or its distinctive multi-word prefix) to prevent false matches like
+ * "Global Ventures" matching for "Renn Global Ventures"
  */
 async function searchTeamLinkedIn(fundName) {
   const parsedName = parseFundName(fundName);
   const teamMembers = [];
+
+  // Get distinctive name parts for validation
+  // For "Renn Global Ventures" -> require "Renn Global" or full name
+  const nameParts = parsedName.toLowerCase().split(' ').filter(w => w.length > 2);
+  // Distinctive prefix = first 2 words (e.g., "renn global") or full name if shorter
+  const distinctivePrefix = nameParts.slice(0, 2).join(' ');
+  const fullNameLower = parsedName.toLowerCase();
+
+  // Common generic words that shouldn't count as matches alone
+  const genericWords = ['ventures', 'capital', 'partners', 'fund', 'investment',
+                        'management', 'holdings', 'group', 'equity', 'global'];
 
   // Search for team members on LinkedIn
   const queries = [
@@ -539,13 +560,34 @@ async function searchTeamLinkedIn(fundName) {
       // Skip if name looks like search results or company pages
       if (!namePart || namePart.includes('LinkedIn') || namePart.length > 50) continue;
 
-      // Check if this person is associated with the fund (name appears in title)
+      // STRICT VALIDATION: Check if profile is actually associated with THIS fund
       const lowerTitle = title.toLowerCase();
-      const lowerParsedName = parsedName.toLowerCase();
-      const nameWords = lowerParsedName.split(' ').filter(w => w.length > 3);
-      const isRelated = nameWords.some(word => lowerTitle.includes(word));
 
-      if (!isRelated) continue;
+      // Must contain EITHER:
+      // 1. The full fund name, OR
+      // 2. The distinctive prefix (first 2+ words), OR
+      // 3. At least 2 non-generic words from the fund name
+      const hasFullName = lowerTitle.includes(fullNameLower);
+      const hasDistinctivePrefix = lowerTitle.includes(distinctivePrefix);
+
+      // Count how many non-generic words from fund name appear in title
+      const nonGenericMatches = nameParts.filter(word =>
+        !genericWords.includes(word) && lowerTitle.includes(word)
+      );
+      const hasMultipleNonGenericWords = nonGenericMatches.length >= 2;
+
+      // Also check if only generic words match (should reject)
+      const onlyGenericMatches = nameParts.every(word =>
+        genericWords.includes(word) || !lowerTitle.includes(word) || nonGenericMatches.includes(word)
+      ) && nonGenericMatches.length === 0;
+
+      const isValidMatch = (hasFullName || hasDistinctivePrefix || hasMultipleNonGenericWords)
+                           && !onlyGenericMatches;
+
+      if (!isValidMatch) {
+        console.log(`[LinkedIn Search] Rejected: "${namePart}" - title doesn't match "${parsedName}" strictly`);
+        continue;
+      }
 
       // Dedupe by LinkedIn username
       const username = url.split('/in/')[1]?.split(/[?/]/)[0]?.toLowerCase();
@@ -554,10 +596,11 @@ async function searchTeamLinkedIn(fundName) {
           name: namePart,
           title: rolePart || null,
           email: null,
-          linkedin: url.split('?')[0] // Clean URL
+          linkedin: url.split('?')[0], // Clean URL
+          source: 'linkedin_search'
         });
 
-        console.log(`[LinkedIn Search] Found: ${namePart} - ${rolePart || 'Unknown role'}`);
+        console.log(`[LinkedIn Search] Accepted: ${namePart} - ${rolePart || 'Unknown role'}`);
       }
 
       // Limit to 5 team members from search
@@ -1044,11 +1087,11 @@ async function enrichManager(name, options = {}) {
     // Not found in ADV, continue with web search
   }
   
-  // Search strategies for retry
+  // Search strategies for retry - start with unquoted (more results) then get specific
   const searchStrategies = [
-    `"${parsedName}" venture capital fund`,
-    `"${parsedName}" investment fund`,
-    `"${parsedName}"`,
+    `${parsedName}`,  // Simple unquoted search first - most likely to find website
+    `${parsedName} venture capital`,
+    `"${parsedName}"`,  // Exact match
     `${parsedName} fund manager`
   ];
   
