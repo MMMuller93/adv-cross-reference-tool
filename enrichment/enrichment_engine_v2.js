@@ -162,9 +162,18 @@ async function braveSearch(query, retryCount = 0) {
   }
 }
 
-async function serperSearch(query) {
+// Track Serper API failures to skip it after repeated errors
+let serperFailureCount = 0;
+const SERPER_MAX_FAILURES = 3;
+
+async function serperSearch(query, retryCount = 0) {
   if (!SERPER_API_KEY) return null;
-  
+
+  // Skip Serper if it's been failing repeatedly (quota/key issues)
+  if (serperFailureCount >= SERPER_MAX_FAILURES) {
+    return null;
+  }
+
   try {
     const response = await fetch('https://google.serper.dev/search', {
       method: 'POST',
@@ -174,12 +183,33 @@ async function serperSearch(query) {
       },
       body: JSON.stringify({ q: query, num: 10 })
     });
-    
+
+    if (response.status === 429 && retryCount < 2) {
+      console.log(`[Serper] Rate limited, waiting 5s...`);
+      await delay(5000);
+      return serperSearch(query, retryCount + 1);
+    }
+
+    if (response.status === 400 || response.status === 401 || response.status === 403) {
+      // API key issue or quota exceeded - mark as failing
+      serperFailureCount++;
+      const errorBody = await response.text().catch(() => '');
+      const isQuotaError = errorBody.includes('Not enough credits') || errorBody.includes('quota');
+      console.error(`[Serper] API error: ${response.status}${isQuotaError ? ' (QUOTA EXHAUSTED)' : ''} - failure ${serperFailureCount}/${SERPER_MAX_FAILURES}`);
+      if (serperFailureCount >= SERPER_MAX_FAILURES) {
+        console.log(`[Serper] Disabled for this session - using Brave/Google instead`);
+      }
+      return null;
+    }
+
     if (!response.ok) {
       console.error(`[Serper] API error: ${response.status}`);
       return null;
     }
-    
+
+    // Reset failure count on success
+    serperFailureCount = 0;
+
     const data = await response.json();
     return {
       web: {
@@ -226,22 +256,29 @@ async function googleSearch(query) {
 
 /**
  * Unified search with fallback chain
+ * Priority: Brave (best rate limits) > Google > Serper (often quota issues)
  */
 async function search(query) {
   let results;
-  
-  // Priority: Google > Serper > Brave
+
+  // Priority 1: Brave Search (best free tier, 2000 requests/month)
+  if (BRAVE_SEARCH_API_KEY) {
+    results = await braveSearch(query);
+    if (results?.web?.results?.length > 0) return results;
+  }
+
+  // Priority 2: Google Custom Search (100 free/day)
   if (GOOGLE_API_KEY && GOOGLE_CX) {
     results = await googleSearch(query);
     if (results?.web?.results?.length > 0) return results;
   }
-  
-  if (SERPER_API_KEY) {
+
+  // Priority 3: Serper (often has quota issues)
+  if (SERPER_API_KEY && serperFailureCount < SERPER_MAX_FAILURES) {
     results = await serperSearch(query);
     if (results?.web?.results?.length > 0) return results;
   }
-  
-  results = await braveSearch(query);
+
   return results;
 }
 
@@ -307,16 +344,121 @@ function extractWebsite(searchResults, fundName) {
 }
 
 /**
- * Extract LinkedIn company URL
+ * Extract LinkedIn company URL from search results
  */
 function extractLinkedIn(searchResults) {
   if (!searchResults?.web?.results) return null;
-  
+
   for (const result of searchResults.web.results) {
     if (result.url?.includes('linkedin.com/company/')) {
       return result.url;
     }
   }
+  return null;
+}
+
+/**
+ * Extract LinkedIn URLs directly from website HTML
+ * This catches LinkedIn links on team/about pages without needing search APIs
+ */
+async function extractLinkedInFromWebsite(websiteUrl) {
+  if (!websiteUrl) return { companyUrl: null, teamLinkedIns: [] };
+
+  const teamPaths = ['', '/team', '/about', '/people', '/leadership', '/our-team', '/about-us', '/company'];
+  const companyLinkedIns = new Set();
+  const personalLinkedIns = [];
+
+  for (const path of teamPaths) {
+    try {
+      const url = websiteUrl.replace(/\/$/, '') + path;
+      const response = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FundRadar/1.0)' },
+        timeout: 10000
+      });
+
+      if (!response.ok) continue;
+
+      const html = await response.text();
+
+      // Extract all LinkedIn URLs from href attributes
+      // Matches: href="https://linkedin.com/in/username" or href="https://www.linkedin.com/company/name"
+      const linkedInRegex = /href=["']?(https?:\/\/(?:www\.)?linkedin\.com\/(?:in|company)\/[a-zA-Z0-9_-]+\/?)[^"'\s>]*/gi;
+      let match;
+
+      while ((match = linkedInRegex.exec(html)) !== null) {
+        const linkedInUrl = match[1].replace(/\/$/, ''); // Clean trailing slash
+
+        if (linkedInUrl.includes('/company/')) {
+          companyLinkedIns.add(linkedInUrl);
+        } else if (linkedInUrl.includes('/in/')) {
+          // Try to find the person's name near this URL in the HTML
+          const surrounding = html.substring(Math.max(0, match.index - 300), match.index + 300);
+
+          // Look for name patterns near the LinkedIn link
+          const nameMatch = surrounding.match(/<[^>]*>([A-Z][a-z]+ [A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)<\/[^>]*>/);
+          const altMatch = surrounding.match(/alt=["']([A-Z][a-z]+ [A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)["']/);
+          const titleMatch = surrounding.match(/title=["']([A-Z][a-z]+ [A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)["']/);
+
+          const name = nameMatch?.[1] || altMatch?.[1] || titleMatch?.[1] || null;
+
+          // Extract username from URL for deduplication
+          const username = linkedInUrl.split('/in/')[1]?.toLowerCase();
+
+          // Check if we already have this person
+          if (username && !personalLinkedIns.some(p => p.url.toLowerCase().includes(username))) {
+            personalLinkedIns.push({
+              url: linkedInUrl,
+              name: name,
+              foundOnPage: path || '/'
+            });
+          }
+        }
+      }
+
+    } catch (error) {
+      continue;
+    }
+  }
+
+  return {
+    companyUrl: companyLinkedIns.size > 0 ? Array.from(companyLinkedIns)[0] : null,
+    teamLinkedIns: personalLinkedIns.slice(0, 20) // Limit to 20 team members
+  };
+}
+
+/**
+ * Try to find company LinkedIn from a team member's personal LinkedIn page
+ * Their profile often links to the company page
+ */
+async function extractCompanyLinkedInFromProfile(personalLinkedInUrl) {
+  if (!personalLinkedInUrl) return null;
+
+  try {
+    // LinkedIn pages require special handling - they may redirect or block
+    const response = await fetch(personalLinkedInUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml'
+      },
+      timeout: 10000,
+      redirect: 'follow'
+    });
+
+    if (!response.ok) return null;
+
+    const html = await response.text();
+
+    // Look for company LinkedIn URL in the experience section
+    const companyMatch = html.match(/linkedin\.com\/company\/([a-zA-Z0-9_-]+)/);
+    if (companyMatch) {
+      return `https://www.linkedin.com/company/${companyMatch[1]}`;
+    }
+
+  } catch (error) {
+    // LinkedIn often blocks scraping, so this is best-effort
+    return null;
+  }
+
   return null;
 }
 
@@ -736,13 +878,44 @@ async function enrichManager(name, options = {}) {
     }
   }
   
-  // Extract LinkedIn
+  // Extract LinkedIn - try multiple methods
   enrichmentData.linkedin_company_url = extractLinkedIn(searchResults);
+
+  // Method 2: Extract directly from website HTML (no API needed!)
+  let websiteLinkedInData = null;
+  if (enrichmentData.website_url) {
+    console.log(`[Enrichment] Extracting LinkedIn URLs from website HTML...`);
+    websiteLinkedInData = await extractLinkedInFromWebsite(enrichmentData.website_url);
+
+    // Use company LinkedIn if found on website
+    if (!enrichmentData.linkedin_company_url && websiteLinkedInData.companyUrl) {
+      enrichmentData.linkedin_company_url = websiteLinkedInData.companyUrl;
+      console.log(`[Enrichment] Found company LinkedIn on website: ${enrichmentData.linkedin_company_url}`);
+    }
+
+    // Store team LinkedIn URLs for later merge with AI-extracted team
+    if (websiteLinkedInData.teamLinkedIns.length > 0) {
+      console.log(`[Enrichment] Found ${websiteLinkedInData.teamLinkedIns.length} team LinkedIn URLs on website`);
+    }
+  }
+
+  // Method 3: Search specifically for LinkedIn (uses API quota)
   if (!enrichmentData.linkedin_company_url) {
     console.log(`[Enrichment] Searching LinkedIn specifically...`);
     await delay(RATE_LIMIT_DELAY_MS);
     enrichmentData.linkedin_company_url = await searchLinkedIn(parsedName);
   }
+
+  // Method 4: Try to get company LinkedIn from a team member's profile
+  if (!enrichmentData.linkedin_company_url && websiteLinkedInData?.teamLinkedIns.length > 0) {
+    console.log(`[Enrichment] Trying to extract company LinkedIn from team member profile...`);
+    const companyFromProfile = await extractCompanyLinkedInFromProfile(websiteLinkedInData.teamLinkedIns[0].url);
+    if (companyFromProfile) {
+      enrichmentData.linkedin_company_url = companyFromProfile;
+      console.log(`[Enrichment] Found company LinkedIn via team member: ${enrichmentData.linkedin_company_url}`);
+    }
+  }
+
   if (enrichmentData.linkedin_company_url) {
     enrichmentData.data_sources.push('linkedin');
     console.log(`[Enrichment] LinkedIn: ${enrichmentData.linkedin_company_url}`);
@@ -772,9 +945,52 @@ async function enrichManager(name, options = {}) {
   if (enrichmentData.website_url) {
     console.log(`[Enrichment] Extracting team members...`);
     enrichmentData.team_members = await extractTeamWithAI(enrichmentData.website_url, parsedName);
+
+    // Merge LinkedIn URLs found directly from website with AI-extracted team
+    if (websiteLinkedInData?.teamLinkedIns.length > 0) {
+      const aiTeamMap = new Map();
+
+      // Index AI-extracted team by lowercase name for matching
+      for (const member of enrichmentData.team_members) {
+        if (member.name) {
+          aiTeamMap.set(member.name.toLowerCase(), member);
+        }
+      }
+
+      // Try to match LinkedIn URLs to team members
+      for (const linkedInPerson of websiteLinkedInData.teamLinkedIns) {
+        if (linkedInPerson.name) {
+          const existingMember = aiTeamMap.get(linkedInPerson.name.toLowerCase());
+          if (existingMember && !existingMember.linkedin) {
+            existingMember.linkedin = linkedInPerson.url;
+            console.log(`[Enrichment] Added LinkedIn to ${existingMember.name}: ${linkedInPerson.url}`);
+          }
+        }
+      }
+
+      // Add any LinkedIn-only team members not found by AI
+      for (const linkedInPerson of websiteLinkedInData.teamLinkedIns) {
+        const username = linkedInPerson.url.split('/in/')[1]?.toLowerCase();
+        const alreadyHasLinkedIn = enrichmentData.team_members.some(m =>
+          m.linkedin?.toLowerCase().includes(username)
+        );
+
+        if (!alreadyHasLinkedIn && linkedInPerson.name) {
+          // Add as new team member with just LinkedIn and name
+          enrichmentData.team_members.push({
+            name: linkedInPerson.name,
+            title: null,
+            email: null,
+            linkedin: linkedInPerson.url
+          });
+          console.log(`[Enrichment] Added new team member from LinkedIn: ${linkedInPerson.name}`);
+        }
+      }
+    }
+
     if (enrichmentData.team_members.length > 0) {
       enrichmentData.data_sources.push('team_extracted');
-      console.log(`[Enrichment] Found ${enrichmentData.team_members.length} team members`);
+      console.log(`[Enrichment] Found ${enrichmentData.team_members.length} team members total`);
     }
   }
   
@@ -935,7 +1151,9 @@ module.exports = {
   extractTeamWithAI,
   validateWebsiteWithAI,
   searchTwitter,
-  searchLinkedIn
+  searchLinkedIn,
+  extractLinkedInFromWebsite,
+  extractCompanyLinkedInFromProfile
 };
 
 // ============================================================================

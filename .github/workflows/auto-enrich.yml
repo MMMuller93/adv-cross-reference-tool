@@ -1,0 +1,82 @@
+# Auto-Enrichment & Compliance Detection Workflow
+# Based on "Implementation Summary: Enrichment Engine v2 & Discrepancy Detector"
+# Runs daily to:
+# 1. Enrich new managers with contact info (websites, emails, Twitter, team members)
+# 2. Detect compliance issues (overdue ADV, VC exemption violations, fund type mismatches)
+
+name: Daily Enrichment & Compliance Scan
+
+on:
+  schedule:
+    - cron: '0 9 * * *'  # Daily at 9am UTC
+  workflow_dispatch:  # Manual trigger from GitHub UI
+
+jobs:
+  enrich-and-detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      # Step 1: Enrich new managers using v2 engine (AI-powered)
+      # Increased to 200/run to process backlog faster
+      - name: Enrich new managers
+        run: |
+          echo "=== ENRICHMENT ENGINE v2 ==="
+          echo "Features: AI validation, email extraction, Twitter discovery, team extraction"
+          echo "Processing up to 200 managers per run..."
+          node enrichment/enrich_recent.js 200
+        env:
+          # ADV Database (enriched advisers/funds)
+          ADV_URL: https://ezuqwwffjgfzymqxsctq.supabase.co
+          ADV_SERVICE_KEY: ${{ secrets.ADV_SERVICE_KEY }}
+
+          # Form D Database (filings, cross-reference, enriched_managers, compliance_issues)
+          FORMD_URL: https://ltdalxkhbbhmkimmogyq.supabase.co
+          FORMD_SERVICE_KEY: ${{ secrets.FORMD_SERVICE_KEY }}
+
+          # Search API (for finding manager websites/contact info)
+          BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+
+          # Backup search providers (optional - fall back if Brave rate limited)
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GOOGLE_CX: ${{ secrets.GOOGLE_CX }}
+
+          # AI Classification (GPT-4o-mini for validation and parsing)
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      # Step 2: Run compliance discrepancy detection
+      - name: Run compliance detection
+        run: |
+          echo "=== DISCREPANCY DETECTOR ==="
+          echo "Checks: Overdue ADV, VC exemption violations, fund type mismatches, exemption mismatches"
+          node detect_compliance_issues.js
+        env:
+          ADV_URL: https://ezuqwwffjgfzymqxsctq.supabase.co
+          ADV_SERVICE_KEY: ${{ secrets.ADV_SERVICE_KEY }}
+          FORMD_URL: https://ltdalxkhbbhmkimmogyq.supabase.co
+          FORMD_SERVICE_KEY: ${{ secrets.FORMD_SERVICE_KEY }}
+
+      - name: Report summary
+        if: always()
+        run: |
+          echo ""
+          echo "=== WORKFLOW COMPLETE ==="
+          echo "Timestamp: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          echo ""
+          echo "Next steps:"
+          echo "- Check enriched_managers table for new contact data"
+          echo "- Check compliance_issues table for new detections"
+          echo "- Review Intelligence Radar in UI for alerts"
