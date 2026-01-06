@@ -287,59 +287,91 @@ async function search(query) {
 // ============================================================================
 
 /**
+ * Check if URL looks like a document/file rather than a website
+ */
+function isFileUrl(url) {
+  if (!url) return true;
+  const urlLower = url.toLowerCase();
+  // Check file extensions
+  const fileExtensions = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.csv', '.zip', '.png', '.jpg', '.jpeg', '.gif', '.mp4', '.mov'];
+  if (fileExtensions.some(ext => urlLower.endsWith(ext))) return true;
+  // Check for common document paths
+  if (urlLower.includes('/files/') || urlLower.includes('/documents/') ||
+      urlLower.includes('/uploads/') || urlLower.includes('/download/') ||
+      urlLower.includes('/attachments/') || urlLower.includes('/sites/default/files/')) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Check if URL looks like a valid company homepage
+ */
+function isValidHomepage(url) {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname;
+    // Homepage or short path
+    if (path === '/' || path === '' || path.length < 15) return true;
+    // Common valid subpaths
+    const validPaths = ['/about', '/team', '/contact', '/portfolio', '/investments', '/home'];
+    if (validPaths.some(p => path.toLowerCase().startsWith(p))) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Extract website URL from search results
- * Uses strict filtering to avoid aggregators and articles
+ * Uses strict filtering to avoid aggregators, articles, and documents
  */
 function extractWebsite(searchResults, fundName) {
   if (!searchResults?.web?.results) return null;
-  
+
   const results = searchResults.web.results;
   const parsedName = parseFundName(fundName).toLowerCase();
-  
+
   // First pass: Look for homepages with fund name in title
   for (const result of results.slice(0, 8)) {
     const url = result.url;
     const title = (result.title || '').toLowerCase();
-    
+
     if (isBlockedDomain(url)) continue;
-    
-    // Check for article patterns in URL
+    if (isFileUrl(url)) continue;
+
+    // Check for article/news patterns in URL
     const urlLower = url.toLowerCase();
     if (urlLower.includes('/news/') || urlLower.includes('/article/') ||
         urlLower.includes('/blog/') || urlLower.includes('/press/') ||
         urlLower.includes('/2024/') || urlLower.includes('/2023/') ||
-        urlLower.includes('/2025/')) {
+        urlLower.includes('/2025/') || urlLower.includes('/2026/')) {
       continue;
     }
-    
+
     // Prefer if fund name appears in title
     if (title.includes(parsedName.split(' ')[0].toLowerCase())) {
-      // Check if it looks like a homepage
-      const path = new URL(url).pathname;
-      if (path === '/' || path.length < 20) {
+      if (isValidHomepage(url)) {
         return url;
       }
     }
   }
-  
-  // Second pass: Accept any non-blocked, non-article URL
+
+  // Second pass: Accept any non-blocked, non-article URL that looks like a homepage
   for (const result of results.slice(0, 5)) {
     const url = result.url;
     if (isBlockedDomain(url)) continue;
-    
+    if (isFileUrl(url)) continue;
+
     const urlLower = url.toLowerCase();
     if (urlLower.includes('/news/') || urlLower.includes('/article/')) continue;
-    
-    try {
-      const path = new URL(url).pathname;
-      if (path === '/' || path.length < 30) {
-        return url;
-      }
-    } catch (e) {
-      continue;
+
+    if (isValidHomepage(url)) {
+      return url;
     }
   }
-  
+
   return null;
 }
 
