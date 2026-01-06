@@ -48,55 +48,93 @@ const DETECTION_CONFIG = {
 /**
  * Detector 1: Needs Initial ADV Filing
  * New managers filed Form D but haven't filed ADV within 60 days
+ *
+ * LOGIC:
+ * 1. Get recent Form D filings
+ * 2. Get all matched accessions from cross_reference_matches (these have ADV matches)
+ * 3. Find Form D filings NOT in matches = no ADV filing exists
+ * 4. Filter to those filed more than 60 days ago
+ *
+ * NOTE: cross_reference_matches only contains MATCHED records.
+ * Unmatched Form D filings are not stored there.
  */
 async function detectNeedsInitialADVFiling() {
     console.log('\n[1/6] Detecting: Needs Initial ADV Filing...');
 
+    // Step 1: Get recent Form D filings (last 6 months of filings)
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const sixMonthsAgoStr = sixMonthsAgo.toISOString().split('T')[0];
+
     const { data: formDFilings, error: formDError } = await formDDb
         .from('form_d_filings')
-        .select('cik, entityname, filing_date')
+        .select('accessionnumber, cik, entityname, filing_date, totalofferingamount')
         .not('cik', 'is', null)
+        .gte('filing_date', sixMonthsAgoStr)
         .order('filing_date', { ascending: false })
-        .limit(DETECTION_CONFIG.batchSize);
+        .limit(5000);
 
     if (formDError) throw formDError;
 
+    console.log(`  Found ${formDFilings.length} Form D filings in last 6 months`);
+
+    // Step 2: Get all matched accessions from cross_reference_matches
+    // These Form Ds have been matched to an ADV fund
+    let allMatchedAccessions = [];
+    let offset = 0;
+    const batchSize = 1000;
+
+    while (offset < 200000) {  // Safety limit
+        const { data: matches, error } = await formDDb
+            .from('cross_reference_matches')
+            .select('formd_accession')
+            .range(offset, offset + batchSize - 1);
+
+        if (error) throw error;
+        if (!matches || matches.length === 0) break;
+
+        allMatchedAccessions.push(...matches.map(m => m.formd_accession));
+        offset += batchSize;
+
+        if (matches.length < batchSize) break;
+    }
+
+    const matchedAccessionSet = new Set(allMatchedAccessions);
+    console.log(`  Found ${matchedAccessionSet.size} Form D filings matched to ADV funds`);
+
+    // Step 3: Find Form D filings NOT in cross_reference_matches
+    // AND filed more than 60 days ago
     const issues = [];
+    const now = Date.now();
 
     for (const filing of formDFilings) {
-        // Check if CIK has corresponding ADV filing
-        const { data: adviser, error } = await advDb
-            .from('advisers_enriched')
-            .select('crd, adviser_name')
-            .eq('sec_file_number', filing.cik)
-            .single();
+        // Skip if this Form D has a match in cross_reference_matches
+        if (matchedAccessionSet.has(filing.accessionnumber)) continue;
 
-        if (error && error.code !== 'PGRST116') continue; // PGRST116 = no rows
+        const filingDate = new Date(filing.filing_date);
+        const daysSinceFiling = Math.floor((now - filingDate.getTime()) / (1000 * 60 * 60 * 24));
 
-        if (!adviser) {
-            // No ADV filing found - check if 60 days have passed
-            const filingDate = new Date(filing.filing_date);
-            const daysSinceFiling = Math.floor((Date.now() - filingDate.getTime()) / (1000 * 60 * 60 * 24));
-
-            if (daysSinceFiling > DETECTION_CONFIG.initialFilingGracePeriodDays) {
-                issues.push({
-                    form_d_cik: filing.cik,
-                    adviser_crd: null,
-                    discrepancy_type: 'needs_initial_adv_filing',
-                    severity: 'high',
-                    description: `Manager "${filing.entityname}" filed Form D on ${filing.filing_date} but has not filed Form ADV within 60 days (${daysSinceFiling} days elapsed)`,
-                    metadata: {
-                        form_d_filing_date: filing.filing_date,
-                        days_since_filing: daysSinceFiling,
-                        entity_name: filing.entityname,
-                        cik: filing.cik
-                    }
-                });
-            }
+        // Only flag if more than 60 days have passed (grace period for initial ADV filing)
+        if (daysSinceFiling > DETECTION_CONFIG.initialFilingGracePeriodDays) {
+            issues.push({
+                form_d_cik: filing.cik,
+                adviser_crd: null,
+                discrepancy_type: 'needs_initial_adv_filing',
+                severity: 'high',
+                description: `Manager "${filing.entityname}" filed Form D on ${filing.filing_date} but has not filed Form ADV within 60 days (${daysSinceFiling} days elapsed)`,
+                metadata: {
+                    form_d_filing_date: filing.filing_date,
+                    days_since_filing: daysSinceFiling,
+                    entity_name: filing.entityname,
+                    cik: filing.cik,
+                    accession_number: filing.accessionnumber,
+                    offering_amount: filing.totalofferingamount
+                }
+            });
         }
     }
 
-    console.log(`  Found ${issues.length} issues`);
+    console.log(`  Found ${issues.length} issues (Form D filed >60 days ago with no ADV match)`);
     return issues;
 }
 
@@ -444,87 +482,151 @@ async function detectFundTypeMismatch() {
 /**
  * Detector 5: Missing Fund in ADV
  * Form D filing exists but fund not found in latest ADV
- * Enhanced: Includes Form D filing date, CIK for EDGAR link, and filters by timing
+ *
+ * LOGIC:
+ * cross_reference_matches only contains MATCHED records (where ADV fund matched Form D).
+ * To find "missing" funds, we need to:
+ * 1. Get advisers who have at least one match in cross_reference_matches
+ * 2. Get ALL Form D filings (from form_d_filings table)
+ * 3. Find Form Ds that share adviser name patterns but aren't in cross_reference_matches
+ *
  * Per user: "This mostly applies to Form Ds filed in a previous year, not reflected in ADV filed after"
+ *
+ * SIMPLIFIED APPROACH:
+ * Since we can't easily link Form Ds to advisers without matches, we look for:
+ * - Form D filings where related_names/roles suggest they're managed by a known adviser
+ * - But the fund itself isn't in cross_reference_matches
+ *
+ * For now: Use a name-based heuristic - find Form Ds with similar names to matched funds
+ * from the same adviser but not in the matches themselves.
  */
 async function detectMissingFundInADV() {
     console.log('\n[5/6] Detecting: Missing Fund in ADV...');
 
-    // Get cross-reference matches where Form D exists but no ADV match
-    const { data: matches, error } = await formDDb
-        .from('cross_reference_matches')
-        .select('formd_entity_name, formd_accession, adviser_entity_crd, adviser_entity_legal_name, match_score, latest_adv_year')
-        .is('adv_fund_name', null)  // Form D exists but no ADV match
-        .not('adviser_entity_crd', 'is', null)
-        .limit(DETECTION_CONFIG.batchSize);
+    // Step 1: Get all unique advisers from cross_reference_matches with their matched Form Ds
+    const adviserMatches = new Map();  // adviser_crd -> { name, matchedAccessions, latestAdvYear }
 
-    if (error) throw error;
+    let offset = 0;
+    while (offset < DETECTION_CONFIG.maxRecords) {
+        const { data: matches, error } = await formDDb
+            .from('cross_reference_matches')
+            .select('adviser_entity_crd, adviser_entity_legal_name, formd_accession, latest_adv_year')
+            .not('adviser_entity_crd', 'is', null)
+            .range(offset, offset + DETECTION_CONFIG.batchSize - 1);
 
-    // Fetch Form D filing dates for these matches
-    const accessions = matches.map(m => m.formd_accession).filter(Boolean);
-    const filingDates = new Map();
+        if (error) throw error;
+        if (!matches || matches.length === 0) break;
 
-    for (let i = 0; i < accessions.length; i += 100) {
-        const batch = accessions.slice(i, i + 100);
-        const { data: filings } = await formDDb
-            .from('form_d_filings')
-            .select('accessionnumber, filing_date, cik, totalofferingamount')
-            .in('accessionnumber', batch);
-
-        for (const f of (filings || [])) {
-            filingDates.set(f.accessionnumber, {
-                filing_date: f.filing_date,
-                cik: f.cik,
-                offering_amount: f.totalofferingamount
-            });
+        for (const m of matches) {
+            if (!adviserMatches.has(m.adviser_entity_crd)) {
+                adviserMatches.set(m.adviser_entity_crd, {
+                    name: m.adviser_entity_legal_name,
+                    matchedAccessions: new Set(),
+                    latestAdvYear: m.latest_adv_year
+                });
+            }
+            adviserMatches.get(m.adviser_entity_crd).matchedAccessions.add(m.formd_accession);
         }
+
+        offset += DETECTION_CONFIG.batchSize;
+        if (matches.length < DETECTION_CONFIG.batchSize) break;
     }
 
+    console.log(`  Found ${adviserMatches.size} advisers with Form D matches`);
+
+    // Step 2: For each adviser, get their ADV funds and check for unmatched Form Ds
+    // We look for Form D filings that share the adviser's name pattern
     const issues = [];
     const currentYear = new Date().getFullYear();
+    const advDeadlinePassed = (new Date().getMonth() >= 3); // After April
 
-    for (const match of matches) {
-        const filingInfo = filingDates.get(match.formd_accession);
-        if (!filingInfo) continue;
+    // Get all Form D filings to check
+    const { data: allFormDFilings, error: formDError } = await formDDb
+        .from('form_d_filings')
+        .select('accessionnumber, cik, entityname, filing_date, totalofferingamount, related_names')
+        .order('filing_date', { ascending: false })
+        .limit(10000);
 
-        const filingDate = new Date(filingInfo.filing_date);
-        const filingYear = filingDate.getFullYear();
-        const latestAdvYear = match.latest_adv_year || currentYear;
+    if (formDError) throw formDError;
 
-        // Per user request: Flag mostly Form Ds filed in previous year not reflected in ADV filed after
-        // Skip if Form D was filed in current year and ADV hasn't been due yet (grace period)
-        // ADV annual amendment is typically due around April 1
-        const advDeadlinePassed = (new Date().getMonth() >= 3); // After April
-
-        // Include if:
-        // 1. Form D was filed in year before the latest ADV year (should have been included)
-        // 2. Or Form D was filed in previous year and current year's ADV deadline has passed
-        const shouldHaveBeenInADV = (filingYear < latestAdvYear) ||
-            (filingYear < currentYear && advDeadlinePassed);
-
-        if (shouldHaveBeenInADV) {
-            issues.push({
-                adviser_crd: match.adviser_entity_crd,
-                form_d_cik: filingInfo.cik,  // For EDGAR link
-                discrepancy_type: 'missing_fund_in_adv',
-                severity: 'medium',
-                description: `Fund "${match.formd_entity_name}" filed Form D on ${filingInfo.filing_date} but not in latest Form ADV (${latestAdvYear})`,
-                metadata: {
-                    fund_name: match.formd_entity_name,
-                    formd_accession: match.formd_accession,
-                    formd_filing_date: filingInfo.filing_date,
-                    formd_cik: filingInfo.cik,
-                    offering_amount: filingInfo.offering_amount,
-                    latest_adv_year: latestAdvYear,
-                    adviser_name: match.adviser_entity_legal_name,
-                    match_score: match.match_score
-                }
-            });
+    // Build a set of all matched accessions for quick lookup
+    const allMatchedAccessions = new Set();
+    for (const [_, advData] of adviserMatches) {
+        for (const acc of advData.matchedAccessions) {
+            allMatchedAccessions.add(acc);
         }
     }
 
-    console.log(`  Found ${issues.length} issues (filtered by timing relevance)`);
-    return issues;
+    console.log(`  Total matched accessions: ${allMatchedAccessions.size}`);
+
+    // Step 3: For each adviser, find Form Ds that mention their name but aren't matched
+    for (const [crd, advData] of adviserMatches) {
+        const adviserName = (advData.name || '').toUpperCase();
+        if (!adviserName || adviserName.length < 3) continue;
+
+        // Extract key words from adviser name (skip common words)
+        const skipWords = new Set(['LLC', 'LP', 'INC', 'CAPITAL', 'PARTNERS', 'MANAGEMENT', 'FUND', 'ADVISORS', 'ADVISERS', 'INVESTMENTS', 'GROUP', 'HOLDINGS', 'THE', 'AND', 'OF']);
+        const adviserKeyWords = adviserName.split(/\s+/)
+            .filter(w => w.length > 2 && !skipWords.has(w))
+            .slice(0, 3);  // Use first 3 distinctive words
+
+        if (adviserKeyWords.length === 0) continue;
+
+        // Find Form Ds that mention adviser name in related_names or entity name
+        for (const filing of allFormDFilings) {
+            // Skip if already matched
+            if (allMatchedAccessions.has(filing.accessionnumber)) continue;
+
+            // Check if this Form D is related to this adviser
+            const relatedNames = (filing.related_names || '').toUpperCase();
+            const entityName = (filing.entityname || '').toUpperCase();
+            const combinedText = relatedNames + ' ' + entityName;
+
+            // Check if adviser's key words appear in the Form D
+            const matchCount = adviserKeyWords.filter(w => combinedText.includes(w)).length;
+            if (matchCount < 2) continue;  // Need at least 2 matching key words
+
+            // Check timing - Form D should have been filed before latest ADV
+            const filingDate = new Date(filing.filing_date);
+            const filingYear = filingDate.getFullYear();
+            const latestAdvYear = advData.latestAdvYear || currentYear;
+
+            const shouldHaveBeenInADV = (filingYear < latestAdvYear) ||
+                (filingYear < currentYear && advDeadlinePassed);
+
+            if (shouldHaveBeenInADV) {
+                issues.push({
+                    adviser_crd: crd,
+                    form_d_cik: filing.cik,
+                    discrepancy_type: 'missing_fund_in_adv',
+                    severity: 'medium',
+                    description: `Fund "${filing.entityname}" filed Form D on ${filing.filing_date} but not in latest Form ADV (${latestAdvYear}) for "${advData.name}"`,
+                    metadata: {
+                        fund_name: filing.entityname,
+                        formd_accession: filing.accessionnumber,
+                        formd_filing_date: filing.filing_date,
+                        formd_cik: filing.cik,
+                        offering_amount: filing.totalofferingamount,
+                        latest_adv_year: latestAdvYear,
+                        adviser_name: advData.name,
+                        matched_keywords: adviserKeyWords.filter(w => combinedText.includes(w))
+                    }
+                });
+            }
+        }
+    }
+
+    // Deduplicate by accession number (same Form D might match multiple advisers)
+    const seenAccessions = new Set();
+    const dedupedIssues = issues.filter(issue => {
+        const acc = issue.metadata.formd_accession;
+        if (seenAccessions.has(acc)) return false;
+        seenAccessions.add(acc);
+        return true;
+    });
+
+    console.log(`  Found ${dedupedIssues.length} issues (Form Ds potentially missing from ADV)`);
+    return dedupedIssues;
 }
 
 /**

@@ -32,6 +32,53 @@ This is because data comes from different sources (SEC vs state ERA data).
 
 ---
 
+### DONE: Fix Needs Initial ADV Filing Detector (2026-01-06)
+**Problem**: Detector was returning 0 results because it tried to match Form D `cik` to non-existent `sec_file_number` column in `advisers_enriched`.
+
+**Root Cause**: Fundamentally broken logic - CIK and SEC file numbers are different identifier systems, and the column didn't even exist.
+
+**Original (Broken) Logic**:
+```javascript
+// WRONG: sec_file_number doesn't exist, and CIK ≠ file number
+const { data: adviser } = await advDb
+    .from('advisers_enriched')
+    .select('crd, adviser_name')
+    .eq('sec_file_number', filing.cik)
+```
+
+**Fix**: Use anti-join pattern against `cross_reference_matches`:
+1. Get recent Form D filings (last 6 months)
+2. Get all matched accessions from `cross_reference_matches`
+3. Find Form D filings NOT in matches = no ADV filing exists
+4. Filter to those filed >60 days ago (grace period)
+
+**Key Insight**: `cross_reference_matches` only contains MATCHED records. Unmatched Form D filings aren't stored there, so the anti-join pattern works.
+
+**Files Changed**: `detect_compliance_issues.js` - `detectNeedsInitialADVFiling()` function
+
+---
+
+### DONE: Fix Missing Fund in ADV Detector (2026-01-06)
+**Problem**: Detector queried `cross_reference_matches` for `adv_fund_name IS NULL`, but that table only contains matched records where both sides have data.
+
+**Root Cause**: Misunderstanding of table structure - assumed unmatched Form Ds would have NULL ADV fields, but those records simply don't exist.
+
+**Original (Broken) Logic**:
+```javascript
+// WRONG: Returns 0 rows because table only has matched records
+.is('adv_fund_name', null)
+```
+
+**Fix**: Use name-based heuristic to find related Form Ds:
+1. Get all advisers from `cross_reference_matches` with their matched Form Ds
+2. Get all Form D filings
+3. For each adviser, find Form Ds that mention their name (in `related_names` or `entityname`) but aren't in matches
+4. Filter by timing: Form D should have been filed before latest ADV year
+
+**Files Changed**: `detect_compliance_issues.js` - `detectMissingFundInADV()` function
+
+---
+
 ### DONE: Form D Links in Intelligence Radar (2026-01-06)
 **Request**: All compliance issue types should link to the relevant Form D filing on EDGAR.
 

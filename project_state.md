@@ -461,6 +461,44 @@ None currently
 
 ## Session Log (Last 5)
 
+### Session 12 - 2026-01-06 (Late Evening)
+- **Focus:** Fix broken compliance detectors returning 0 results + create database schema reference
+- **Completed:**
+  - ✅ **Fixed needs_initial_adv_filing detector** (was returning 0, now returns 777)
+    - Root cause: Tried to match CIK to non-existent `sec_file_number` column
+    - Fix: Anti-join pattern - find Form Ds NOT in cross_reference_matches, filed >60 days ago
+  - ✅ **Fixed missing_fund_in_adv detector** (was returning 0, now returns 407)
+    - Root cause: Queried for `adv_fund_name IS NULL` but table only has matched records
+    - Fix: Name-based heuristic - find Form Ds that mention adviser name but aren't matched
+  - ✅ **Created DATABASE_SCHEMA.md** - Comprehensive reference for all Supabase tables with:
+    - Entity relationship diagram
+    - All table columns with types and descriptions
+    - Key linkages for compliance detection
+    - Query patterns for common operations
+  - ✅ **Updated PRODUCT_BACKLOG.md** with detector fix documentation
+  - ✅ **Local detection run successful** - all 6 detectors working
+- **Detection Results (Local Run):**
+  - needs_initial_adv_filing: 777 (was 0 - FIXED!)
+  - overdue_annual_amendment: 2,123
+  - vc_exemption_violation: 25
+  - fund_type_mismatch: 16,154
+  - missing_fund_in_adv: 407 (was 0 - FIXED!)
+  - exemption_mismatch: 9,900
+  - **Total: 29,386 compliance issues**
+- **Key Insight Documented:**
+  - `cross_reference_matches` only contains MATCHED records
+  - Unmatched Form Ds don't exist in that table
+  - Must use anti-join patterns to find unmatched filings
+- **Files Created/Modified:**
+  - NEW: DATABASE_SCHEMA.md (comprehensive database reference)
+  - MODIFIED: detect_compliance_issues.js (both detectors fixed)
+  - MODIFIED: PRODUCT_BACKLOG.md (documented fixes)
+  - MODIFIED: project_state.md (this update)
+- **User Request:** Create database schema reference for data linkages
+- **Next Steps:**
+  - Commit all changes
+  - Verify UI shows new compliance issues in Intelligence Radar
+
 ### Session 11 - 2026-01-06 (Continued)
 - **Focus:** Compliance Issue Enhancements - Actionable Data for Intelligence Radar
 - **Completed:**
