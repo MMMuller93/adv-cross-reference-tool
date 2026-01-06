@@ -78,7 +78,7 @@ const ADMIN_UMBRELLAS = [
   'assure spv', 'carta spv', 'allocations.com', 'allocations spv',
   // Fund admin platforms
   'forge', 'forge global', 'finally fund admin', 'finally admin',
-  'juniper square', 'carta fund admin', 'anduin',
+  'juniper square', 'carta fund admin', 'anduin', 'decile', 'decile fund',
   // Other SPV umbrellas
   'stonks spv', 'flow spv', 'republic spv', 'wefunder spv'
 ];
@@ -753,28 +753,42 @@ async function validateWebsiteWithAI(websiteUrl, fundName) {
   if (!openai || !websiteUrl) {
     return { isValid: true, confidence: 0.5 }; // Default if no AI
   }
-  
+
   try {
     const response = await fetch(websiteUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FundRadar/1.0)' },
       timeout: 10000
     });
-    
+
     if (!response.ok) {
       return { isValid: false, confidence: 0, reason: 'Website not accessible' };
     }
-    
+
     const html = await response.text();
     const truncatedHtml = html.slice(0, 5000); // Limit tokens
-    
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
-          content: `You are validating if a website belongs to an investment fund/firm.
-Return JSON only: {"isValid": boolean, "confidence": 0.0-1.0, "reason": "brief explanation"}
-Consider: Does the website mention the fund name or similar? Is it an investment firm website?`
+          content: `You are validating if a website belongs to the EXACT investment fund/firm specified.
+Return JSON only: {"isValid": boolean, "confidence": 0.0-1.0, "reason": "brief explanation", "foundName": "name found on site or null"}
+
+CRITICAL RULES for validation:
+1. The website MUST mention the EXACT fund name (or very close variant), not just a similar name
+2. "Global Ventures" is NOT the same as "Renn Global Ventures" - these are DIFFERENT firms
+3. "XYZ Capital" is NOT the same as "ABC XYZ Capital" - partial matches are FALSE
+4. Watch out for common generic words: "Ventures", "Capital", "Partners", "Fund", "Investment"
+5. The FULL distinctive name must match, not just common suffixes
+6. If you find a different company name on the website, return isValid: false
+
+Examples of FALSE matches:
+- Fund "Renn Global Ventures" vs website for "Global Ventures" -> FALSE (different company)
+- Fund "Oak Capital" vs website for "Red Oak Capital" -> FALSE (different company)
+- Fund "Summit Partners" vs website for "Summit Fund Partners" -> FALSE (different company)
+
+Only return isValid: true if the website clearly belongs to the EXACT fund specified.`
         },
         {
           role: "user",
@@ -785,15 +799,20 @@ ${truncatedHtml}`
         }
       ],
       temperature: 0,
-      max_tokens: 150
+      max_tokens: 200
     });
-    
+
     const aiResponse = completion.choices[0].message.content;
     const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      const result = JSON.parse(jsonMatch[0]);
+      // Log any potential mismatches for debugging
+      if (result.foundName && result.foundName.toLowerCase() !== fundName.toLowerCase()) {
+        console.log(`[AI Validation] Name mismatch check: searched "${fundName}", found "${result.foundName}", isValid: ${result.isValid}`);
+      }
+      return result;
     }
-    
+
     return { isValid: true, confidence: 0.5 };
   } catch (error) {
     console.error('[AI Validation] Error:', error.message);
@@ -806,9 +825,9 @@ ${truncatedHtml}`
  */
 async function extractTeamWithAI(websiteUrl, fundName) {
   if (!openai || !websiteUrl) return [];
-  
+
   const teamPaths = ['/team', '/about', '/people', '/leadership', '/our-team', '/about-us'];
-  
+
   for (const path of teamPaths) {
     try {
       const url = websiteUrl.replace(/\/$/, '') + path;
@@ -816,53 +835,73 @@ async function extractTeamWithAI(websiteUrl, fundName) {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FundRadar/1.0)' },
         timeout: 10000
       });
-      
+
       if (!response.ok) continue;
-      
+
       const html = await response.text();
-      
+
       // Check if this looks like a team page
       const lowerHtml = html.toLowerCase();
       if (!lowerHtml.includes('team') && !lowerHtml.includes('partner') &&
           !lowerHtml.includes('founder') && !lowerHtml.includes('managing')) {
         continue;
       }
-      
+
       const truncatedHtml = html.slice(0, 8000);
-      
+
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
             content: `Extract team members from this investment firm's team page.
-Return JSON array only: [{"name": "Full Name", "title": "Job Title", "email": "email or null", "linkedin": "url or null"}]
-Focus on: Partners, Founders, Managing Directors, Principals. Skip: Advisors, Board members unless they're key.
-Return empty array [] if no team members found.`
+Return JSON: {"firmNameFound": "name found on page", "team": [{"name": "Full Name", "title": "Job Title", "email": "email or null", "linkedin": "url or null"}]}
+
+CRITICAL VALIDATION:
+1. First, identify what firm/company name appears on this page
+2. ONLY extract team members if this page is for the EXACT firm specified (not a similarly-named firm)
+3. If the page mentions a DIFFERENT firm (e.g., searching "Renn Global Ventures" but page is for "Global Ventures"), return empty team
+4. Focus on: Partners, Founders, Managing Directors, Principals
+5. Skip: Advisors, Board members, contractors
+
+If the firm name doesn't match exactly, return: {"firmNameFound": "actual firm name", "team": []}`
           },
           {
             role: "user",
-            content: `Extract team members from ${fundName}'s page:\n\n${truncatedHtml}`
+            content: `Extract team members for: "${fundName}"
+Website URL: ${url}
+HTML:
+${truncatedHtml}`
           }
         ],
         temperature: 0,
-        max_tokens: 1000
+        max_tokens: 1200
       });
-      
+
       const aiResponse = completion.choices[0].message.content;
-      const jsonMatch = aiResponse.match(/\[[\s\S]*\]/);
+      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        const team = JSON.parse(jsonMatch[0]);
-        if (team.length > 0) {
-          console.log(`[Team AI] Found ${team.length} team members from ${url}`);
-          return team;
+        const result = JSON.parse(jsonMatch[0]);
+        // Check if firm name matches
+        if (result.firmNameFound && result.firmNameFound.toLowerCase() !== fundName.toLowerCase()) {
+          // Check if it's a reasonable variant (e.g., "X LLC" vs "X")
+          const normalizedFound = result.firmNameFound.toLowerCase().replace(/\s*(llc|lp|inc|corp|ltd|l\.l\.c\.|l\.p\.)\s*$/i, '').trim();
+          const normalizedSearch = fundName.toLowerCase().replace(/\s*(llc|lp|inc|corp|ltd|l\.l\.c\.|l\.p\.)\s*$/i, '').trim();
+          if (normalizedFound !== normalizedSearch && !normalizedFound.includes(normalizedSearch) && !normalizedSearch.includes(normalizedFound)) {
+            console.log(`[Team AI] Firm name mismatch: searched "${fundName}", found "${result.firmNameFound}" - skipping team extraction`);
+            continue; // Try next path
+          }
+        }
+        if (result.team && result.team.length > 0) {
+          console.log(`[Team AI] Found ${result.team.length} team members from ${url} (firm: ${result.firmNameFound || 'not specified'})`);
+          return result.team;
         }
       }
     } catch (error) {
       continue;
     }
   }
-  
+
   return [];
 }
 
