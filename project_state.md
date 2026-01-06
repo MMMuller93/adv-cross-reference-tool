@@ -5,7 +5,7 @@
 - **Port**: 3009
 - **Goal**: Comprehensive intelligence platform for private fund managers
 - **Started**: 2025-11
-- **Last Updated**: 2026-01-04
+- **Last Updated**: 2026-01-06
 - **Version**: 2.7.0
 
 ---
@@ -460,6 +460,56 @@ None currently
 ---
 
 ## Session Log (Last 5)
+
+### Session 10 - 2026-01-06
+- **Focus:** Deep inspection of Form D/ADV matching logic + Founders Fund investigation
+- **Completed:**
+  - ✅ Investigated "Don Quixote" fund names appearing for Founders Fund
+  - ✅ Analyzed compute_cross_reference.py matching algorithm
+  - ✅ Verified frontend UI implementations (fund types, EDGAR links, adviser loading)
+- **Key Findings:**
+  1. **Mystery fund names SOLVED**: GRISOSTOMO, ROQUE GUINART, DODGER, PEMULIS, etc. are **historical funds** from older ADV filings (2011-2014) that have since been dissolved. User's IAPD extract is from current filing - database includes all historical filings.
+  2. **Matching algorithm is correct**: Uses file_num (primary, 100% accurate) + normalized name (fallback). Well-documented with trade-offs.
+  3. **Frontend UI features verified in code**: radar-ui-001, radar-ui-002, radar-ui-003 all implemented correctly - need browser verification.
+- **Technical Details:**
+  - GRISOSTOMO: form_d_file_number=021-149309, gav_2012=$9.4M, gav_2013=$67K, gav_2014=$59K, then nothing (fund dissolved)
+  - normalize_name_for_match() removes punctuation, uppercases, strips entity suffixes
+  - compute_cross_reference.py correctly processes 185k ADV funds → 63k matches
+- **No Action Needed:** Database correctly includes historical funds - this is a feature, not a bug
+- **Files Reviewed (no changes):**
+  - scripts/compute_cross_reference.py
+  - public/app.js (lines 4169-4300)
+  - IAPD extract comparison
+
+### Session 9 - 2026-01-06
+- **Focus:** Fix Intelligence Radar pagination to process ALL 63k cross_reference_matches
+- **Issue Found & Fixed:**
+  - Supabase has default 1000 row limit per request
+  - Fixed batchSize to 1000 to work within Supabase limits
+  - Added batched inserts (500 per batch) to avoid timeout
+- **Completed:**
+  - ✅ Added best-practices/ folder with Anthropic guidelines
+  - ✅ Reviewed CLAUDE_BEST_PRACTICES.md, STATE_PERSISTENCE.md
+  - ✅ Updated detectExemptionMismatch with pagination
+  - ✅ Fixed batchSize=1000 for Supabase compatibility
+  - ✅ Added clearExistingIssues() function
+  - ✅ Added batched inserts to saveIssues() to avoid timeouts
+  - ✅ Full detection run completed successfully
+- **Detection Results (FINAL - all 63,096 records):**
+  - 2,123 overdue annual amendment (unique advisers)
+  - 740 VC exemption violations
+  - 16,154 fund type mismatches
+  - 9,900 exemption mismatches
+  - **Total: 28,917 compliance issues saved**
+- **Improvement over previous run:**
+  - Overdue ADV: 638 → 2,123 (3.3x)
+  - Fund Type: 324 → 16,154 (50x)
+  - Exemption: 105 → 9,900 (94x)
+  - Total: 1,807 → 28,917 (16x)
+- **Files Modified:**
+  - detect_compliance_issues.js (pagination, batched inserts)
+  - best-practices/ folder added
+  - project_state.md updated
 
 ### Session 8 - 2026-01-05 (Continued)
 

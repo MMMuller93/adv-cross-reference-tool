@@ -7,10 +7,15 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const { createClient } = require('@supabase/supabase-js');
-const { enrichManager, saveEnrichment } = require('./enrichment_engine');
+// USE V2 ENGINE - has Twitter, email extraction, and AI team extraction
+const { enrichManager, saveEnrichment } = require('./enrichment_engine_v2');
 
-const SUPABASE_FORMD_URL = 'https://ltdalxkhbbhmkimmogyq.supabase.co';
-const SUPABASE_FORMD_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0ZGFseGtoYmJobWtpbW1vZ3lxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1OTg3NTMsImV4cCI6MjA3NTE3NDc1M30.TS9uNMRqPKcthHCSMKAcFfhFEP-7Q6XbDHQNujBDOtc';
+// Form D database - use environment variables for GitHub Actions, fallback to defaults for local dev
+const SUPABASE_FORMD_URL = process.env.FORMD_URL || 'https://ltdalxkhbbhmkimmogyq.supabase.co';
+const SUPABASE_FORMD_KEY = process.env.FORMD_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0ZGFseGtoYmJobWtpbW1vZ3lxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1OTg3NTMsImV4cCI6MjA3NTE3NDc1M30.TS9uNMRqPKcthHCSMKAcFfhFEP-7Q6XbDHQNujBDOtc';
+
+console.log(`[Config] Form D URL: ${SUPABASE_FORMD_URL.substring(0, 30)}...`);
+console.log(`[Config] Using ${process.env.FORMD_SERVICE_KEY ? 'environment' : 'default'} credentials`);
 
 const formdClient = createClient(SUPABASE_FORMD_URL, SUPABASE_FORMD_KEY);
 const enrichedClient = createClient(SUPABASE_FORMD_URL, SUPABASE_FORMD_KEY);
@@ -181,19 +186,21 @@ async function main() {
       const enrichmentData = await enrichManager(manager.series_master_llc);
       await saveEnrichment(enrichmentData);
 
-      // Log results
-      switch (enrichmentData.enrichmentStatus) {
+      // Log results - v2 uses enrichment_status, v1 used enrichmentStatus
+      const status = enrichmentData.enrichment_status || enrichmentData.enrichmentStatus;
+      switch (status) {
         case 'auto_enriched':
           results.auto_enriched++;
-          console.log(`  ✅ Auto-enriched (confidence: ${enrichmentData.confidence.toFixed(2)})`);
-          if (enrichmentData.website) console.log(`     Website: ${enrichmentData.website}`);
-          if (enrichmentData.linkedinUrl) console.log(`     LinkedIn: ${enrichmentData.linkedinUrl}`);
-          if (enrichmentData.teamMembers?.length) console.log(`     Team: ${enrichmentData.teamMembers.length} members`);
-          if (enrichmentData.portfolioCompanies?.length) console.log(`     Portfolio: ${enrichmentData.portfolioCompanies.length} companies`);
+          console.log(`  ✅ Auto-enriched (confidence: ${enrichmentData.confidence_score?.toFixed(2) || enrichmentData.confidence?.toFixed(2)})`);
+          if (enrichmentData.website_url) console.log(`     Website: ${enrichmentData.website_url}`);
+          if (enrichmentData.linkedin_company_url) console.log(`     LinkedIn: ${enrichmentData.linkedin_company_url}`);
+          if (enrichmentData.twitter_handle) console.log(`     Twitter: ${enrichmentData.twitter_handle}`);
+          if (enrichmentData.primary_contact_email) console.log(`     Email: ${enrichmentData.primary_contact_email}`);
+          if (enrichmentData.team_members?.length) console.log(`     Team: ${enrichmentData.team_members.length} members`);
           break;
         case 'needs_manual_review':
           results.needs_review++;
-          console.log(`  ⏳ Needs review (confidence: ${enrichmentData.confidence.toFixed(2)})`);
+          console.log(`  ⏳ Needs review (confidence: ${enrichmentData.confidence_score?.toFixed(2) || 'N/A'})`);
           break;
         case 'platform_spv':
           results.platform_spv++;

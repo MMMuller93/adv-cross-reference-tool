@@ -2597,18 +2597,29 @@ function App() {
         console.log('[URL Load] Loading adviser CRD:', adviserCrd);
         try {
           const res = await fetch(`${SUPABASE_ADV_URL}/rest/v1/advisers_enriched?crd=eq.${adviserCrd}&select=*`, { headers: advHeaders });
+          if (!res.ok) {
+            console.error('[URL Load] HTTP error:', res.status, res.statusText);
+            setView('adviser_detail'); // Show "not found" fallback UI
+            return;
+          }
           const data = await res.json();
-          if (data && data.length > 0) {
+          // Check for Supabase error format
+          if (data && data.code && data.message) {
+            console.error('[URL Load] Supabase error:', data.message);
+            setView('adviser_detail'); // Show "not found" fallback UI
+            return;
+          }
+          if (data && Array.isArray(data) && data.length > 0) {
             console.log('[URL Load] Adviser found:', data[0].adviser_name);
             setSelectedAdviser(data[0]);
             setView('adviser_detail');
           } else {
             console.warn('[URL Load] Adviser not found for CRD:', adviserCrd);
-            setView('dashboard'); // Fall back to dashboard if not found
+            setView('adviser_detail'); // Show "not found" fallback UI instead of dashboard
           }
         } catch (err) {
           console.error('[URL Load] Error loading adviser:', err);
-          setView('dashboard'); // Fall back to dashboard on error
+          setView('adviser_detail'); // Show "not found" fallback UI instead of dashboard
         }
         return;
       }
@@ -2620,18 +2631,29 @@ function App() {
         try {
           // Try to load fund by reference_id
           const res = await fetch(`${SUPABASE_ADV_URL}/rest/v1/funds_enriched?reference_id=eq.${fundId}&select=*`, { headers: advHeaders });
+          if (!res.ok) {
+            console.error('[URL Load] HTTP error:', res.status, res.statusText);
+            setView('fund_detail'); // Show "not found" fallback UI
+            return;
+          }
           const data = await res.json();
-          if (data && data.length > 0) {
+          // Check for Supabase error format
+          if (data && data.code && data.message) {
+            console.error('[URL Load] Supabase error:', data.message);
+            setView('fund_detail'); // Show "not found" fallback UI
+            return;
+          }
+          if (data && Array.isArray(data) && data.length > 0) {
             console.log('[URL Load] Fund found:', data[0].fund_name);
             setSelectedFund(data[0]);
             setView('fund_detail');
           } else {
             console.warn('[URL Load] Fund not found for ID:', fundId);
-            setView('dashboard'); // Fall back to dashboard if not found
+            setView('fund_detail'); // Show "not found" fallback UI instead of dashboard
           }
         } catch (err) {
           console.error('[URL Load] Error loading fund:', err);
-          setView('dashboard'); // Fall back to dashboard on error
+          setView('fund_detail'); // Show "not found" fallback UI instead of dashboard
         }
       }
     };
@@ -4729,6 +4751,46 @@ function App() {
         )}
         {view === 'fund_detail' && selectedFund && (
           <FundDetailView fund={selectedFund} onBack={handleBack} onNavigateToAdviser={handleNavigateToAdviserFromFund} />
+        )}
+
+        {/* Fallback for detail views without data - prevents blank page */}
+        {view === 'adviser_detail' && !selectedAdviser && (
+          <div className="flex-1 flex flex-col items-center justify-center bg-white">
+            <div className="text-center">
+              <div className="text-gray-400 mb-4">
+                <svg className="w-16 h-16 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Adviser Not Found</h3>
+              <p className="text-sm text-gray-500 mb-6">The adviser you're looking for couldn't be loaded.</p>
+              <button
+                onClick={handleBack}
+                className="px-4 py-2 text-sm font-medium text-white bg-slate-700 hover:bg-slate-800 rounded-lg transition-colors"
+              >
+                Back to Dashboard
+              </button>
+            </div>
+          </div>
+        )}
+        {view === 'fund_detail' && !selectedFund && (
+          <div className="flex-1 flex flex-col items-center justify-center bg-white">
+            <div className="text-center">
+              <div className="text-gray-400 mb-4">
+                <svg className="w-16 h-16 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Fund Not Found</h3>
+              <p className="text-sm text-gray-500 mb-6">The fund you're looking for couldn't be loaded.</p>
+              <button
+                onClick={handleBack}
+                className="px-4 py-2 text-sm font-medium text-white bg-slate-700 hover:bg-slate-800 rounded-lg transition-colors"
+              >
+                Back to Dashboard
+              </button>
+            </div>
+          </div>
         )}
 
         {/* Loading States for URL-based navigation */}

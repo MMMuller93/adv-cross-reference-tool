@@ -15,12 +15,16 @@
 
 const { createClient } = require('@supabase/supabase-js');
 
-// Database configuration
-const SUPABASE_URL = 'https://ezuqwwffjgfzymqxsctq.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6dXF3d2ZmamdmenltcXhzY3RxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMzMjY0NDAsImV4cCI6MjA3ODkwMjQ0MH0.RGMhIb7yMXmOQpysiPgazxJzflGKNCdzRZ8XBgPDCAE';
+// Database configuration - use environment variables for GitHub Actions, fallback to defaults for local dev
+const SUPABASE_URL = process.env.ADV_URL || 'https://ezuqwwffjgfzymqxsctq.supabase.co';
+const SUPABASE_KEY = process.env.ADV_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6dXF3d2ZmamdmenltcXhzY3RxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMzMjY0NDAsImV4cCI6MjA3ODkwMjQ0MH0.RGMhIb7yMXmOQpysiPgazxJzflGKNCdzRZ8XBgPDCAE';
 
-const FORM_D_URL = 'https://ltdalxkhbbhmkimmogyq.supabase.co';
-const FORM_D_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0ZGFseGtoYmJobWtpbW1vZ3lxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1OTg3NTMsImV4cCI6MjA3NTE3NDc1M30.TS9uNMRqPKcthHCSMKAcFfhFEP-7Q6XbDHQNujBDOtc';
+const FORM_D_URL = process.env.FORMD_URL || 'https://ltdalxkhbbhmkimmogyq.supabase.co';
+const FORM_D_KEY = process.env.FORMD_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0ZGFseGtoYmJobWtpbW1vZ3lxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1OTg3NTMsImV4cCI6MjA3NTE3NDc1M30.TS9uNMRqPKcthHCSMKAcFfhFEP-7Q6XbDHQNujBDOtc';
+
+console.log(`[Config] ADV DB: ${SUPABASE_URL.substring(0, 30)}...`);
+console.log(`[Config] Form D DB: ${FORM_D_URL.substring(0, 30)}...`);
+console.log(`[Config] Using ${process.env.ADV_SERVICE_KEY ? 'environment' : 'default'} credentials`);
 
 const advDb = createClient(SUPABASE_URL, SUPABASE_KEY);
 const formDDb = createClient(FORM_D_URL, FORM_D_KEY);
@@ -29,14 +33,14 @@ const formDDb = createClient(FORM_D_URL, FORM_D_KEY);
 const DETECTION_CONFIG = {
     initialFilingGracePeriodDays: 60,  // Days after Form D to file initial ADV
     annualAmendmentDeadline: '2025-04-01',  // Current year deadline
-    batchSize: 1000,
+    batchSize: 1000,  // Supabase default limit is 1000 rows per request
+    maxRecords: 100000,  // Process up to 100k records total
     enabledDetectors: [
-        // 'needs_initial_adv_filing',  // Disabled - requires CIK linkage (sparse coverage)
-        // 'overdue_annual_amendment',  // Disabled - needs latest_filing_date column
+        'overdue_annual_amendment',  // Uses overdue_adv_flag from cross_reference_matches
         'vc_exemption_violation',
         'fund_type_mismatch',
         'exemption_mismatch'
-        // 'missing_fund_in_adv'  // Disabled - cross_reference_matches only contains matches
+        // 'needs_initial_adv_filing'  // Disabled - requires comparing Form D to ADV at entity level
     ]
 };
 
@@ -97,24 +101,54 @@ async function detectNeedsInitialADVFiling() {
 
 /**
  * Detector 2: Overdue Annual ADV Amendment
- * Managers haven't filed 2025 annual amendment by April 1
+ * Uses pre-computed overdue_adv_flag from cross_reference_matches
+ * Flags advisers whose latest ADV filing is not current year
  */
 async function detectOverdueAnnualAmendment() {
     console.log('\n[2/6] Detecting: Overdue Annual ADV Amendment...');
 
-    const deadline = new Date(DETECTION_CONFIG.annualAmendmentDeadline);
-    const today = new Date();
+    const issues = [];
+    let offset = 0;
+    const seenAdvisers = new Set(); // Deduplicate by adviser
 
-    if (today < deadline) {
-        console.log(`  Skipping - deadline not reached (${DETECTION_CONFIG.annualAmendmentDeadline})`);
-        return [];
+    while (offset < DETECTION_CONFIG.maxRecords) {
+        const { data: matches, error } = await formDDb
+            .from('cross_reference_matches')
+            .select('adviser_entity_crd, adviser_entity_legal_name, latest_adv_year, overdue_adv_flag, adv_fund_name')
+            .eq('overdue_adv_flag', true)
+            .range(offset, offset + DETECTION_CONFIG.batchSize - 1);
+
+        if (error) throw error;
+        if (!matches || matches.length === 0) break;
+
+        for (const match of matches) {
+            // Deduplicate by adviser CRD
+            if (!match.adviser_entity_crd || seenAdvisers.has(match.adviser_entity_crd)) continue;
+            seenAdvisers.add(match.adviser_entity_crd);
+
+            issues.push({
+                adviser_crd: match.adviser_entity_crd,
+                discrepancy_type: 'overdue_annual_amendment',
+                severity: 'high',
+                description: `Manager "${match.adviser_entity_legal_name}" has not filed current year ADV amendment (last filing: ${match.latest_adv_year || 'unknown'})`,
+                metadata: {
+                    adviser_name: match.adviser_entity_legal_name,
+                    latest_adv_year: match.latest_adv_year,
+                    sample_fund: match.adv_fund_name
+                }
+            });
+        }
+
+        offset += DETECTION_CONFIG.batchSize;
+        if (matches.length < DETECTION_CONFIG.batchSize) break;
+
+        if (offset % 10000 === 0) {
+            console.log(`    Processed ${offset} records, found ${issues.length} overdue advisers...`);
+        }
     }
 
-    // Note: Detector disabled - needs column mapping fix
-    // No latest_filing_date column in advisers_enriched table
-    // Would need to derive from filing_id or separate filing_dates table
-    console.log('  Skipped - column mapping needs investigation');
-    return [];
+    console.log(`  Found ${issues.length} issues (unique advisers with overdue ADV)`);
+    return issues;
 }
 
 /**
@@ -172,83 +206,93 @@ async function detectVCExemptionViolation() {
 /**
  * Detector 4: Fund Type Mismatch
  * Fund type in Form D differs from Form ADV
- * Uses cross_reference_matches to find matched funds, then compares types
+ * Paginates through ALL cross_reference_matches to find mismatches
  */
 async function detectFundTypeMismatch() {
     console.log('\n[4/6] Detecting: Fund Type Mismatch...');
 
-    // Get cross-reference matches that have both ADV and Form D data
-    const { data: matches, error } = await formDDb
-        .from('cross_reference_matches')
-        .select('adv_fund_id, adv_fund_name, formd_accession, formd_entity_name, adviser_entity_crd, adviser_entity_legal_name')
-        .not('adv_fund_id', 'is', null)
-        .not('formd_accession', 'is', null)
-        .limit(DETECTION_CONFIG.batchSize);
-
-    if (error) throw error;
-    console.log(`  Processing ${matches.length} matched fund pairs...`);
-
     const issues = [];
+    let pageOffset = 0;
+    let totalProcessed = 0;
 
-    // Process in batches to avoid overwhelming the API
-    const batchSize = 50;
-    for (let i = 0; i < matches.length; i += batchSize) {
-        const batch = matches.slice(i, i + batchSize);
+    while (pageOffset < DETECTION_CONFIG.maxRecords) {
+        // Get a page of cross-reference matches
+        const { data: matches, error } = await formDDb
+            .from('cross_reference_matches')
+            .select('adv_fund_id, adv_fund_name, formd_accession, formd_entity_name, adviser_entity_crd, adviser_entity_legal_name')
+            .not('adv_fund_id', 'is', null)
+            .not('formd_accession', 'is', null)
+            .range(pageOffset, pageOffset + DETECTION_CONFIG.batchSize - 1);
 
-        // Get ADV fund types for this batch
-        const advFundIds = batch.map(m => m.adv_fund_id).filter(Boolean);
-        const { data: advFunds } = await advDb
-            .from('funds_enriched')
-            .select('fund_id, fund_type')
-            .in('fund_id', advFundIds);
+        if (error) throw error;
+        if (!matches || matches.length === 0) break;
 
-        const advFundMap = new Map((advFunds || []).map(f => [f.fund_id, f.fund_type]));
+        // Process in smaller batches for API calls
+        const apiBatchSize = 100;
+        for (let i = 0; i < matches.length; i += apiBatchSize) {
+            const batch = matches.slice(i, i + apiBatchSize);
 
-        // Get Form D fund types for this batch
-        const accessions = batch.map(m => m.formd_accession).filter(Boolean);
-        const { data: formDFilings } = await formDDb
-            .from('form_d_filings')
-            .select('accessionnumber, investmentfundtype')
-            .in('accessionnumber', accessions);
+            // Get ADV fund types for this batch
+            const advFundIds = batch.map(m => m.adv_fund_id).filter(Boolean);
+            const { data: advFunds } = await advDb
+                .from('funds_enriched')
+                .select('fund_id, fund_type')
+                .in('fund_id', advFundIds);
 
-        const formDMap = new Map((formDFilings || []).map(f => [f.accessionnumber, f.investmentfundtype]));
+            const advFundMap = new Map((advFunds || []).map(f => [f.fund_id, f.fund_type]));
 
-        // Compare types
-        for (const match of batch) {
-            const advType = advFundMap.get(match.adv_fund_id) || '';
-            const formDType = formDMap.get(match.formd_accession) || '';
+            // Get Form D fund types for this batch
+            const accessions = batch.map(m => m.formd_accession).filter(Boolean);
+            const { data: formDFilings } = await formDDb
+                .from('form_d_filings')
+                .select('accessionnumber, investmentfundtype')
+                .in('accessionnumber', accessions);
 
-            // Skip if either type is empty
-            if (!advType || !formDType) continue;
+            const formDMap = new Map((formDFilings || []).map(f => [f.accessionnumber, f.investmentfundtype]));
 
-            const advTypeLower = advType.toLowerCase().trim();
-            const formDTypeLower = formDType.toLowerCase().trim();
+            // Compare types
+            for (const match of batch) {
+                const advType = advFundMap.get(match.adv_fund_id) || '';
+                const formDType = formDMap.get(match.formd_accession) || '';
 
-            // Check if types are significantly different
-            if (!areTypesEquivalent(advTypeLower, formDTypeLower)) {
-                issues.push({
-                    adviser_crd: match.adviser_entity_crd,
-                    discrepancy_type: 'fund_type_mismatch',
-                    severity: 'medium',
-                    description: `Fund type mismatch for "${match.adv_fund_name}": ADV reports "${advType}", Form D reports "${formDType}"`,
-                    metadata: {
-                        adv_fund_name: match.adv_fund_name,
-                        formd_entity_name: match.formd_entity_name,
-                        adv_fund_type: advType,
-                        formd_fund_type: formDType,
-                        formd_accession: match.formd_accession,
-                        adviser_name: match.adviser_entity_legal_name
-                    }
-                });
+                // Skip if either type is empty
+                if (!advType || !formDType) continue;
+
+                const advTypeLower = advType.toLowerCase().trim();
+                const formDTypeLower = formDType.toLowerCase().trim();
+
+                // Check if types are significantly different
+                if (!areTypesEquivalent(advTypeLower, formDTypeLower)) {
+                    issues.push({
+                        adviser_crd: match.adviser_entity_crd,
+                        discrepancy_type: 'fund_type_mismatch',
+                        severity: 'medium',
+                        description: `Fund type mismatch for "${match.adv_fund_name}": ADV reports "${advType}", Form D reports "${formDType}"`,
+                        metadata: {
+                            adv_fund_name: match.adv_fund_name,
+                            formd_entity_name: match.formd_entity_name,
+                            adv_fund_type: advType,
+                            formd_fund_type: formDType,
+                            formd_accession: match.formd_accession,
+                            adviser_name: match.adviser_entity_legal_name
+                        }
+                    });
+                }
             }
         }
 
-        if (i % 500 === 0 && i > 0) {
-            console.log(`    Processed ${i}/${matches.length} matches, found ${issues.length} mismatches so far...`);
+        totalProcessed += matches.length;
+        pageOffset += DETECTION_CONFIG.batchSize;
+
+        if (totalProcessed % 10000 === 0) {
+            console.log(`    Processed ${totalProcessed} matches, found ${issues.length} mismatches so far...`);
         }
+
+        if (matches.length < DETECTION_CONFIG.batchSize) break;
     }
 
-    console.log(`  Found ${issues.length} issues`);
+    console.log(`  Processed ${totalProcessed} total matches`);
+    console.log(`  Found ${issues.length} fund type mismatches`);
     return issues;
 }
 
@@ -291,96 +335,106 @@ async function detectMissingFundInADV() {
 /**
  * Detector 6: Exemption Mismatch
  * 3(c)(1) or 3(c)(7) status differs between Form D and ADV
- * Uses cross_reference_matches to find matched funds, then compares exemptions
+ * Paginates through ALL cross_reference_matches to find exemption mismatches
  */
 async function detectExemptionMismatch() {
     console.log('\n[6/6] Detecting: Exemption Mismatch (3c1 vs 3c7)...');
 
-    // Get cross-reference matches that have both ADV and Form D data
-    const { data: matches, error } = await formDDb
-        .from('cross_reference_matches')
-        .select('adv_fund_id, adv_fund_name, formd_accession, formd_entity_name, adviser_entity_crd, adviser_entity_legal_name')
-        .not('adv_fund_id', 'is', null)
-        .not('formd_accession', 'is', null)
-        .limit(DETECTION_CONFIG.batchSize);
-
-    if (error) throw error;
-    console.log(`  Processing ${matches.length} matched fund pairs...`);
-
     const issues = [];
+    let pageOffset = 0;
+    let totalProcessed = 0;
 
-    // Process in batches
-    const batchSize = 50;
-    for (let i = 0; i < matches.length; i += batchSize) {
-        const batch = matches.slice(i, i + batchSize);
+    while (pageOffset < DETECTION_CONFIG.maxRecords) {
+        // Get a page of cross-reference matches
+        const { data: matches, error } = await formDDb
+            .from('cross_reference_matches')
+            .select('adv_fund_id, adv_fund_name, formd_accession, formd_entity_name, adviser_entity_crd, adviser_entity_legal_name')
+            .not('adv_fund_id', 'is', null)
+            .not('formd_accession', 'is', null)
+            .range(pageOffset, pageOffset + DETECTION_CONFIG.batchSize - 1);
 
-        // Get ADV fund exemptions for this batch
-        const advFundIds = batch.map(m => m.adv_fund_id).filter(Boolean);
-        const { data: advFunds } = await advDb
-            .from('funds_enriched')
-            .select('fund_id, exclusion_3c1, exclusion_3c7')
-            .in('fund_id', advFundIds);
+        if (error) throw error;
+        if (!matches || matches.length === 0) break;
 
-        const advFundMap = new Map((advFunds || []).map(f => [f.fund_id, {
-            c1: f.exclusion_3c1 === 'Y' || f.exclusion_3c1 === true,
-            c7: f.exclusion_3c7 === 'Y' || f.exclusion_3c7 === true
-        }]));
+        // Process in smaller batches for API calls
+        const apiBatchSize = 100;
+        for (let i = 0; i < matches.length; i += apiBatchSize) {
+            const batch = matches.slice(i, i + apiBatchSize);
 
-        // Get Form D exemptions for this batch
-        const accessions = batch.map(m => m.formd_accession).filter(Boolean);
-        const { data: formDFilings } = await formDDb
-            .from('form_d_filings')
-            .select('accessionnumber, federalexemptions_items_list')
-            .in('accessionnumber', accessions);
+            // Get ADV fund exemptions for this batch
+            const advFundIds = batch.map(m => m.adv_fund_id).filter(Boolean);
+            const { data: advFunds } = await advDb
+                .from('funds_enriched')
+                .select('fund_id, exclusion_3c1, exclusion_3c7')
+                .in('fund_id', advFundIds);
 
-        // Parse Form D exemptions
-        const formDMap = new Map();
-        for (const f of (formDFilings || [])) {
-            const exemptions = (f.federalexemptions_items_list || '').toLowerCase();
-            // Form D uses variations: "3C", "3C.1", "3C.7", "3(c)(1)", "3(c)(7)"
-            const has3c1 = exemptions.includes('3c.1') || exemptions.includes('3(c)(1)') ||
-                          (exemptions.includes('3c') && !exemptions.includes('3c.7') && !exemptions.includes('3(c)(7)'));
-            const has3c7 = exemptions.includes('3c.7') || exemptions.includes('3(c)(7)');
-            formDMap.set(f.accessionnumber, { c1: has3c1, c7: has3c7 });
-        }
+            const advFundMap = new Map((advFunds || []).map(f => [f.fund_id, {
+                c1: f.exclusion_3c1 === 'Y' || f.exclusion_3c1 === true,
+                c7: f.exclusion_3c7 === 'Y' || f.exclusion_3c7 === true
+            }]));
 
-        // Compare exemptions
-        for (const match of batch) {
-            const advExempt = advFundMap.get(match.adv_fund_id);
-            const formDExempt = formDMap.get(match.formd_accession);
+            // Get Form D exemptions for this batch
+            const accessions = batch.map(m => m.formd_accession).filter(Boolean);
+            const { data: formDFilings } = await formDDb
+                .from('form_d_filings')
+                .select('accessionnumber, federalexemptions_items_list')
+                .in('accessionnumber', accessions);
 
-            // Skip if we don't have both
-            if (!advExempt || !formDExempt) continue;
+            // Parse Form D exemptions
+            const formDMap = new Map();
+            for (const f of (formDFilings || [])) {
+                const exemptions = (f.federalexemptions_items_list || '').toLowerCase();
+                // Form D uses variations: "3C", "3C.1", "3C.7", "3(c)(1)", "3(c)(7)"
+                const has3c1 = exemptions.includes('3c.1') || exemptions.includes('3(c)(1)') ||
+                              (exemptions.includes('3c') && !exemptions.includes('3c.7') && !exemptions.includes('3(c)(7)'));
+                const has3c7 = exemptions.includes('3c.7') || exemptions.includes('3(c)(7)');
+                formDMap.set(f.accessionnumber, { c1: has3c1, c7: has3c7 });
+            }
 
-            // Detect mismatch - significant difference in 3(c)(1) vs 3(c)(7) status
-            const mismatch = (advExempt.c1 !== formDExempt.c1) || (advExempt.c7 !== formDExempt.c7);
+            // Compare exemptions
+            for (const match of batch) {
+                const advExempt = advFundMap.get(match.adv_fund_id);
+                const formDExempt = formDMap.get(match.formd_accession);
 
-            if (mismatch) {
-                issues.push({
-                    adviser_crd: match.adviser_entity_crd,
-                    discrepancy_type: 'exemption_mismatch',
-                    severity: 'high',
-                    description: `Exemption mismatch for "${match.adv_fund_name}": ADV reports 3(c)(1)=${advExempt.c1 ? 'Y' : 'N'}, 3(c)(7)=${advExempt.c7 ? 'Y' : 'N'}; Form D reports 3(c)(1)=${formDExempt.c1 ? 'Y' : 'N'}, 3(c)(7)=${formDExempt.c7 ? 'Y' : 'N'}`,
-                    metadata: {
-                        adv_fund_name: match.adv_fund_name,
-                        formd_entity_name: match.formd_entity_name,
-                        adv_3c1: advExempt.c1,
-                        adv_3c7: advExempt.c7,
-                        formd_3c1: formDExempt.c1,
-                        formd_3c7: formDExempt.c7,
-                        formd_accession: match.formd_accession,
-                        adviser_name: match.adviser_entity_legal_name
-                    }
-                });
+                // Skip if we don't have both
+                if (!advExempt || !formDExempt) continue;
+
+                // Detect mismatch - significant difference in 3(c)(1) vs 3(c)(7) status
+                const mismatch = (advExempt.c1 !== formDExempt.c1) || (advExempt.c7 !== formDExempt.c7);
+
+                if (mismatch) {
+                    issues.push({
+                        adviser_crd: match.adviser_entity_crd,
+                        discrepancy_type: 'exemption_mismatch',
+                        severity: 'high',
+                        description: `Exemption mismatch for "${match.adv_fund_name}": ADV reports 3(c)(1)=${advExempt.c1 ? 'Y' : 'N'}, 3(c)(7)=${advExempt.c7 ? 'Y' : 'N'}; Form D reports 3(c)(1)=${formDExempt.c1 ? 'Y' : 'N'}, 3(c)(7)=${formDExempt.c7 ? 'Y' : 'N'}`,
+                        metadata: {
+                            adv_fund_name: match.adv_fund_name,
+                            formd_entity_name: match.formd_entity_name,
+                            adv_3c1: advExempt.c1,
+                            adv_3c7: advExempt.c7,
+                            formd_3c1: formDExempt.c1,
+                            formd_3c7: formDExempt.c7,
+                            formd_accession: match.formd_accession,
+                            adviser_name: match.adviser_entity_legal_name
+                        }
+                    });
+                }
             }
         }
 
-        if (i % 500 === 0 && i > 0) {
-            console.log(`    Processed ${i}/${matches.length} matches, found ${issues.length} mismatches so far...`);
+        totalProcessed += matches.length;
+        pageOffset += DETECTION_CONFIG.batchSize;
+
+        if (totalProcessed % 10000 === 0) {
+            console.log(`    Processed ${totalProcessed} matches, found ${issues.length} exemption mismatches so far...`);
         }
+
+        if (matches.length < DETECTION_CONFIG.batchSize) break;
     }
 
-    console.log(`  Found ${issues.length} issues`);
+    console.log(`  Processed ${totalProcessed} total matches`);
+    console.log(`  Found ${issues.length} exemption mismatches`);
     return issues;
 }
 
@@ -405,7 +459,26 @@ function areTypesEquivalent(type1, type2) {
 }
 
 /**
- * Save issues to database
+ * Clear existing issues from database
+ */
+async function clearExistingIssues() {
+    console.log('\nClearing existing compliance issues...');
+
+    const { error } = await formDDb
+        .from('compliance_issues')
+        .delete()
+        .neq('id', 0);  // Delete all rows (Supabase requires a filter)
+
+    if (error) {
+        console.error('Error clearing issues:', error);
+        throw error;
+    }
+
+    console.log('✓ Cleared existing issues');
+}
+
+/**
+ * Save issues to database in batches
  */
 async function saveIssues(issues) {
     if (issues.length === 0) {
@@ -415,17 +488,30 @@ async function saveIssues(issues) {
 
     console.log(`\nSaving ${issues.length} issues to database...`);
 
-    const { data, error } = await formDDb
-        .from('compliance_issues')
-        .insert(issues)
-        .select();
+    const insertBatchSize = 500;  // Insert in smaller batches to avoid timeout
+    let totalSaved = 0;
 
-    if (error) {
-        console.error('Error saving issues:', error);
-        throw error;
+    for (let i = 0; i < issues.length; i += insertBatchSize) {
+        const batch = issues.slice(i, i + insertBatchSize);
+
+        const { data, error } = await formDDb
+            .from('compliance_issues')
+            .insert(batch)
+            .select('id');
+
+        if (error) {
+            console.error(`Error saving batch ${i / insertBatchSize + 1}:`, error);
+            throw error;
+        }
+
+        totalSaved += data.length;
+
+        if (totalSaved % 5000 === 0 || i + insertBatchSize >= issues.length) {
+            console.log(`  Saved ${totalSaved}/${issues.length} issues...`);
+        }
     }
 
-    console.log(`✓ Saved ${data.length} compliance issues`);
+    console.log(`✓ Saved ${totalSaved} compliance issues`);
 }
 
 /**
@@ -438,6 +524,9 @@ async function main() {
     console.log(`Started: ${new Date().toISOString()}\n`);
 
     try {
+        // Clear existing issues before running detection
+        await clearExistingIssues();
+
         const allIssues = [];
 
         // Run all enabled detectors

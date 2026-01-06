@@ -1,0 +1,38 @@
+{
+  "project_info": {
+    "name": "PROJECT_NAME",
+    "description": "Brief project description",
+    "created_at": "YYYY-MM-DD",
+    "last_updated": "YYYY-MM-DD"
+  },
+  "session_state": {
+    "current_session": 1,
+    "last_working_commit": "",
+    "environment_verified": false,
+    "notes": ""
+  },
+  "features": [
+    {
+      "id": "feat-001",
+      "category": "core",
+      "description": "Example feature description",
+      "acceptance_criteria": [
+        "Criterion 1",
+        "Criterion 2",
+        "Criterion 3"
+      ],
+      "priority": 1,
+      "status": "not_started",
+      "passes": false,
+      "tested_at": null,
+      "notes": ""
+    }
+  ],
+  "completed_features": [],
+  "blocked_features": [],
+  "known_issues": [],
+  "next_actions": [
+    "First priority action",
+    "Second priority action"
+  ]
+}
