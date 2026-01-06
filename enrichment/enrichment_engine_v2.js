@@ -72,9 +72,15 @@ const BLOCKED_DOMAINS = [
 ];
 
 const ADMIN_UMBRELLAS = [
-  'roll up vehicles', 'angellist funds', 'angellist-gp-funds',
+  // SPV/Syndicate platforms
+  'roll up vehicles', 'angellist funds', 'angellist-gp-funds', 'angellist stack',
   'multimodal ventures', 'mv funds', 'cgf2021 llc', 'sydecar',
-  'assure spv', 'carta spv', 'allocations.com'
+  'assure spv', 'carta spv', 'allocations.com', 'allocations spv',
+  // Fund admin platforms
+  'forge', 'forge global', 'finally fund admin', 'finally admin',
+  'juniper square', 'carta fund admin', 'anduin',
+  // Other SPV umbrellas
+  'stonks spv', 'flow spv', 'republic spv', 'wefunder spv'
 ];
 
 // ============================================================================
@@ -1185,38 +1191,43 @@ async function enrichManager(name, options = {}) {
   }
 
   // FALLBACK 2: Cross-reference with Form D related parties
-  console.log(`[Enrichment] Cross-referencing with Form D related parties...`);
-  const formDRelatedParties = await extractRelatedPartiesFromFormD(name);
+  // SKIP for fund admin platforms - their related parties are platform contacts, not the actual fund team
+  if (!isAdminUmbrella(name)) {
+    console.log(`[Enrichment] Cross-referencing with Form D related parties...`);
+    const formDRelatedParties = await extractRelatedPartiesFromFormD(name);
 
-  if (formDRelatedParties.length > 0) {
-    // Merge with existing team (Form D as supplementary, not replacement)
-    const existingNames = new Set(enrichmentData.team_members.map(m => m.name?.toLowerCase()));
+    if (formDRelatedParties.length > 0) {
+      // Merge with existing team (Form D as supplementary, not replacement)
+      const existingNames = new Set(enrichmentData.team_members.map(m => m.name?.toLowerCase()));
 
-    for (const formDPerson of formDRelatedParties) {
-      const nameKey = formDPerson.name?.toLowerCase();
-      if (nameKey && !existingNames.has(nameKey)) {
-        // Add Form D person to team
-        enrichmentData.team_members.push({
-          name: formDPerson.name,
-          title: formDPerson.title,
-          email: null,
-          linkedin: null,
-          source: 'form_d'
-        });
-        existingNames.add(nameKey);
-      } else if (nameKey && existingNames.has(nameKey)) {
-        // Fill in title from Form D if missing
-        const existing = enrichmentData.team_members.find(m => m.name?.toLowerCase() === nameKey);
-        if (existing && !existing.title && formDPerson.title) {
-          existing.title = formDPerson.title;
+      for (const formDPerson of formDRelatedParties) {
+        const nameKey = formDPerson.name?.toLowerCase();
+        if (nameKey && !existingNames.has(nameKey)) {
+          // Add Form D person to team
+          enrichmentData.team_members.push({
+            name: formDPerson.name,
+            title: formDPerson.title,
+            email: null,
+            linkedin: null,
+            source: 'form_d'
+          });
+          existingNames.add(nameKey);
+        } else if (nameKey && existingNames.has(nameKey)) {
+          // Fill in title from Form D if missing
+          const existing = enrichmentData.team_members.find(m => m.name?.toLowerCase() === nameKey);
+          if (existing && !existing.title && formDPerson.title) {
+            existing.title = formDPerson.title;
+          }
         }
       }
-    }
 
-    if (!enrichmentData.data_sources.includes('form_d_related')) {
-      enrichmentData.data_sources.push('form_d_related');
+      if (!enrichmentData.data_sources.includes('form_d_related')) {
+        enrichmentData.data_sources.push('form_d_related');
+      }
+      console.log(`[Enrichment] Team after Form D merge: ${enrichmentData.team_members.length} members`);
     }
-    console.log(`[Enrichment] Team after Form D merge: ${enrichmentData.team_members.length} members`);
+  } else {
+    console.log(`[Enrichment] Skipping Form D related parties for admin umbrella platform`);
   }
 
   // Classify fund type
