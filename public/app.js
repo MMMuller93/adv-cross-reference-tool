@@ -1355,20 +1355,43 @@ const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters,
           {activeTab === 'cross_reference' && (
             <div className="space-y-4 px-1">
               <div className="space-y-2">
-                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">DISCREPANCY TYPE</label>
-                <select
-                  className="w-full px-2.5 py-1.5 text-[11px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-slate-400 text-slate-700 bg-white"
-                  value={filters.discrepancyType || ''}
-                  onChange={(e) => setFilters(f => ({ ...f, discrepancyType: e.target.value }))}
-                >
-                  <option value="">All Types</option>
-                  <option value="needs_initial_adv_filing">Needs Initial ADV Filing</option>
-                  <option value="overdue_annual_amendment">Overdue Annual Amendment</option>
-                  <option value="vc_exemption_violation">VC Exemption Violation</option>
-                  <option value="fund_type_mismatch">Fund Type Mismatch</option>
-                  <option value="missing_fund_in_adv">Missing Fund in ADV</option>
-                  <option value="exemption_mismatch">Exemption Mismatch</option>
-                </select>
+                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">DISCREPANCY TYPES</label>
+                <div className="space-y-1.5 bg-white border border-slate-200 rounded p-2">
+                  {[
+                    { value: 'overdue_annual_amendment', label: 'Overdue Annual Amendment' },
+                    { value: 'vc_exemption_violation', label: 'VC Exemption Violation' },
+                    { value: 'fund_type_mismatch', label: 'Fund Type Mismatch' },
+                    { value: 'missing_fund_in_adv', label: 'Missing Fund in ADV' },
+                    { value: 'exemption_mismatch', label: 'Exemption Mismatch' }
+                  ].map(({ value, label }) => {
+                    const selectedTypes = (filters.discrepancyType || '').split(',').filter(Boolean);
+                    const isSelected = selectedTypes.includes(value);
+                    return (
+                      <label key={value} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 rounded px-1 py-0.5">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => {
+                            const newTypes = e.target.checked
+                              ? [...selectedTypes, value]
+                              : selectedTypes.filter(t => t !== value);
+                            setFilters(f => ({ ...f, discrepancyType: newTypes.join(',') }));
+                          }}
+                          className="w-3 h-3 rounded border-slate-300 text-slate-600 focus:ring-slate-500"
+                        />
+                        <span className="text-[10px] text-slate-700">{label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {(filters.discrepancyType || '').split(',').filter(Boolean).length > 0 && (
+                  <button
+                    onClick={() => setFilters(f => ({ ...f, discrepancyType: '' }))}
+                    className="text-[9px] text-slate-500 hover:text-slate-700 underline"
+                  >
+                    Clear selection
+                  </button>
+                )}
               </div>
 
               <div className="space-y-2">
