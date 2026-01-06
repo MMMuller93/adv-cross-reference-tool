@@ -1358,6 +1358,7 @@ const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters,
                 <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">DISCREPANCY TYPES</label>
                 <div className="space-y-1.5 bg-white border border-slate-200 rounded p-2">
                   {[
+                    { value: 'needs_initial_adv_filing', label: 'Needs Initial ADV Filing' },
                     { value: 'overdue_annual_amendment', label: 'Overdue Annual Amendment' },
                     { value: 'vc_exemption_violation', label: 'VC Exemption Violation' },
                     { value: 'fund_type_mismatch', label: 'Fund Type Mismatch' },
@@ -4297,30 +4298,71 @@ function App() {
 
                                     {/* Show clickable fund links for VC exemption violations */}
                                     {(match.type === 'vc_exemption_violation' || match.discrepancy_type === 'vc_exemption_violation') && match.metadata?.sample_non_vc_funds?.length > 0 && (
-                                      <div className="mt-1.5 flex flex-wrap gap-1">
-                                        {match.metadata.sample_non_vc_funds.slice(0, 3).map((fund, i) => (
-                                          <button
-                                            key={i}
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              if (fund.reference_id) {
-                                                handleFundClickByName(fund.name, fund.reference_id);
-                                              }
-                                            }}
-                                            className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium bg-amber-50 text-amber-700 rounded border border-amber-200 ${fund.reference_id ? 'hover:bg-amber-100 cursor-pointer' : 'cursor-default'}`}
-                                          >
-                                            {fund.name?.substring(0, 30)}{fund.name?.length > 30 ? '...' : ''} ({fund.type || 'Unknown'})
-                                          </button>
-                                        ))}
-                                        {match.metadata.sample_non_vc_funds.length > 3 && (
-                                          <span className="text-[9px] text-gray-400">+{match.metadata.sample_non_vc_funds.length - 3} more</span>
-                                        )}
+                                      <div className="mt-1.5 space-y-1">
+                                        <div className="text-[9px] text-gray-500 font-medium">Non-VC funds (per Form ADV):</div>
+                                        <div className="flex flex-wrap gap-1">
+                                          {match.metadata.sample_non_vc_funds.slice(0, 3).map((fund, i) => (
+                                            <div key={i} className="inline-flex items-center gap-1">
+                                              <button
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  if (fund.reference_id) {
+                                                    handleFundClickByName(fund.name, fund.reference_id);
+                                                  }
+                                                }}
+                                                className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium bg-amber-50 text-amber-700 rounded border border-amber-200 ${fund.reference_id ? 'hover:bg-amber-100 cursor-pointer' : 'cursor-default'}`}
+                                              >
+                                                {fund.name?.substring(0, 25)}{fund.name?.length > 25 ? '...' : ''} ({fund.type || '?'})
+                                              </button>
+                                              {fund.formd_cik && (
+                                                <a
+                                                  href={`https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${fund.formd_cik}&type=D&dateb=&owner=include&count=10`}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="text-[9px] text-blue-600 hover:underline"
+                                                  onClick={(e) => e.stopPropagation()}
+                                                >
+                                                  D
+                                                </a>
+                                              )}
+                                            </div>
+                                          ))}
+                                          {match.metadata.sample_non_vc_funds.length > 3 && (
+                                            <span className="text-[9px] text-gray-400">+{match.metadata.sample_non_vc_funds.length - 3} more</span>
+                                          )}
+                                        </div>
                                       </div>
                                     )}
 
-                                    {/* Show fund type mismatch details with clickable fund */}
+                                    {/* Show fund type mismatch details with clickable fund and Form D link */}
                                     {(match.type === 'fund_type_mismatch' || match.discrepancy_type === 'fund_type_mismatch') && match.metadata && (
-                                      <div className="mt-1.5 space-y-1">
+                                      <div className="mt-1.5 space-y-1.5">
+                                        {/* Fund name - clickable */}
+                                        <div className="flex items-center gap-1.5">
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              if (match.metadata.adv_fund_reference_id) {
+                                                handleFundClickByName(match.metadata.adv_fund_name, match.metadata.adv_fund_reference_id);
+                                              }
+                                            }}
+                                            className={`text-[10px] font-medium text-blue-700 ${match.metadata.adv_fund_reference_id ? 'hover:underline cursor-pointer' : 'cursor-default'}`}
+                                          >
+                                            {match.metadata.adv_fund_name?.substring(0, 40)}{match.metadata.adv_fund_name?.length > 40 ? '...' : ''}
+                                          </button>
+                                          {match.metadata.formd_cik && (
+                                            <a
+                                              href={`https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${match.metadata.formd_cik}&type=D&dateb=&owner=include&count=10`}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="text-[9px] px-1 py-0.5 bg-purple-50 text-purple-600 rounded hover:bg-purple-100"
+                                              onClick={(e) => e.stopPropagation()}
+                                            >
+                                              Form D
+                                            </a>
+                                          )}
+                                        </div>
+                                        {/* Type comparison */}
                                         <div className="flex items-center gap-1 text-[9px]">
                                           <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded border border-blue-200">ADV: {match.metadata.adv_fund_type}</span>
                                           <span className="text-gray-400">vs</span>
@@ -4363,11 +4405,24 @@ function App() {
                                       </div>
                                     )}
 
-                                    {/* Show missing fund details with Form D filing date */}
+                                    {/* Show missing fund details with Form D filing date and EDGAR link */}
                                     {(match.type === 'missing_fund_in_adv' || match.discrepancy_type === 'missing_fund_in_adv') && match.metadata && (
                                       <div className="mt-1.5 space-y-1">
-                                        <div className="text-[9px] text-amber-700 font-medium">
-                                          Fund: {match.metadata.fund_name}
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="text-[9px] text-amber-700 font-medium">
+                                            {match.metadata.fund_name?.substring(0, 40)}{match.metadata.fund_name?.length > 40 ? '...' : ''}
+                                          </span>
+                                          {match.metadata.formd_cik && (
+                                            <a
+                                              href={`https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${match.metadata.formd_cik}&type=D&dateb=&owner=include&count=10`}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="text-[9px] px-1 py-0.5 bg-purple-50 text-purple-600 rounded hover:bg-purple-100"
+                                              onClick={(e) => e.stopPropagation()}
+                                            >
+                                              Form D
+                                            </a>
+                                          )}
                                         </div>
                                         {match.metadata.formd_filing_date && (
                                           <div className="text-[9px] text-gray-500">
@@ -4377,6 +4432,34 @@ function App() {
                                         )}
                                         <div className="text-[9px] text-gray-400">
                                           Latest ADV: {match.metadata.latest_adv_year || 'Unknown'}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Show needs initial ADV filing details */}
+                                    {(match.type === 'needs_initial_adv_filing' || match.discrepancy_type === 'needs_initial_adv_filing') && match.metadata && (
+                                      <div className="mt-1.5 space-y-1">
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="text-[9px] text-amber-700 font-medium">
+                                            {match.metadata.entity_name?.substring(0, 40)}{match.metadata.entity_name?.length > 40 ? '...' : ''}
+                                          </span>
+                                          {match.metadata.cik && (
+                                            <a
+                                              href={`https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${match.metadata.cik}&type=D&dateb=&owner=include&count=10`}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="text-[9px] px-1 py-0.5 bg-purple-50 text-purple-600 rounded hover:bg-purple-100"
+                                              onClick={(e) => e.stopPropagation()}
+                                            >
+                                              Form D
+                                            </a>
+                                          )}
+                                        </div>
+                                        <div className="text-[9px] text-gray-500">
+                                          Form D filed: {formatDateDisplay(match.metadata.form_d_filing_date)} ({match.metadata.days_since_filing} days ago)
+                                        </div>
+                                        <div className="text-[9px] text-red-600 font-medium">
+                                          No Form ADV on file - required within 60 days
                                         </div>
                                       </div>
                                     )}

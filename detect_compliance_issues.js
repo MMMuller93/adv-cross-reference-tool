@@ -36,12 +36,12 @@ const DETECTION_CONFIG = {
     batchSize: 1000,  // Supabase default limit is 1000 rows per request
     maxRecords: 100000,  // Process up to 100k records total
     enabledDetectors: [
+        'needs_initial_adv_filing',  // New managers filed Form D but no ADV within 60 days
         'overdue_annual_amendment',  // Uses overdue_adv_flag from cross_reference_matches
         'vc_exemption_violation',
         'fund_type_mismatch',
-        'missing_fund_in_adv',  // Enabled: Form D exists but fund not in ADV
+        'missing_fund_in_adv',  // Form D exists but fund not in ADV
         'exemption_mismatch'
-        // 'needs_initial_adv_filing'  // Disabled - requires comparing Form D to ADV at entity level
     ]
 };
 
@@ -216,62 +216,126 @@ async function detectOverdueAnnualAmendment() {
 
 /**
  * Detector 3: VC Exemption Violation
- * Manager claims venture capital exemption but manages non-VC funds
- * Enhanced: Includes fund reference_id for direct linking
+ * Manager claims venture capital exemption (Rule 203(l)-1) but manages non-VC funds
+ *
+ * IMPORTANT: exemption_2b1 = VC exemption (Rule 203(l)-1)
+ *            exemption_2b2 = Private fund adviser exemption (Rule 203(m)-1, under $150M)
+ *
+ * Enhanced: Shows which funds blow the exemption (from ADV), includes Form D if matched
  */
 async function detectVCExemptionViolation() {
     console.log('\n[3/6] Detecting: VC Exemption Violation...');
 
-    const { data: advisers, error } = await advDb
+    // Get advisers who claim VC exemption (exemption_2b1 = 'Y' or true)
+    // Note: Data has mixed formats - 'Y'/'N' strings and true/false booleans
+    // Need to query for both to catch all VC exemption claimants
+    const { data: advisersStringY, error: err1 } = await advDb
         .from('advisers_enriched')
-        .select('crd, adviser_name, exemption_2b2')
-        .eq('exemption_2b2', 'Y');
+        .select('crd, adviser_name, exemption_2b1')
+        .eq('exemption_2b1', 'Y');
 
-    if (error) throw error;
+    const { data: advisersBoolTrue, error: err2 } = await advDb
+        .from('advisers_enriched')
+        .select('crd, adviser_name, exemption_2b1')
+        .eq('exemption_2b1', true);
+
+    if (err1) throw err1;
+    if (err2) throw err2;
+
+    // Combine and dedupe by CRD
+    const seenCRDs = new Set();
+    const advisers = [];
+    for (const a of [...(advisersStringY || []), ...(advisersBoolTrue || [])]) {
+        if (!seenCRDs.has(a.crd)) {
+            seenCRDs.add(a.crd);
+            advisers.push(a);
+        }
+    }
+
+    console.log(`  Found ${advisers.length} advisers claiming VC exemption (2b1=Y or true)`);
 
     const issues = [];
 
     for (const adviser of advisers) {
-        // Check funds managed by this adviser
+        // Check funds managed by this adviser from ADV
         const { data: funds, error: fundsError } = await advDb
             .from('funds_enriched')
-            .select('fund_name, fund_type, reference_id')
+            .select('fund_name, fund_type, reference_id, form_d_file_number')
             .eq('adviser_entity_crd', adviser.crd);
 
         if (fundsError) continue;
 
+        // Find non-VC funds in the ADV filing
         const nonVCFunds = funds.filter(fund => {
             const type = (fund.fund_type || '').toLowerCase();
-            return !type.includes('venture') && !type.includes('vc') && type !== '';
+            // Fund type must be specified AND not be VC-related
+            return type !== '' && !type.includes('venture') && !type.includes('vc');
         });
 
         if (nonVCFunds.length > 0) {
+            // Get Form D info for the non-VC funds if they have form_d_file_number
+            const formDFileNumbers = nonVCFunds
+                .map(f => f.form_d_file_number)
+                .filter(Boolean);
+
+            let formDMatches = [];
+            if (formDFileNumbers.length > 0) {
+                // Try to get Form D filing info
+                const { data: formDFilings } = await formDDb
+                    .from('form_d_filings')
+                    .select('file_num, entityname, investmentfundtype, cik, filing_date')
+                    .in('file_num', formDFileNumbers)
+                    .limit(10);
+
+                formDMatches = formDFilings || [];
+            }
+
             // Pick the first non-VC fund as the "primary" fund for this issue
             const primaryFund = nonVCFunds[0];
+            const primaryFormD = formDMatches.find(f => f.file_num === primaryFund.form_d_file_number);
 
             issues.push({
                 adviser_crd: adviser.crd,
                 fund_reference_id: primaryFund.reference_id,  // For linking to fund detail
+                form_d_cik: primaryFormD?.cik || null,  // For EDGAR link if Form D exists
                 discrepancy_type: 'vc_exemption_violation',
                 severity: 'high',
-                description: `Manager "${adviser.adviser_name}" claims venture capital exemption but manages ${nonVCFunds.length} non-VC funds`,
+                description: `Manager "${adviser.adviser_name}" claims VC exemption (203(l)-1) but manages ${nonVCFunds.length} non-VC fund(s) per Form ADV`,
                 metadata: {
-                    exemption_2b2: 'Y',
+                    exemption_claimed: 'vc_203l1',  // Clear label
+                    exemption_2b1: 'Y',
                     non_vc_fund_count: nonVCFunds.length,
+                    total_funds: funds.length,
+                    // Primary fund details
                     primary_fund_name: primaryFund.fund_name,
                     primary_fund_type: primaryFund.fund_type,
                     primary_fund_reference_id: primaryFund.reference_id,
-                    sample_non_vc_funds: nonVCFunds.slice(0, 5).map(f => ({
-                        name: f.fund_name,
-                        type: f.fund_type,
-                        reference_id: f.reference_id  // Include for each fund
-                    }))
+                    primary_fund_form_d_file_num: primaryFund.form_d_file_number,
+                    // Form D info if available
+                    primary_formd_cik: primaryFormD?.cik || null,
+                    primary_formd_entity_name: primaryFormD?.entityname || null,
+                    primary_formd_fund_type: primaryFormD?.investmentfundtype || null,
+                    primary_formd_filing_date: primaryFormD?.filing_date || null,
+                    // Source indicator
+                    source: 'form_adv',  // Non-VC fund identified from Form ADV
+                    // Sample of all non-VC funds
+                    sample_non_vc_funds: nonVCFunds.slice(0, 5).map(f => {
+                        const matchingFormD = formDMatches.find(fd => fd.file_num === f.form_d_file_number);
+                        return {
+                            name: f.fund_name,
+                            type: f.fund_type,
+                            reference_id: f.reference_id,
+                            form_d_file_num: f.form_d_file_number,
+                            formd_cik: matchingFormD?.cik || null,
+                            formd_type: matchingFormD?.investmentfundtype || null
+                        };
+                    })
                 }
             });
         }
     }
 
-    console.log(`  Found ${issues.length} issues`);
+    console.log(`  Found ${issues.length} VC exemption violations`);
     return issues;
 }
 
