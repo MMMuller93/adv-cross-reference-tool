@@ -1130,10 +1130,13 @@ app.get('/api/funds/new-managers', async (req, res) => {
           fund_type: enrichedData.fund_type,
           investment_stage: enrichedData.investment_stage,
           linkedin: enrichedData.linkedin_company_url || enrichedData.linkedin_url,
+          twitter: enrichedData.twitter_handle,
+          email: enrichedData.primary_contact_email,
           is_published: enrichedData.is_published,
           confidence: enrichedData.confidence_score,
           team_members: enrichedData.team_members || [],
-          portfolio_companies: enrichedData.portfolio_companies || []
+          portfolio_companies: enrichedData.portfolio_companies || [],
+          enrichment_status: enrichedData.enrichment_status
         };
       }
 

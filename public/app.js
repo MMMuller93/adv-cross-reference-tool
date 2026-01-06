@@ -4600,10 +4600,23 @@ function App() {
                                                   <svg className="w-3 h-3 absolute -top-1 -right-1 text-gray-400" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="white" stroke="currentColor" strokeWidth="1.5"/><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
                                                 </span>
                                               )}
-                                              {/* Email Button */}
-                                              {fund.issueremail ? (
+                                              {/* Twitter Button */}
+                                              {manager.enrichment_data?.twitter ? (
                                                 <a
-                                                  href={`mailto:${fund.issueremail}`}
+                                                  href={`https://twitter.com/${manager.enrichment_data.twitter.replace('@', '')}`}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-300 text-gray-700 rounded text-[10px] font-medium hover:bg-gray-50 transition-colors shadow-sm"
+                                                  onClick={(e) => e.stopPropagation()}
+                                                >
+                                                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                                                  {manager.enrichment_data.twitter}
+                                                </a>
+                                              ) : null}
+                                              {/* Email Button */}
+                                              {(manager.enrichment_data?.email || fund.issueremail) ? (
+                                                <a
+                                                  href={`mailto:${manager.enrichment_data?.email || fund.issueremail}`}
                                                   className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-gray-300 text-gray-700 rounded text-[10px] font-medium hover:bg-gray-50 transition-colors shadow-sm"
                                                   onClick={(e) => e.stopPropagation()}
                                                 >
@@ -4649,6 +4662,36 @@ function App() {
                                             <div className="text-gray-400 text-[11px] italic">No related parties listed</div>
                                           )}
                                         </div>
+                                        {/* Team Members (from enrichment) */}
+                                        {manager.enrichment_data?.team_members?.length > 0 && (
+                                          <div>
+                                            <div className="font-semibold text-gray-900 mb-2 text-[11px] uppercase tracking-wide">Team Members</div>
+                                            <div className="space-y-2">
+                                              {manager.enrichment_data.team_members.slice(0, 5).map((member, i) => (
+                                                <div key={i} className="bg-white rounded px-3 py-2 border border-gray-100 flex items-center justify-between">
+                                                  <div>
+                                                    <div className="text-gray-900 font-medium text-[12px]">{member.name}</div>
+                                                    {member.title && <div className="text-gray-500 text-[10px] mt-0.5">{member.title}</div>}
+                                                  </div>
+                                                  {(member.linkedin || member.linkedin_url) && (
+                                                    <a
+                                                      href={member.linkedin || member.linkedin_url}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="text-blue-600 hover:text-blue-800 p-1"
+                                                      onClick={(e) => e.stopPropagation()}
+                                                    >
+                                                      <LinkedinIcon className="w-3.5 h-3.5" />
+                                                    </a>
+                                                  )}
+                                                </div>
+                                              ))}
+                                              {manager.enrichment_data.team_members.length > 5 && (
+                                                <div className="text-gray-400 text-[10px] italic">+{manager.enrichment_data.team_members.length - 5} more team members</div>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
                                       </div>
                                     </td>
                                   </tr>
