@@ -1,0 +1,25 @@
+{
+  "project": {
+    "name": "PROJECT_NAME",
+    "description": "Brief project description",
+    "created": "YYYY-MM-DD",
+    "total_features": 0,
+    "completed_features": 0
+  },
+  "features": [
+    {
+      "id": "feat-001",
+      "category": "core|ui|api|integration|edge-case",
+      "description": "Clear, specific description of the feature",
+      "acceptance_criteria": [
+        "Criterion 1 - specific and testable",
+        "Criterion 2 - specific and testable",
+        "Criterion 3 - specific and testable"
+      ],
+      "priority": 1,
+      "passes": false,
+      "tested_at": null,
+      "notes": ""
+    }
+  ]
+}

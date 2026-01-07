@@ -1116,10 +1116,26 @@ async function enrichManager(name, options = {}) {
   }
   
   if (!searchResults?.web?.results?.length) {
-    console.log(`[Enrichment] No search results found`);
-    enrichmentData.enrichment_status = 'no_data_found';
-    enrichmentData.flagged_issues.push('no_search_results');
-    return enrichmentData;
+    console.log(`[Enrichment] No web search results found, trying LinkedIn fallback...`);
+
+    // LinkedIn fallback: Try to find company LinkedIn page even when website search fails
+    await delay(RATE_LIMIT_DELAY_MS);
+    enrichmentData.linkedin_company_url = await searchLinkedIn(parsedName);
+
+    if (enrichmentData.linkedin_company_url) {
+      console.log(`[Enrichment] LinkedIn fallback found: ${enrichmentData.linkedin_company_url}`);
+      enrichmentData.data_sources.push('linkedin');
+      enrichmentData.enrichment_status = 'linkedin_only';
+      enrichmentData.flagged_issues.push('no_website_found');
+
+      // Try to get team info from Form D related parties as additional fallback
+      // (This is done later in the flow for cases with website, but we need it here too)
+    } else {
+      console.log(`[Enrichment] No search results or LinkedIn found`);
+      enrichmentData.enrichment_status = 'no_data_found';
+      enrichmentData.flagged_issues.push('no_search_results');
+      return enrichmentData;
+    }
   }
   
   // Extract website

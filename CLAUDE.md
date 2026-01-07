@@ -80,11 +80,14 @@ Before doing ANY work, run these commands in order:
 
 ```bash
 1. pwd                           # Confirm you're in the right directory
-2. cat project_state.md          # Understand current state & DO NOT DO list
-3. cat features.json             # Know what's done/remaining
-4. git log --oneline -10         # See recent changes
-5. git status                    # Check uncommitted work
+2. cat .claude/MEMORY.md         # READ FIRST: User corrections, feature goals, learnings
+3. cat project_state.md          # Understand current state & DO NOT DO list
+4. cat features.json             # Know what's done/remaining
+5. git log --oneline -10         # See recent changes
+6. git status                    # Check uncommitted work
 ```
+
+**CRITICAL: Read MEMORY.md FIRST - it contains user feedback and corrections that must not be repeated.**
 
 **ONLY AFTER completing these steps, begin work.**
 
@@ -274,6 +277,8 @@ Example: `"Tiger Fund, L.P."` → `"TIGER FUND"`
 | File | Purpose | Read Frequency |
 |------|---------|----------------|
 | `CLAUDE.md` | This file - agent harness | Every session start |
+| `.claude/MEMORY.md` | **User feedback, corrections, learnings** | **Every session start (READ FIRST)** |
+| `.claude/agents/*.md` | Specialized agent instructions | When doing related work |
 | `project_state.md` | Current state, session log, DO NOT DO | Every session start |
 | `features.json` | Feature tracking | When working on features |
 | `server.js` | Main API server | When modifying API |
@@ -287,12 +292,78 @@ Example: `"Tiger Fund, L.P."` → `"TIGER FUND"`
 Before ending ANY session:
 - [ ] No half-implemented features
 - [ ] All changes committed with descriptive messages
+- [ ] **MEMORY.md updated with any new:**
+  - User corrections (add to "DO NOT REPEAT" section)
+  - Feature requirements or goals explained
+  - Improvement ideas shared
+  - Learnings about data, enrichment, or bugs
+  - User preferences expressed
 - [ ] project_state.md updated with:
   - What was completed
   - What remains
   - Any blockers or issues discovered
   - Context for next session
 - [ ] features.json status updated if features completed
+
+## Memory Update Protocol (DURING SESSION)
+
+**When user gives correction or feedback, IMMEDIATELY update MEMORY.md:**
+
+1. User says "don't do X" → Add to "DO NOT REPEAT THESE MISTAKES" section
+2. User explains how feature should work → Add to "Feature Requirements & Goals"
+3. User shares improvement idea → Add to relevant section
+4. User expresses frustration about repeated issue → Add prominently to corrections
+5. You discover a bug or data issue → Add to "Known Bugs" or "Known Issues"
+
+**Don't wait until session end** - capture feedback as it happens so it's not lost.
+
+---
+
+## Production Verification Protocol (MANDATORY)
+
+**CRITICAL: Never say "done" without verifying production.**
+
+### After ANY Code Change That Affects Production:
+
+```bash
+# 1. Commit and push
+git add . && git commit -m "descriptive message" && git push
+
+# 2. Wait for deployment (Railway auto-deploys from master)
+# Check: https://github.com/MMMuller93/adv-cross-reference-tool/actions
+
+# 3. Verify production is serving new code
+curl -s "https://privatefundsradar.com/api/health" # or equivalent endpoint
+
+# 4. Test the actual feature on the live site
+# - Open browser to privatefundsradar.com
+# - Navigate to affected feature
+# - Verify it works as expected
+```
+
+### Verification Checklist
+
+Before marking ANY production-affecting change as complete:
+- [ ] Code pushed to GitHub (not just committed locally)
+- [ ] Deployment completed (check GitHub Actions or Railway dashboard)
+- [ ] Live site tested in browser (not just localhost)
+- [ ] Feature works end-to-end on production
+- [ ] If API change: curl production endpoint to verify response
+
+### Red Flags - STOP and Verify
+
+If you're about to say any of these, STOP and verify first:
+- "The fix is deployed" → Did you actually check the live site?
+- "This should now work" → Did you test on production?
+- "I've pushed the changes" → Did deployment succeed?
+
+### Production URLs
+
+| Environment | URL |
+|-------------|-----|
+| Production | https://privatefundsradar.com |
+| GitHub | https://github.com/MMMuller93/adv-cross-reference-tool |
+| Railway | Check Railway dashboard for deployment status |
 
 ---
 

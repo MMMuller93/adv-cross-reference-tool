@@ -756,34 +756,40 @@ function areTypesEquivalent(type1, type2) {
 }
 
 /**
- * Clear existing issues from database
+ * Clear existing issues of a specific type from database
+ * This approach ensures each detector's issues are cleanly replaced
+ * without requiring full table DELETE access (RLS-compatible)
  */
-async function clearExistingIssues() {
-    console.log('\nClearing existing compliance issues...');
+async function clearIssuesByType(discrepancyType) {
+    console.log(`  Clearing existing "${discrepancyType}" issues...`);
 
-    const { error } = await formDDb
+    const { error, count } = await formDDb
         .from('compliance_issues')
         .delete()
-        .neq('id', 0);  // Delete all rows (Supabase requires a filter)
+        .eq('discrepancy_type', discrepancyType);
 
     if (error) {
-        console.error('Error clearing issues:', error);
-        throw error;
+        // Log error but don't throw - RLS might block DELETE
+        // In that case, we'll have duplicates but script continues
+        console.error(`  Warning: Could not clear "${discrepancyType}" issues:`, error.message);
+        return false;
     }
 
-    console.log('✓ Cleared existing issues');
+    console.log(`  Cleared existing "${discrepancyType}" issues`);
+    return true;
 }
 
 /**
- * Save issues to database in batches
+ * Save issues to database in batches for a specific discrepancy type
+ * Called immediately after clearing that type's issues to prevent duplicates
  */
-async function saveIssues(issues) {
+async function saveIssuesBatch(issues, discrepancyType) {
     if (issues.length === 0) {
-        console.log('\n✓ No new issues to save');
-        return;
+        console.log(`  No ${discrepancyType} issues to save`);
+        return 0;
     }
 
-    console.log(`\nSaving ${issues.length} issues to database...`);
+    console.log(`  Saving ${issues.length} ${discrepancyType} issues...`);
 
     const insertBatchSize = 500;  // Insert in smaller batches to avoid timeout
     let totalSaved = 0;
@@ -797,18 +803,15 @@ async function saveIssues(issues) {
             .select('id');
 
         if (error) {
-            console.error(`Error saving batch ${i / insertBatchSize + 1}:`, error);
+            console.error(`  Error saving ${discrepancyType} batch ${i / insertBatchSize + 1}:`, error);
             throw error;
         }
 
         totalSaved += data.length;
-
-        if (totalSaved % 5000 === 0 || i + insertBatchSize >= issues.length) {
-            console.log(`  Saved ${totalSaved}/${issues.length} issues...`);
-        }
     }
 
-    console.log(`✓ Saved ${totalSaved} compliance issues`);
+    console.log(`  Saved ${totalSaved} ${discrepancyType} issues`);
+    return totalSaved;
 }
 
 /**
@@ -821,33 +824,49 @@ async function main() {
     console.log(`Started: ${new Date().toISOString()}\n`);
 
     try {
-        // Clear existing issues before running detection
-        await clearExistingIssues();
-
         const allIssues = [];
 
         // Run all enabled detectors
+        // Each detector clears its own issue type before inserting fresh data
+        // This prevents duplicates and ensures each run gives accurate counts
         if (DETECTION_CONFIG.enabledDetectors.includes('needs_initial_adv_filing')) {
-            allIssues.push(...await detectNeedsInitialADVFiling());
+            await clearIssuesByType('needs_initial_adv_filing');
+            const issues = await detectNeedsInitialADVFiling();
+            await saveIssuesBatch(issues, 'needs_initial_adv_filing');
+            allIssues.push(...issues);
         }
         if (DETECTION_CONFIG.enabledDetectors.includes('overdue_annual_amendment')) {
-            allIssues.push(...await detectOverdueAnnualAmendment());
+            await clearIssuesByType('overdue_annual_amendment');
+            const issues = await detectOverdueAnnualAmendment();
+            await saveIssuesBatch(issues, 'overdue_annual_amendment');
+            allIssues.push(...issues);
         }
         if (DETECTION_CONFIG.enabledDetectors.includes('vc_exemption_violation')) {
-            allIssues.push(...await detectVCExemptionViolation());
+            await clearIssuesByType('vc_exemption_violation');
+            const issues = await detectVCExemptionViolation();
+            await saveIssuesBatch(issues, 'vc_exemption_violation');
+            allIssues.push(...issues);
         }
         if (DETECTION_CONFIG.enabledDetectors.includes('fund_type_mismatch')) {
-            allIssues.push(...await detectFundTypeMismatch());
+            await clearIssuesByType('fund_type_mismatch');
+            const issues = await detectFundTypeMismatch();
+            await saveIssuesBatch(issues, 'fund_type_mismatch');
+            allIssues.push(...issues);
         }
         if (DETECTION_CONFIG.enabledDetectors.includes('missing_fund_in_adv')) {
-            allIssues.push(...await detectMissingFundInADV());
+            await clearIssuesByType('missing_fund_in_adv');
+            const issues = await detectMissingFundInADV();
+            await saveIssuesBatch(issues, 'missing_fund_in_adv');
+            allIssues.push(...issues);
         }
         if (DETECTION_CONFIG.enabledDetectors.includes('exemption_mismatch')) {
-            allIssues.push(...await detectExemptionMismatch());
+            await clearIssuesByType('exemption_mismatch');
+            const issues = await detectExemptionMismatch();
+            await saveIssuesBatch(issues, 'exemption_mismatch');
+            allIssues.push(...issues);
         }
 
-        // Save to database
-        await saveIssues(allIssues);
+        // Note: Issues are saved per-detector above, not in bulk at the end
 
         console.log('\n========================================');
         console.log('Detection Complete');

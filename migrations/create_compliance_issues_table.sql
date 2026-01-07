@@ -66,6 +66,12 @@ CREATE POLICY "Allow anon insert access" ON compliance_issues
     TO anon
     WITH CHECK (true);
 
+-- RLS Policy: Allow anon users to delete (for detection script to clear old issues)
+CREATE POLICY "Allow anon delete access" ON compliance_issues
+    FOR DELETE
+    TO anon
+    USING (true);
+
 -- RLS Policy: Allow service role full access
 CREATE POLICY "Allow service role full access" ON compliance_issues
     FOR ALL
