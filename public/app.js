@@ -3485,6 +3485,7 @@ function App() {
               formd_entity_name: d.fund_name || d.entity_name,
               adviser_entity_legal_name: d.entity_name,
               adviser_entity_crd: d.crd,
+              metadata: d.metadata,
               issues: d.details?.description || d.type,
               discrepancy_type: d.type,
               severity: d.severity,
@@ -4259,7 +4260,7 @@ function App() {
                                         {match.entity_name || match.adviser_entity_legal_name || match.metadata?.entity_name || match.metadata?.adviser_name || 'Unknown Manager'}
                                       </button>
                                     ) : (
-                                      <div className="text-[13px] font-medium text-gray-900">{match.entity_name || match.metadata?.entity_name || match.metadata?.adviser_name || 'Unknown Manager'}</div>
+                                      <div className="text-[13px] font-medium text-gray-900">{match.entity_name || match.adviser_entity_legal_name || match.metadata?.entity_name || match.metadata?.adviser_name || 'Unknown Manager'}</div>
                                     )}
                                     {/* Show clickable fund name - from direct field or metadata */}
                                     {(match.fund_name || match.metadata?.primary_fund_name || match.metadata?.adv_fund_name || match.metadata?.fund_name) && (
