@@ -919,6 +919,22 @@ app.get('/api/discrepancies', async (req, res) => {
     // Transform to frontend format
     const discrepancies = (issues || []).map(issue => {
       const adviser = adviserMap.get(issue.adviser_crd);
+      const meta = issue.metadata || {};
+
+      // Determine entity name with explicit fallback chain
+      let entityName = 'Unknown';
+      if (adviser?.adviser_name) {
+        entityName = adviser.adviser_name;
+      } else if (adviser?.adviser_entity_legal_name) {
+        entityName = adviser.adviser_entity_legal_name;
+      } else if (meta.entity_name) {
+        entityName = meta.entity_name;
+      } else if (meta.adviser_name) {
+        entityName = meta.adviser_name;
+      } else if (meta.fund_name) {
+        entityName = meta.fund_name;
+      }
+
       return {
         id: issue.id,
         fund_reference_id: issue.fund_reference_id,
@@ -928,15 +944,15 @@ app.get('/api/discrepancies', async (req, res) => {
         severity: issue.severity,
         status: issue.status,
         description: issue.description,
-        metadata: issue.metadata || {},
+        metadata: meta,
         detected_date: issue.detected_date,
         resolved_date: issue.resolved_date,
-        // Adviser details
-        entity_name: adviser?.adviser_name || adviser?.adviser_entity_legal_name || issue.metadata?.entity_name || 'Unknown',
-        fund_name: issue.metadata?.sample_non_vc_funds?.[0]?.name || issue.metadata?.fund_name,
+        // Adviser/entity details - use computed entityName
+        entity_name: entityName,
+        fund_name: meta.sample_non_vc_funds?.[0]?.name || meta.primary_fund_name || meta.adv_fund_name || meta.fund_name,
         contact_info: {
-          email: adviser?.regulatory_contact_email || issue.metadata?.contact_email,
-          phone: adviser?.phone_number || issue.metadata?.contact_phone,
+          email: adviser?.regulatory_contact_email || meta.contact_email,
+          phone: adviser?.phone_number || meta.contact_phone,
           website: adviser?.primary_website
         }
       };
