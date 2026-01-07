@@ -46,14 +46,40 @@ const DETECTION_CONFIG = {
 };
 
 /**
+ * Parse fund name to extract the "series master LLC" (the manager name)
+ * e.g., "Fund A, a series of Manager LLC" -> "Manager LLC"
+ * Same logic as New Managers tab uses
+ */
+function parseFundName(name) {
+    if (!name) return name;
+    let parsed = name;
+
+    // Remove common suffixes first
+    parsed = parsed.replace(/,?\s*(LP|LLC|L\.P\.|L\.L\.C\.|Ltd|Limited|Inc|Incorporated)$/i, '');
+
+    // Handle "A Series of X" pattern - extract the master LLC
+    const seriesMatch = parsed.match(/,?\s+a\s+series\s+of\s+(.+?)$/i);
+    if (seriesMatch) {
+        parsed = seriesMatch[1].trim();
+    }
+
+    // Remove fund numbers (Fund I, Fund II, etc.)
+    parsed = parsed.replace(/\s+(Fund\s+)?[IVX]+$/i, '');
+    parsed = parsed.replace(/\s+Fund\s+\d+$/i, '');
+
+    return parsed.trim();
+}
+
+/**
  * Detector 1: Needs Initial ADV Filing
- * New managers filed Form D but haven't filed ADV within 60 days
+ * New MANAGERS filed Form D but haven't filed ADV within 60 days
  *
  * LOGIC:
  * 1. Get recent Form D filings
  * 2. Get all matched accessions from cross_reference_matches (these have ADV matches)
  * 3. Find Form D filings NOT in matches = no ADV filing exists
  * 4. Filter to those filed more than 60 days ago
+ * 5. GROUP by manager (using series/master LLC pattern) - one issue per manager, not per fund
  *
  * NOTE: cross_reference_matches only contains MATCHED records.
  * Unmatched Form D filings are not stored there.
@@ -104,7 +130,8 @@ async function detectNeedsInitialADVFiling() {
 
     // Step 3: Find Form D filings NOT in cross_reference_matches
     // AND filed more than 60 days ago
-    const issues = [];
+    // GROUP by manager using parseFundName (series/master LLC pattern)
+    const managerFilings = new Map(); // manager_name -> { filings: [], earliest_date, latest_date, total_offering }
     const now = Date.now();
 
     for (const filing of formDFilings) {
@@ -114,49 +141,126 @@ async function detectNeedsInitialADVFiling() {
         const filingDate = new Date(filing.filing_date);
         const daysSinceFiling = Math.floor((now - filingDate.getTime()) / (1000 * 60 * 60 * 24));
 
-        // Only flag if more than 60 days have passed (grace period for initial ADV filing)
+        // Only consider if more than 60 days have passed (grace period for initial ADV filing)
         if (daysSinceFiling > DETECTION_CONFIG.initialFilingGracePeriodDays) {
-            issues.push({
-                form_d_cik: filing.cik,
-                adviser_crd: null,
-                discrepancy_type: 'needs_initial_adv_filing',
-                severity: 'high',
-                description: `Manager "${filing.entityname}" filed Form D on ${filing.filing_date} but has not filed Form ADV within 60 days (${daysSinceFiling} days elapsed)`,
-                metadata: {
-                    form_d_filing_date: filing.filing_date,
-                    days_since_filing: daysSinceFiling,
-                    entity_name: filing.entityname,
-                    cik: filing.cik,
-                    accession_number: filing.accessionnumber,
-                    offering_amount: filing.totalofferingamount
-                }
+            // Extract manager name using series/master LLC pattern
+            const managerName = parseFundName(filing.entityname) || filing.entityname;
+
+            if (!managerFilings.has(managerName)) {
+                managerFilings.set(managerName, {
+                    filings: [],
+                    earliest_date: filing.filing_date,
+                    latest_date: filing.filing_date,
+                    total_offering: 0,
+                    primary_cik: filing.cik // Use first CIK for EDGAR link
+                });
+            }
+
+            const manager = managerFilings.get(managerName);
+            manager.filings.push({
+                entity_name: filing.entityname,
+                cik: filing.cik,
+                accession: filing.accessionnumber,
+                filing_date: filing.filing_date,
+                offering_amount: filing.totalofferingamount
             });
+
+            // Track date range
+            if (filing.filing_date < manager.earliest_date) manager.earliest_date = filing.filing_date;
+            if (filing.filing_date > manager.latest_date) manager.latest_date = filing.filing_date;
+
+            // Sum offerings
+            if (filing.totalofferingamount && !isNaN(filing.totalofferingamount)) {
+                manager.total_offering += parseFloat(filing.totalofferingamount);
+            }
         }
     }
 
-    console.log(`  Found ${issues.length} issues (Form D filed >60 days ago with no ADV match)`);
+    // Step 4: Create one issue per manager
+    const issues = [];
+    const nowDate = new Date();
+
+    for (const [managerName, data] of managerFilings) {
+        const daysSinceFirst = Math.floor((nowDate.getTime() - new Date(data.earliest_date).getTime()) / (1000 * 60 * 60 * 24));
+
+        issues.push({
+            form_d_cik: data.primary_cik,
+            adviser_crd: null,
+            discrepancy_type: 'needs_initial_adv_filing',
+            severity: 'high',
+            description: `Manager "${managerName}" has ${data.filings.length} Form D filing(s) since ${data.earliest_date} but has not filed Form ADV (${daysSinceFirst} days since first filing)`,
+            metadata: {
+                manager_name: managerName,
+                entity_name: managerName, // For display compatibility
+                fund_count: data.filings.length,
+                earliest_filing_date: data.earliest_date,
+                latest_filing_date: data.latest_date,
+                days_since_first_filing: daysSinceFirst,
+                total_offering_amount: data.total_offering,
+                cik: data.primary_cik,
+                sample_funds: data.filings.slice(0, 5).map(f => ({
+                    name: f.entity_name,
+                    cik: f.cik,
+                    filing_date: f.filing_date,
+                    offering_amount: f.offering_amount
+                }))
+            }
+        });
+    }
+
+    console.log(`  Found ${issues.length} issues (unique managers with Form D but no ADV)`);
     return issues;
 }
 
 /**
+ * Helper: Get actual latest ADV year for an adviser from the ADV database
+ * Uses GAV (Gross Asset Value) columns to find the most recent year with data
+ */
+async function getActualLatestAdvYear(crd) {
+    try {
+        const { data: funds } = await advDb
+            .from('funds_enriched')
+            .select('gav_2025, gav_2024, gav_2023, gav_2022, gav_2021, gav_2020')
+            .eq('adviser_entity_crd', crd)
+            .limit(10);
+
+        if (!funds || funds.length === 0) return null;
+
+        // Check each year from newest to oldest
+        const years = [2025, 2024, 2023, 2022, 2021, 2020];
+        for (const year of years) {
+            const hasDataThisYear = funds.some(f => f[`gav_${year}`] !== null);
+            if (hasDataThisYear) return year;
+        }
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
+/**
  * Detector 2: Overdue Annual ADV Amendment
- * Uses pre-computed overdue_adv_flag from cross_reference_matches
- * Flags advisers whose latest ADV filing is not current year
- * Enhanced: Includes Form D filings filed after the last ADV
+ * Finds advisers with Form D activity who haven't updated their ADV this year
+ *
+ * FIXED LOGIC:
+ * 1. Get advisers with recent Form D filings (from cross_reference_matches)
+ * 2. For each adviser, check ACTUAL latest ADV year from advisers_enriched GAV columns
+ * 3. Only flag if ADV is truly outdated (no data for current year or last year)
  */
 async function detectOverdueAnnualAmendment() {
     console.log('\n[2/6] Detecting: Overdue Annual ADV Amendment...');
 
+    const currentYear = new Date().getFullYear();
     const issues = [];
-    let offset = 0;
-    const seenAdvisers = new Set(); // Deduplicate by adviser
     const adviserFormDs = new Map(); // Collect Form D filings per adviser
 
+    // Step 1: Get all advisers with Form D matches
+    let offset = 0;
     while (offset < DETECTION_CONFIG.maxRecords) {
         const { data: matches, error } = await formDDb
             .from('cross_reference_matches')
-            .select('adviser_entity_crd, adviser_entity_legal_name, latest_adv_year, overdue_adv_flag, adv_fund_name, formd_accession, formd_entity_name')
-            .eq('overdue_adv_flag', true)
+            .select('adviser_entity_crd, adviser_entity_legal_name, formd_accession, formd_entity_name')
+            .not('adviser_entity_crd', 'is', null)
             .range(offset, offset + DETECTION_CONFIG.batchSize - 1);
 
         if (error) throw error;
@@ -165,11 +269,9 @@ async function detectOverdueAnnualAmendment() {
         for (const match of matches) {
             if (!match.adviser_entity_crd) continue;
 
-            // Collect Form D filings for each adviser
             if (!adviserFormDs.has(match.adviser_entity_crd)) {
                 adviserFormDs.set(match.adviser_entity_crd, {
                     adviser_name: match.adviser_entity_legal_name,
-                    latest_adv_year: match.latest_adv_year,
                     form_d_filings: []
                 });
             }
@@ -190,62 +292,62 @@ async function detectOverdueAnnualAmendment() {
         }
     }
 
-    // Now fetch Form D filing dates for all relevant accessions
-    const allAccessions = [];
+    console.log(`  Found ${adviserFormDs.size} unique advisers with Form D activity`);
+
+    // Step 2: For each adviser, check actual latest ADV year
+    let checkedCount = 0;
     for (const [crd, data] of adviserFormDs) {
-        allAccessions.push(...data.form_d_filings.map(f => f.accession));
-    }
+        const actualLatestYear = await getActualLatestAdvYear(crd);
 
-    // Batch fetch Form D filing dates
-    const filingDates = new Map();
-    for (let i = 0; i < allAccessions.length; i += 100) {
-        const batch = allAccessions.slice(i, i + 100);
-        const { data: filings } = await formDDb
-            .from('form_d_filings')
-            .select('accessionnumber, filing_date, entityname, cik')
-            .in('accessionnumber', batch);
+        // Only flag if ADV is actually overdue (not filed in current year)
+        // Note: We allow last year since annual amendment deadline is April 1
+        const isOverdue = actualLatestYear !== null && actualLatestYear < currentYear - 1;
 
-        for (const f of (filings || [])) {
-            filingDates.set(f.accessionnumber, {
-                filing_date: f.filing_date,
-                cik: f.cik
+        if (isOverdue) {
+            // Get Form D filing dates
+            const formDDetails = [];
+            for (const f of data.form_d_filings.slice(0, 10)) {
+                const { data: filingData } = await formDDb
+                    .from('form_d_filings')
+                    .select('accessionnumber, filing_date, cik')
+                    .eq('accessionnumber', f.accession)
+                    .single();
+
+                if (filingData) {
+                    formDDetails.push({
+                        accession: f.accession,
+                        entity_name: f.entity_name,
+                        filing_date: filingData.filing_date,
+                        cik: filingData.cik
+                    });
+                }
+            }
+
+            // Filter to Form Ds filed after last ADV
+            const formDsAfterAdv = formDDetails.filter(f => {
+                if (!f.filing_date) return false;
+                return new Date(f.filing_date).getFullYear() > actualLatestYear;
+            });
+
+            issues.push({
+                adviser_crd: crd,
+                discrepancy_type: 'overdue_annual_amendment',
+                severity: 'high',
+                description: `Manager "${data.adviser_name}" has not filed current year ADV amendment (last filing: ${actualLatestYear || 'unknown'})${formDsAfterAdv.length > 0 ? `. ${formDsAfterAdv.length} Form D filings since then.` : ''}`,
+                metadata: {
+                    adviser_name: data.adviser_name,
+                    latest_adv_year: actualLatestYear,
+                    current_year: currentYear,
+                    form_d_count_after_adv: formDsAfterAdv.length,
+                    form_d_filings_after_adv: formDsAfterAdv.slice(0, 5)
+                }
             });
         }
-    }
 
-    // Build issues with Form D details
-    for (const [crd, data] of adviserFormDs) {
-        // Find Form D filings after the last ADV year
-        const formDsAfterAdv = data.form_d_filings
-            .filter(f => {
-                const filingInfo = filingDates.get(f.accession);
-                if (!filingInfo) return false;
-                const filingYear = new Date(filingInfo.filing_date).getFullYear();
-                return filingYear > (data.latest_adv_year || 0);
-            })
-            .map(f => ({
-                ...f,
-                filing_date: filingDates.get(f.accession)?.filing_date,
-                cik: filingDates.get(f.accession)?.cik
-            }));
-
-        issues.push({
-            adviser_crd: crd,
-            discrepancy_type: 'overdue_annual_amendment',
-            severity: 'high',
-            description: `Manager "${data.adviser_name}" has not filed current year ADV amendment (last filing: ${data.latest_adv_year || 'unknown'})${formDsAfterAdv.length > 0 ? `. ${formDsAfterAdv.length} Form D filings since then.` : ''}`,
-            metadata: {
-                adviser_name: data.adviser_name,
-                latest_adv_year: data.latest_adv_year,
-                form_d_count_after_adv: formDsAfterAdv.length,
-                form_d_filings_after_adv: formDsAfterAdv.slice(0, 5).map(f => ({
-                    accession: f.accession,
-                    entity_name: f.entity_name,
-                    filing_date: f.filing_date,
-                    cik: f.cik
-                }))
-            }
-        });
+        checkedCount++;
+        if (checkedCount % 500 === 0) {
+            console.log(`    Checked ${checkedCount}/${adviserFormDs.size} advisers, found ${issues.length} overdue...`);
+        }
     }
 
     console.log(`  Found ${issues.length} issues (unique advisers with overdue ADV)`);

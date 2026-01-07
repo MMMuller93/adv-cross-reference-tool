@@ -4511,13 +4511,10 @@ function App() {
                                     ) : (
                                       <span className="text-[10px] text-gray-300">IAPD</span>
                                     )}
-                                    {/* EDGAR link - support CIK or accession number */}
-                                    {match.form_d_cik || match.metadata?.formd_accession ? (
+                                    {/* EDGAR link - use CIK from form_d_cik or metadata.cik/formd_cik */}
+                                    {(match.form_d_cik || match.metadata?.cik || match.metadata?.formd_cik) ? (
                                       <a
-                                        href={match.form_d_cik
-                                          ? `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${match.form_d_cik}&type=D&dateb=&owner=include&count=40`
-                                          : `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&filenum=${match.metadata.formd_accession}&type=D&dateb=&owner=include&count=40`
-                                        }
+                                        href={`https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${match.form_d_cik || match.metadata?.cik || match.metadata?.formd_cik}&type=D&dateb=&owner=include&count=40`}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="text-[10px] font-medium text-blue-600 hover:text-blue-800 hover:underline"
