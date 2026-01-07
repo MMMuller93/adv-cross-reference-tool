@@ -4256,10 +4256,10 @@ function App() {
                                         }}
                                         className="text-[13px] font-medium text-gray-900 hover:text-slate-700 transition-colors tracking-tight text-left"
                                       >
-                                        {match.entity_name || match.adviser_entity_legal_name || 'Unknown Manager'}
+                                        {match.entity_name || match.adviser_entity_legal_name || match.metadata?.entity_name || match.metadata?.adviser_name || 'Unknown Manager'}
                                       </button>
                                     ) : (
-                                      <div className="text-[13px] font-medium text-gray-900">{match.entity_name || 'Unknown Manager'}</div>
+                                      <div className="text-[13px] font-medium text-gray-900">{match.entity_name || match.metadata?.entity_name || match.metadata?.adviser_name || 'Unknown Manager'}</div>
                                     )}
                                     {/* Show clickable fund name - from direct field or metadata */}
                                     {(match.fund_name || match.metadata?.primary_fund_name || match.metadata?.adv_fund_name || match.metadata?.fund_name) && (
