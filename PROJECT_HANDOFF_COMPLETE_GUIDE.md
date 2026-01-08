@@ -28,27 +28,59 @@
 
 ### What is Private Funds Radar?
 
-**SEC Form ADV / Form D compliance intelligence platform** that identifies regulatory discrepancies between investment advisers' Form ADV filings and their fund offerings filed via Form D.
+**Comprehensive SEC Form ADV / Form D intelligence platform** for analyzing private fund managers and their filings.
 
-**Primary Users**: Compliance teams, regulators, financial analysts, journalists
+**Primary Users**: Compliance teams, regulators, financial analysts, journalists, fund researchers
 
-**Core Value Proposition**:
-- Automated detection of compliance violations (60-day ADV filing rule, VC exemption violations, etc.)
-- Cross-reference matching between Form D funds and Form ADV funds
-- Manager enrichment (contact info, team members, social profiles)
-- Historical AUM tracking and visualization
+**Core Capabilities**:
 
-### Why This Exists
+1. **Search & Discovery**
+   - Search ~40,000 registered investment advisers (RIA + ERA)
+   - Search ~180,000 private funds from Form ADV
+   - Search ~100,000 Form D fund offerings
+   - Track new managers entering the market
 
-**The 60-Day Rule**: When a manager raises their first private fund via Form D, they must file Form ADV within 60 days. Many don't comply.
+2. **Cross-Reference Matching**
+   - Link Form D filings to corresponding Form ADV funds
+   - ~63,000 matched fund pairs (35% match rate)
+   - Identify unmatched Form Ds (potential new managers)
 
-**The Problem**: No automated system exists to track this. Manual checking requires:
-1. Finding unmatched Form D filings
-2. Extracting manager entity names
-3. Searching IAPD manually for each manager
-4. Determining if they're actually registered
+3. **Historical Analysis & Visualization**
+   - AUM trends from 2011-2025 for each adviser
+   - Fund size (GAV) trends over time
+   - Interactive Chart.js visualizations
 
-**Our Solution**: Automated pipeline that does all of this, plus identifies 5 other violation types.
+4. **Compliance Detection** (Intelligence Radar)
+   - 6 violation types detected across ~29,000 issues
+   - 60-day ADV filing rule violations
+   - VC exemption violations
+   - Fund type/exemption mismatches
+   - Overdue annual amendments
+   - Missing funds in ADV
+
+5. **Manager Enrichment**
+   - Contact information (website, email, LinkedIn)
+   - Team member extraction
+   - Fund strategy and focus areas
+   - ~1,500 managers enriched
+
+### Why This Platform Exists
+
+**The Gap**: No unified system exists to cross-reference SEC Form D offerings with Form ADV registrations and detect discrepancies.
+
+**Manual Challenges**:
+- Form D and Form ADV data exist in separate systems
+- Fund names differ between filings (matching is hard)
+- Compliance checking requires comparing 180k+ funds manually
+- Historical data not easily visualized
+- New manager discovery is time-consuming
+
+**Our Solution**:
+- Automated cross-referencing between Form D and ADV
+- Fuzzy matching algorithm (35% match rate, improving)
+- 6 compliance detectors running automatically
+- Historical trend visualization
+- Enrichment pipeline for contact discovery
 
 ---
 
@@ -400,50 +432,137 @@ for (const match of matches) {
 
 **SEC EDGAR**: All data originates from SEC's Electronic Data Gathering, Analysis, and Retrieval system
 
-1. **Form ADV** (Investment Adviser Registration)
-   - URL: https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=ADV
-   - Format: XML files
-   - Frequency: Annual updates (due by April 1), amendments as needed
-   - **How we got it**: Bulk download via SEC EDGAR API (external process, not in this codebase)
-   - **Loaded into**: `advisers_enriched`, `funds_enriched` tables (ADV Database)
+#### 1. Form ADV Data (Investment Adviser Registration)
 
-2. **Form D** (Regulation D Offerings)
-   - URL: https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=D
-   - Format: XML files
-   - Frequency: Filed within 15 days of first sale, amendments as needed
-   - **How we got it**: Bulk download via SEC EDGAR API (external process)
-   - **Loaded into**: `form_d_filings` table (Form D Database)
+**Source**: SEC EDGAR bulk downloads
+- URL: https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=ADV
+- Format: XML files (Form ADV Part 1A, Schedule D)
+- Filing frequency: Annual updates (due by April 1), amendments as needed
 
-3. **IAPD** (Investment Adviser Public Disclosure)
-   - URL: https://adviserinfo.sec.gov/
-   - Purpose: Manual validation of adviser registration status
-   - **How we use it**: Playwright browser automation (`scripts/validate_needs_adv_corrected.js`)
-   - Search endpoint: `https://adviserinfo.sec.gov/search/genericsearch/firmgrid`
-   - **IMPORTANT**: IAPD search is rate-limited and requires browser automation (protected by Cloudflare)
+**How we ingest it**:
+- **Quarterly manual uploads** from historical ADV filing archives
+- Includes historical filings from 2011-2025 (explains why we have 180k funds including dissolved ones)
+- Parsed externally (not in this codebase) → loaded into Supabase
+- Contains both current RIA advisers and historical Exempt Reporting Advisers (ERAs)
+
+**Loaded into**:
+- `advisers_enriched` table (ADV DB) - ~40,000 advisers (current + historical)
+- `funds_enriched` table (ADV DB) - ~180,000 funds (includes dissolved/historical funds)
+
+**Key detail**: Database includes ALL historical Form ADV filings, not just current ones. This is why funds like "GRISOSTOMO" (Founders Fund's dissolved 2012 fund) still appear in the database.
+
+#### 2. Form D Data (Regulation D Offerings)
+
+**Source**: SEC EDGAR + automated scraper
+- URL: https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=D
+- Format: XML files
+- Filing frequency: Within 15 days of first sale, amendments as needed
+
+**How we ingest it**:
+- **Automated weekly scraper** (external tool: `/Users/Miles/Desktop/FormD_Project/active/daily_scraper_with_alerts.py`)
+- Runs weekly to capture new Form D filings
+- Parses XML and loads into Supabase
+- Includes filings from ~2011-present
+
+**Loaded into**:
+- `form_d_filings` table (Form D DB) - ~100,000 filings
+
+**Update frequency**: Weekly (new filings added automatically)
+
+#### 3. State ERA Data (Exempt Reporting Advisers)
+
+**Source**: State securities regulators + SEC filings
+
+**How we ingest it**:
+- Manual imports of state-registered ERA data
+- Supplements SEC's federal RIA data
+- Some states require ERA filings for advisers managing <$150M
+
+**Loaded into**:
+- `advisers_enriched` table (ADV DB) - included in the ~40k count
+- Tagged with `type = 'ERA'` vs `type = 'RIA'`
+
+#### 4. IAPD (Investment Adviser Public Disclosure)
+
+**Source**: https://adviserinfo.sec.gov/
+
+**Purpose**: Manual validation of adviser registration status (not bulk data source)
+
+**How we use it**:
+- Playwright browser automation for spot-checking (`scripts/validate_needs_adv_corrected.js`)
+- Search endpoint: `https://adviserinfo.sec.gov/search/genericsearch/firmgrid`
+- Used to validate managers flagged as "needs ADV filing"
+
+**IMPORTANT**: IAPD search is rate-limited and requires browser automation (protected by Cloudflare)
 
 ### Data Ingestion Flow
 
 ```
-SEC EDGAR XML files (bulk download, external process)
-  │
-  ├─► Parsed by external ETL scripts (Python/other)
-  │   └─► advisers_enriched (ADV DB)
-  │   └─► funds_enriched (ADV DB)
-  │   └─► form_d_filings (Form D DB)
-  │
-  └─► Once loaded, our scripts take over:
-      │
-      ├─► compute_cross_reference.py
-      │   └─► cross_reference_matches (Form D DB)
-      │
-      ├─► detect_compliance_issues.js
-      │   └─► compliance_issues (Form D DB)
-      │
-      └─► enrichment/ scripts
-          └─► enriched_managers (Form D DB)
+┌─────────────────────────────────────────────────────────────┐
+│                    DATA SOURCES                             │
+├─────────────────────────────────────────────────────────────┤
+│  1. SEC EDGAR Bulk Downloads (historical ADV files)         │
+│     → Quarterly manual uploads                              │
+│     → 2011-2025 historical data                             │
+│                                                             │
+│  2. Form D Scraper (external Python script)                 │
+│     → Weekly automated runs                                 │
+│     → /Users/Miles/Desktop/FormD_Project/...                │
+│                                                             │
+│  3. State ERA Data Imports                                  │
+│     → Manual uploads as needed                              │
+│     → Supplements federal RIA data                          │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│              EXTERNAL ETL / PARSING                         │
+│  (Outside this codebase - uploads directly to Supabase)     │
+├─────────────────────────────────────────────────────────────┤
+│  Parse XML → Transform → Load                               │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 SUPABASE DATABASES                          │
+├─────────────────────────────────────────────────────────────┤
+│  ADV DB: advisers_enriched, funds_enriched                  │
+│  Form D DB: form_d_filings                                  │
+│                                                             │
+│  Update Frequency:                                          │
+│  • advisers_enriched: Quarterly                             │
+│  • funds_enriched: Quarterly                                │
+│  • form_d_filings: Weekly (automated scraper)               │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│              OUR SCRIPTS (This Codebase)                    │
+├─────────────────────────────────────────────────────────────┤
+│  compute_cross_reference.py                                 │
+│  ├─ Matches Form D ↔ ADV funds                             │
+│  └─ Writes to: cross_reference_matches                     │
+│                                                             │
+│  detect_compliance_issues.js                                │
+│  ├─ Runs 6 compliance detectors                            │
+│  └─ Writes to: compliance_issues                           │
+│                                                             │
+│  enrichment/ scripts                                        │
+│  ├─ Enriches manager contact info                          │
+│  └─ Writes to: enriched_managers                           │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**NOTE**: The initial XML → Supabase ingestion is EXTERNAL to this codebase. Our code assumes data is already in Supabase.
+**IMPORTANT NOTES**:
+
+1. **Initial data loading is EXTERNAL** - Our code assumes data already exists in Supabase
+2. **Historical data**: Database contains ALL filings since 2011, including dissolved funds
+3. **Update schedule**:
+   - Form ADV: Quarterly manual updates
+   - Form D: Weekly automated scraper
+   - Cross-references: Run manually when needed
+   - Compliance issues: Run manually when needed
+4. **Form D scraper**: Lives outside this codebase at `/Users/Miles/Desktop/FormD_Project/`
 
 ### Form ADV Website Usage
 
