@@ -71,15 +71,100 @@ function parseFundName(name) {
 }
 
 /**
+ * Extract base company name for ADV registration matching
+ *
+ * IMPORTANT: GP entity names in Form D often differ from registered adviser names.
+ * Examples:
+ *   - "KIG GP, LLC" registers as "KIG INVESTMENT MANAGEMENT, LLC"
+ *   - "Akahi Capital Management, LLC" registers as "AKAHI CAPITAL MANAGEMENT"
+ *   - "HighVista GP LLC" registers as "HIGHVISTA STRATEGIES LLC"
+ *
+ * This function strips suffixes to find the base company name for matching.
+ *
+ * @param {string} name - Full entity name from Form D
+ * @returns {string} - Base company name for matching
+ */
+function extractBaseName(name) {
+    if (!name) return '';
+
+    let base = name;
+
+    // Remove GP/Manager/Management/Advisors variations
+    base = base.replace(/\s+(GP|General Partner|Manager|Management|Advisors?|Advisers?)\s*,?\s*(LLC|LP|L\.?P\.?)?$/i, '');
+
+    // Remove entity types
+    base = base.replace(/\s*,?\s*(LLC|L\.?L\.?C\.?|LP|L\.?P\.?|LTD|LIMITED|INC|INCORPORATED)\.?$/i, '');
+
+    // Remove fund-specific terms
+    base = base.replace(/\s+(Fund|Capital|Ventures?|Partners?|Holdings?|Group)\s+(I{1,3}|IV|V|VI|VII|VIII|IX|X|\d+)$/i, '');
+
+    return base.trim();
+}
+
+/**
+ * Check if a manager is registered in the ADV database
+ * Uses base name extraction to handle GP entity name vs registered adviser name differences
+ *
+ * @param {string} managerName - Manager entity name from Form D
+ * @returns {Promise<{found: boolean, crd?: number, adviser_name?: string}>}
+ */
+async function checkAdvDatabase(managerName) {
+    const baseName = extractBaseName(managerName);
+
+    // Try exact base name match first
+    const { data: exact } = await advDb
+        .from('advisers_enriched')
+        .select('crd, adviser_name')
+        .ilike('adviser_name', `%${baseName}%`)
+        .limit(5);
+
+    if (exact && exact.length > 0) {
+        return {
+            found: true,
+            source: 'database',
+            crd: exact[0].crd,
+            adviser_name: exact[0].adviser_name
+        };
+    }
+
+    // Try first word only (e.g., "KIG" from "KIG Investment Management")
+    const firstWord = baseName.split(' ')[0];
+    if (firstWord && firstWord.length >= 3) {
+        const { data: partial } = await advDb
+            .from('advisers_enriched')
+            .select('crd, adviser_name')
+            .ilike('adviser_name', `${firstWord}%`)
+            .limit(10);
+
+        if (partial && partial.length > 0) {
+            return {
+                found: true,
+                source: 'database_partial',
+                crd: partial[0].crd,
+                adviser_name: partial[0].adviser_name
+            };
+        }
+    }
+
+    return { found: false };
+}
+
+/**
  * Detector 1: Needs Initial ADV Filing
  * New MANAGERS filed Form D but haven't filed ADV within 60 days
  *
- * LOGIC:
+ * CORRECTED LOGIC (2026-01-07):
  * 1. Get recent Form D filings
  * 2. Get all matched accessions from cross_reference_matches (these have ADV matches)
- * 3. Find Form D filings NOT in matches = no ADV filing exists
+ * 3. Find Form D filings NOT in matches = potentially no ADV filing
  * 4. Filter to those filed more than 60 days ago
- * 5. GROUP by manager (using series/master LLC pattern) - one issue per manager, not per fund
+ * 5. GROUP by manager (using series/master LLC pattern)
+ * 6. **NEW: Validate each manager against advisers_enriched database using base name extraction**
+ * 7. Only flag if NOT found in database (true violators)
+ *
+ * KEY FIX: GP entity names (e.g., "KIG GP, LLC") often differ from registered adviser names
+ * (e.g., "KIG INVESTMENT MANAGEMENT, LLC"). We must check the database with base name matching
+ * to avoid false positives.
  *
  * NOTE: cross_reference_matches only contains MATCHED records.
  * Unmatched Form D filings are not stored there.
@@ -94,7 +179,7 @@ async function detectNeedsInitialADVFiling() {
 
     const { data: formDFilings, error: formDError } = await formDDb
         .from('form_d_filings')
-        .select('accessionnumber, cik, entityname, filing_date, totalofferingamount')
+        .select('accessionnumber, cik, entityname, filing_date, totalofferingamount, related_names')
         .not('cik', 'is', null)
         .gte('filing_date', sixMonthsAgoStr)
         .order('filing_date', { ascending: false })
@@ -152,7 +237,8 @@ async function detectNeedsInitialADVFiling() {
                     earliest_date: filing.filing_date,
                     latest_date: filing.filing_date,
                     total_offering: 0,
-                    primary_cik: filing.cik // Use first CIK for EDGAR link
+                    primary_cik: filing.cik, // Use first CIK for EDGAR link
+                    related_names: filing.related_names // Store for GP entity extraction
                 });
             }
 
@@ -176,11 +262,25 @@ async function detectNeedsInitialADVFiling() {
         }
     }
 
-    // Step 4: Create one issue per manager
+    console.log(`  Found ${managerFilings.size} unique managers with unmatched Form D filings`);
+
+    // Step 4: Validate each manager against ADV database
+    // Only flag managers that are NOT registered
     const issues = [];
     const nowDate = new Date();
+    let checkedCount = 0;
 
     for (const [managerName, data] of managerFilings) {
+        // Check if manager is registered in ADV database
+        const dbResult = await checkAdvDatabase(managerName);
+
+        if (dbResult.found) {
+            // Manager IS registered - skip (not a violator)
+            console.log(`  ✓ Found: ${managerName} → ${dbResult.adviser_name} (CRD ${dbResult.crd})`);
+            continue;
+        }
+
+        // Manager NOT found - this is a true violator
         const daysSinceFirst = Math.floor((nowDate.getTime() - new Date(data.earliest_date).getTime()) / (1000 * 60 * 60 * 24));
 
         issues.push({
@@ -188,7 +288,7 @@ async function detectNeedsInitialADVFiling() {
             adviser_crd: null,
             discrepancy_type: 'needs_initial_adv_filing',
             severity: 'high',
-            description: `Manager "${managerName}" has ${data.filings.length} Form D filing(s) since ${data.earliest_date} but has not filed Form ADV (${daysSinceFirst} days since first filing)`,
+            description: `Manager "${managerName}" has ${data.filings.length} Form D filing(s) since ${data.earliest_date} but has not filed Form ADV (${daysSinceFirst} days since first filing, verified against ADV database)`,
             metadata: {
                 manager_name: managerName,
                 entity_name: managerName, // For display compatibility
@@ -198,6 +298,7 @@ async function detectNeedsInitialADVFiling() {
                 days_since_first_filing: daysSinceFirst,
                 total_offering_amount: data.total_offering,
                 cik: data.primary_cik,
+                validation_method: 'database_check',
                 sample_funds: data.filings.slice(0, 5).map(f => ({
                     name: f.entity_name,
                     cik: f.cik,
@@ -206,9 +307,15 @@ async function detectNeedsInitialADVFiling() {
                 }))
             }
         });
+
+        checkedCount++;
+        if (checkedCount % 50 === 0) {
+            console.log(`  Validated ${checkedCount}/${managerFilings.size} managers, found ${issues.length} violators...`);
+        }
     }
 
-    console.log(`  Found ${issues.length} issues (unique managers with Form D but no ADV)`);
+    console.log(`  Validated all ${managerFilings.size} managers`);
+    console.log(`  Found ${issues.length} true violators (managers NOT registered in ADV database)`);
     return issues;
 }
 
