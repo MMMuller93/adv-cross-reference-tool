@@ -1,0 +1,246 @@
+{
+  "project_info": {
+    "name": "ADV Cross-Reference Intelligence Platform",
+    "description": "Compliance detection system for Form D/ADV cross-reference analysis",
+    "port": 3009,
+    "created_at": "2025-11",
+    "last_updated": "2026-01-06"
+  },
+  "session_state": {
+    "current_session": 10,
+    "last_working_commit": "05456fa",
+    "environment_verified": true,
+    "notes": "ADV validation fix complete - added base name extraction and database validation. Project handoff documentation created."
+  },
+  "features": [
+    {
+      "id": "feat-001",
+      "category": "core",
+      "description": "Adviser Search - Search and display advisers with filters",
+      "priority": 1,
+      "status": "done",
+      "passes": true,
+      "tested_at": "2025-11-27"
+    },
+    {
+      "id": "feat-002",
+      "category": "core",
+      "description": "ADV Fund Search - Search and display ADV funds with pagination",
+      "priority": 1,
+      "status": "done",
+      "passes": true,
+      "tested_at": "2025-11-27"
+    },
+    {
+      "id": "feat-003",
+      "category": "core",
+      "description": "Form D Search - Search and display Form D filings sorted by date",
+      "priority": 1,
+      "status": "done",
+      "passes": true,
+      "tested_at": "2025-11-27"
+    },
+    {
+      "id": "feat-004",
+      "category": "core",
+      "description": "New Managers Tab - Display new fund managers with expandable rows",
+      "priority": 1,
+      "status": "done",
+      "passes": true,
+      "tested_at": "2025-11-27"
+    },
+    {
+      "id": "radar-001",
+      "category": "intelligence_radar",
+      "description": "Overdue Annual ADV Amendment detector",
+      "acceptance_criteria": [
+        "Query all advisers with overdue_adv_flag=true",
+        "Paginate through all records",
+        "Deduplicate by adviser CRD"
+      ],
+      "priority": 1,
+      "status": "done",
+      "passes": true,
+      "tested_at": "2026-01-06",
+      "notes": "Found 2,123 unique advisers"
+    },
+    {
+      "id": "radar-002",
+      "category": "intelligence_radar",
+      "description": "VC Exemption Violation detector",
+      "acceptance_criteria": [
+        "Find advisers claiming VC exemption",
+        "Check if they manage non-VC funds",
+        "Store fund types in metadata"
+      ],
+      "priority": 1,
+      "status": "done",
+      "passes": true,
+      "tested_at": "2026-01-06",
+      "notes": "Found 740 violations"
+    },
+    {
+      "id": "radar-003",
+      "category": "intelligence_radar",
+      "description": "Fund Type Mismatch detector",
+      "acceptance_criteria": [
+        "Compare fund type in Form D vs ADV",
+        "Paginate through ALL 63k records",
+        "Store both types in metadata"
+      ],
+      "priority": 1,
+      "status": "done",
+      "passes": true,
+      "tested_at": "2026-01-06",
+      "notes": "Found 16,154 mismatches"
+    },
+    {
+      "id": "radar-004",
+      "category": "intelligence_radar",
+      "description": "Exemption Mismatch (3c1 vs 3c7) detector",
+      "acceptance_criteria": [
+        "Compare 3(c)(1) and 3(c)(7) between Form D and ADV",
+        "Paginate through ALL records",
+        "Handle different exemption formats"
+      ],
+      "priority": 1,
+      "status": "done",
+      "passes": true,
+      "tested_at": "2026-01-06",
+      "notes": "Found 9,900 mismatches"
+    },
+    {
+      "id": "radar-005",
+      "category": "intelligence_radar",
+      "description": "Needs Initial ADV Filing detector with database validation",
+      "acceptance_criteria": [
+        "Find Form D filings with no ADV match within 60 days",
+        "Extract manager names using parseFundName()",
+        "Validate against advisers_enriched using base name extraction",
+        "Only flag managers NOT found in database"
+      ],
+      "priority": 1,
+      "status": "done",
+      "passes": true,
+      "tested_at": "2026-01-07",
+      "notes": "Fixed false positive rate from 78% to 0%. Validated 200 managers: 147 registered (73.5%), 53 need ADV (26.5%). Added extractBaseName() and checkAdvDatabase() functions. See docs/ADV_VALIDATION_MAPPING.md"
+    },
+    {
+      "id": "radar-ui-001",
+      "category": "intelligence_radar",
+      "description": "Frontend - Fund types in VC violations",
+      "acceptance_criteria": [
+        "Show fund type badges (PE, Hedge, etc.)",
+        "Display sample non-VC funds from metadata"
+      ],
+      "priority": 1,
+      "status": "needs_verification",
+      "passes": false,
+      "tested_at": null,
+      "notes": "Code written - verify in browser"
+    },
+    {
+      "id": "radar-ui-002",
+      "category": "intelligence_radar",
+      "description": "Frontend - EDGAR links for Form D mismatches",
+      "acceptance_criteria": [
+        "Generate EDGAR links from accession number",
+        "Display alongside ADV IAPD links"
+      ],
+      "priority": 1,
+      "status": "needs_verification",
+      "passes": false,
+      "tested_at": null,
+      "notes": "Code written - verify in browser"
+    },
+    {
+      "id": "radar-ui-003",
+      "category": "intelligence_radar",
+      "description": "Frontend - Adviser detail from Intelligence Radar",
+      "acceptance_criteria": [
+        "Click adviser loads detail page",
+        "Loading spinner during fetch",
+        "URL navigation works"
+      ],
+      "priority": 1,
+      "status": "needs_verification",
+      "passes": false,
+      "tested_at": null,
+      "notes": "Added loading_adviser state - verify in browser"
+    },
+    {
+      "id": "match-001",
+      "category": "cross_reference",
+      "description": "Form D/ADV matching algorithm improvement",
+      "acceptance_criteria": [
+        "Improve match rate beyond 28%",
+        "Better fuzzy matching",
+        "Handle entity variations"
+      ],
+      "priority": 3,
+      "status": "not_started",
+      "passes": false,
+      "tested_at": null,
+      "notes": "Current: 63k matches / ~180k funds"
+    },
+    {
+      "id": "enrich-001",
+      "category": "enrichment",
+      "description": "Fix contact enrichment (URLs, emails)",
+      "acceptance_criteria": [
+        "Clean up bad article URLs",
+        "Improve website extraction accuracy",
+        "Handle edge cases"
+      ],
+      "priority": 3,
+      "status": "not_started",
+      "passes": false,
+      "tested_at": null,
+      "notes": "Some enriched managers have article URLs"
+    }
+  ],
+  "completed_features": [
+    "feat-001", "feat-002", "feat-003", "feat-004",
+    "radar-001", "radar-002", "radar-003", "radar-004", "radar-005"
+  ],
+  "blocked_features": [],
+  "known_issues": [
+    {
+      "id": "issue-001",
+      "description": "Supabase 1000 row default limit",
+      "status": "resolved",
+      "resolution": "Set batchSize to 1000, use pagination"
+    },
+    {
+      "id": "issue-002",
+      "description": "Insert timeout for large batches",
+      "status": "resolved",
+      "resolution": "Batch inserts at 500 rows"
+    },
+    {
+      "id": "issue-003",
+      "description": "Mixed date formats in Form D",
+      "status": "resolved",
+      "resolution": "parseFilingDate() helper"
+    },
+    {
+      "id": "issue-004",
+      "description": "ADV validation false positives (GP entity name != registered adviser name)",
+      "status": "resolved",
+      "resolution": "Added extractBaseName() and checkAdvDatabase() functions. Validates against advisers_enriched database before flagging. Reduced false positive rate from 78% to 0%. See docs/ADV_VALIDATION_MAPPING.md (2026-01-07)"
+    }
+  ],
+  "next_actions": [
+    "Verify frontend displays in browser (fund types, EDGAR links, adviser loading)",
+    "Run updated detect_compliance_issues.js to validate ADV filing detector accuracy",
+    "Re-inspect Form D/ADV matching quality (match-001)",
+    "Fix contact enrichment issues (enrich-001)"
+  ],
+  "project_documentation": {
+    "primary_handoff": "PROJECT_HANDOFF_COMPLETE_GUIDE.md",
+    "schema_reference": "DATABASE_SCHEMA.md",
+    "changelog": "CHANGELOG.md",
+    "validation_mapping": "docs/ADV_VALIDATION_MAPPING.md",
+    "work_logs": "docs/WORK_LOG_*.md"
+  }
+}

@@ -58,6 +58,44 @@ const { data: adviser } = await advDb
 
 ---
 
+### DONE: Improved Needs Initial ADV Filing Detection (2026-01-07)
+
+**Problem**: Original detection had high false positive rate (399 issues) because:
+1. Only used series LLC pattern ("a series of X") for firm name extraction
+2. Simple fuzzy matching missed legitimate matches (e.g., "Ulu Ventures Fund IV" should match "ULU VENTURES MANAGEMENT COMPANY, LLC")
+3. Didn't check against our advisers_enriched database effectively
+
+**Solution**: Created `detect_needs_adv_improved.js` with:
+
+**1. Better Firm Name Extraction:**
+- Series LLC pattern: "Fund A, a series of Manager LLC" → "Manager LLC"
+- Related names extraction: Find company names (LLC, LP, Management, Capital, etc.) from Form D related parties
+- Entity name cleaning: Strip fund numbers, series indicators, legal suffixes
+
+**2. Smarter Fuzzy Matching:**
+- Filter out generic words (FUND, MANAGEMENT, CAPITAL, PARTNERS, etc.)
+- Focus on distinctive words (e.g., "ULU" is distinctive, "VENTURES" is generic)
+- Prefix matching: If first 2 words match, high confidence match
+- 80%+ similarity threshold on distinctive words
+
+**3. Company vs Person Detection:**
+- Uses legal suffixes (LLC, LP, Inc) to identify companies
+- Uses name patterns (First Last) to skip person names
+- Filters out service providers (admin, custodian, legal, accountant)
+
+**Results:**
+- Before improvement: 399 unique managers flagged
+- After improvement: 122 unique managers flagged
+- Reduction of 69% false positives
+
+**Files Created:**
+- `detect_needs_adv_improved.js` - Improved detection script
+- `scripts/validate_iapd_playwright.js` - Playwright-based IAPD validation (for future use)
+
+**Future Enhancement:** Use Playwright script to validate remaining 122 candidates against SEC's live IAPD search.
+
+---
+
 ### DONE: Fix Missing Fund in ADV Detector (2026-01-06)
 **Problem**: Detector queried `cross_reference_matches` for `adv_fund_name IS NULL`, but that table only contains matched records where both sides have data.
 
