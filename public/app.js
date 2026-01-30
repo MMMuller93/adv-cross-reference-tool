@@ -2972,7 +2972,15 @@ function App() {
         break;
       case 'funds':
         title = 'Private Fund Offerings Export';
-        headers = ['Fund Name', 'Adviser', 'AUM/Offering', 'Amount Sold', 'Type', 'Exemptions', 'State', 'Filing Date', 'Signer', 'Phone', 'Related Parties'];
+        headers = [
+          'Fund Name', 'Adviser', 'CRD', 'Form D Offering', 'Amount Sold', 'Amount Remaining',
+          'ADV AUM', 'Type', 'Exemptions', 'Filing Date', 'First Sale Date',
+          'State', 'Jurisdiction', 'Address', 'CIK', 'File Number',
+          'Phone', 'Min Investment', 'Num Investors', 'Non-Accredited Investors',
+          'Signer', 'Signer Title', 'Industry', 'Entity Type', 'Amendment',
+          'Sales Commission', 'Finders Fee',
+          'Related Parties', 'SEC Filing Link'
+        ];
         rows = data.map(f => {
           let relatedParties = '';
           if (f.related_names) {
@@ -2984,18 +2992,37 @@ function App() {
               .map((n, i) => `${n}${roles[i] ? ` (${roles[i].trim()})` : ''}`)
               .join('; ');
           }
+          const secLink = f.cik ? `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${f.cik}&type=D&dateb=&owner=include&count=40` : 'N/A';
           return [
             f.name || f.fund_name || 'N/A',
             f.adviser_entity_legal_name || 'N/A',
-            formatCurrency(f.latest_gross_asset_value || parseCurrency(f.form_d_offering_amount)),
+            f.adviser_entity_crd || f.crd || 'N/A',
+            f.form_d_offering_amount || (f.form_d_indefinite ? 'Indefinite' : 'N/A'),
             f.form_d_amount_sold || f.totalamountsold || 'N/A',
+            f.form_d_remaining || 'N/A',
+            f.latest_gross_asset_value || 'N/A',
             f.fund_type || f.investment_fund_type || 'N/A',
             f.exemptions || f.federal_exemptions || 'N/A',
-            f.stateorcountry || f.state_of_organization || f.state_country || 'N/A',
             formatDate(f.filing_date || f.form_d_filing_date || f.adv_filing_date) || 'N/A',
-            f.form_d_signer ? `${f.form_d_signer}${f.form_d_signer_title ? ` (${f.form_d_signer_title})` : ''}` : 'N/A',
+            f.form_d_first_sale_date || 'N/A',
+            f.stateorcountry || f.state_of_organization || f.state_country || 'N/A',
+            f.form_d_jurisdiction || 'N/A',
+            f.form_d_address || 'N/A',
+            f.cik || 'N/A',
+            f.form_d_file_number || 'N/A',
             f.form_d_phone || 'N/A',
-            relatedParties || 'N/A'
+            f.form_d_min_investment || 'N/A',
+            f.form_d_num_investors || 'N/A',
+            f.form_d_has_non_accredited === 'Y' ? `Yes (${f.form_d_num_non_accredited || '?'})` : (f.form_d_has_non_accredited === 'N' ? 'No' : 'N/A'),
+            f.form_d_signer || 'N/A',
+            f.form_d_signer_title || 'N/A',
+            f.form_d_industry || 'N/A',
+            f.form_d_entity_type || 'N/A',
+            f.form_d_is_amendment === 'true' || f.form_d_is_amendment === true ? 'Yes' : 'No',
+            f.form_d_sales_commission || 'N/A',
+            f.form_d_finders_fee || 'N/A',
+            relatedParties || 'N/A',
+            secLink
           ];
         });
         break;
