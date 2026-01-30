@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const path = require('path');
+const fs = require('fs');
 
 // Stripe setup - only initialize if key is present
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
@@ -192,6 +193,52 @@ const formdClient = createClient(
   'https://ltdalxkhbbhmkimmogyq.supabase.co',
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0ZGFseGtoYmJobWtpbW1vZ3lxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1OTg3NTMsImV4cCI6MjA3NTE3NDc1M30.TS9uNMRqPKcthHCSMKAcFfhFEP-7Q6XbDHQNujBDOtc'
 );
+
+// Multi-Platform Managers CSV data (loaded at startup)
+let multiPlatformManagers = [];
+
+function loadMultiPlatformManagersCSV() {
+  const csvPath = path.join(__dirname, 'lead_lists', '08_multi_platform_managers.csv');
+  try {
+    if (!fs.existsSync(csvPath)) {
+      console.warn('[Multi-Platform] CSV not found:', csvPath);
+      return;
+    }
+    const content = fs.readFileSync(csvPath, 'utf-8');
+    const lines = content.trim().split('\n');
+    const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
+
+    multiPlatformManagers = lines.slice(1).map(line => {
+      const values = [];
+      let current = '';
+      let inQuotes = false;
+      for (const char of line) {
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+          values.push(current.trim());
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      values.push(current.trim());
+
+      const row = {};
+      headers.forEach((h, i) => {
+        row[h] = values[i] || '';
+      });
+      return row;
+    }).filter(r => r.display_name); // Filter out empty rows
+
+    console.log(`[Multi-Platform] Loaded ${multiPlatformManagers.length} managers from CSV`);
+  } catch (err) {
+    console.error('[Multi-Platform] Error loading CSV:', err.message);
+  }
+}
+
+// Load CSV at startup
+loadMultiPlatformManagersCSV();
 
 // SEO slug utility (used in redirects)
 function generateSlug(name) {
@@ -672,7 +719,7 @@ app.get('/api/funds/formd', async (req, res) => {
 
     let dbQuery = formdClient
       .from('form_d_filings')
-      .select('accessionnumber,entityname,cik,filing_date,stateorcountry,federalexemptions_items_list,investmentfundtype,related_names,related_roles,totalofferingamount,totalamountsold');
+      .select('accessionnumber,entityname,cik,filing_date,stateorcountry,federalexemptions_items_list,investmentfundtype,related_names,related_roles,totalofferingamount,totalamountsold,issuerphonenumber,minimuminvestmentaccepted,totalnumberalreadyinvested,nameofsigner,signaturetitle,street1,city,zipcode,sale_date,totalremaining,salescomm_dollaramount,findersfee_dollaramount,hasnonaccreditedinvestors,numbernonaccreditedinvestors,isamendment,industrygrouptype,entitytype,jurisdictionofinc,file_num');
 
     if (query) {
       dbQuery = dbQuery.or(`entityname.ilike.%${query}%,related_names.ilike.%${query}%`);
@@ -732,6 +779,23 @@ app.get('/api/funds/formd', async (req, res) => {
       investment_fund_type: fund.investmentfundtype,
       form_d_offering_amount: fund.totalofferingamount,
       form_d_amount_sold: fund.totalamountsold,
+      form_d_file_number: fund.file_num,
+      form_d_phone: fund.issuerphonenumber,
+      form_d_min_investment: fund.minimuminvestmentaccepted,
+      form_d_num_investors: fund.totalnumberalreadyinvested,
+      form_d_signer: fund.nameofsigner,
+      form_d_signer_title: fund.signaturetitle,
+      form_d_address: [fund.street1, fund.city, fund.stateorcountry, fund.zipcode].filter(Boolean).join(', '),
+      form_d_first_sale_date: fund.sale_date,
+      form_d_remaining: fund.totalremaining,
+      form_d_sales_commission: fund.salescomm_dollaramount,
+      form_d_finders_fee: fund.findersfee_dollaramount,
+      form_d_has_non_accredited: fund.hasnonaccreditedinvestors,
+      form_d_num_non_accredited: fund.numbernonaccreditedinvestors,
+      form_d_is_amendment: fund.isamendment,
+      form_d_industry: fund.industrygrouptype,
+      form_d_entity_type: fund.entitytype,
+      form_d_jurisdiction: fund.jurisdictionofinc,
       source: 'formd'
     }));
 
@@ -970,6 +1034,102 @@ app.get('/api/discrepancies', async (req, res) => {
   }
 });
 
+// API: Multi-Platform Managers (managers using multiple fund admin platforms)
+app.get('/api/multi-platform-managers', (req, res) => {
+  try {
+    const { searchTerm, platformFilter, minPlatforms = 2, limit = 100, offset = 0 } = req.query;
+    console.log(`[Multi-Platform] Fetching managers - search: ${searchTerm || 'none'}, platform: ${platformFilter || 'all'}, minPlatforms: ${minPlatforms}`);
+
+    let filtered = [...multiPlatformManagers];
+
+    // Filter by minimum platforms
+    if (minPlatforms > 1) {
+      filtered = filtered.filter(m => parseInt(m.num_platforms) >= parseInt(minPlatforms));
+    }
+
+    // Filter by platform
+    if (platformFilter) {
+      const platforms = platformFilter.split(',').map(p => p.trim().toLowerCase());
+      filtered = filtered.filter(m => {
+        const managerPlatforms = (m.platforms_used || '').toLowerCase();
+        return platforms.some(p => managerPlatforms.includes(p));
+      });
+    }
+
+    // Search by manager name, IA firm name, or sample entities
+    if (searchTerm && searchTerm.trim()) {
+      const search = searchTerm.toLowerCase();
+      filtered = filtered.filter(m =>
+        (m.display_name || '').toLowerCase().includes(search) ||
+        (m.ia_firm_name || '').toLowerCase().includes(search) ||
+        (m.sample_entities || '').toLowerCase().includes(search)
+      );
+    }
+
+    // Sort by number of filings (most active first)
+    filtered.sort((a, b) => parseInt(b.num_filings || 0) - parseInt(a.num_filings || 0));
+
+    // Pagination
+    const start = parseInt(offset);
+    const end = start + parseInt(limit);
+    const paginated = filtered.slice(start, end);
+
+    // Transform to API response format
+    const managers = paginated.map(m => {
+      // Parse team_members if it's a JSON string
+      let teamMembers = [];
+      if (m.team_members) {
+        try {
+          teamMembers = JSON.parse(m.team_members.replace(/'/g, '"'));
+        } catch {
+          teamMembers = [];
+        }
+      }
+
+      return {
+        id: m.manager_key,
+        display_name: m.display_name,
+        manager_key: m.manager_key,
+        num_platforms: parseInt(m.num_platforms) || 0,
+        platforms: (m.platforms_used || '').split(', ').filter(Boolean),
+        num_filings: parseInt(m.num_filings) || 0,
+        num_ciks: parseInt(m.num_ciks) || 0,
+        linked_crd: m.linked_crd || null,
+        ia_firm_name: m.ia_firm_name || null,
+        form_adv_url: m.form_adv_url || null,
+        website: m.website || null,
+        linkedin_url: m.linkedin_url || null,
+        phone: m.phone || null,
+        cco_name: m.cco_name || null,
+        cco_email: m.cco_email || null,
+        team_members: teamMembers,
+        sample_entities: (m.sample_entities || '').split(' | ').slice(0, 3),
+        platform_signers: m.platform_signers || null,
+        match_type: m.match_type || null
+      };
+    });
+
+    // Get unique platforms for filter options
+    const allPlatforms = new Set();
+    multiPlatformManagers.forEach(m => {
+      (m.platforms_used || '').split(', ').forEach(p => {
+        if (p.trim()) allPlatforms.add(p.trim());
+      });
+    });
+
+    res.json({
+      success: true,
+      managers,
+      total: filtered.length,
+      platforms: Array.from(allPlatforms).sort(),
+      filters: { searchTerm, platformFilter, minPlatforms }
+    });
+  } catch (error) {
+    console.error('[Multi-Platform] Error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // API: New Managers
 app.get('/api/funds/new-managers', async (req, res) => {
   try {
@@ -1062,13 +1222,26 @@ app.get('/api/funds/new-managers', async (req, res) => {
     });
 
     // Create lookup map for enriched managers
+    // Index by BOTH full name AND parsed umbrella name for better matching
+    const enrichedSeriesPattern = /,?\s+a\s+series\s+of\s+(.+?)(?:\s*,?\s*$|$)/i;
     const enrichedManagersMap = {};
     enrichedManagersData.forEach(em => {
       if (em.series_master_llc) {
-        enrichedManagersMap[em.series_master_llc.toLowerCase()] = em;
+        const fullName = em.series_master_llc.toLowerCase();
+        enrichedManagersMap[fullName] = em;
+
+        // Also index by parsed umbrella name (if it's a series pattern)
+        const emMatch = em.series_master_llc.match(enrichedSeriesPattern);
+        if (emMatch) {
+          const umbrellaName = emMatch[1].trim().toLowerCase();
+          // Only add if not already present (prefer exact match)
+          if (!enrichedManagersMap[umbrellaName]) {
+            enrichedManagersMap[umbrellaName] = em;
+          }
+        }
       }
     });
-    console.log(`  Loaded ${enrichedManagersData.length} enriched managers for matching`);
+    console.log(`  Loaded ${enrichedManagersData.length} enriched managers for matching (indexed by full name + umbrella)`);
 
     // Batch fetch all advisers for matching (include AUM years to detect defunct advisers)
     const advisersData = await fetchAllResultsPaginated((from, to) => {

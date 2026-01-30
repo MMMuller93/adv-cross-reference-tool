@@ -553,6 +553,7 @@ const UserIcon = (p) => <Icon {...p}><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 
 const LogOutIcon = (p) => <Icon {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></Icon>;
 const LockIcon = (p) => <Icon {...p}><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></Icon>;
 const CheckIcon = (p) => <Icon {...p}><path d="M20 6 9 17l-5-5"/></Icon>;
+const LayersIcon = (p) => <Icon {...p}><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/></Icon>;
 
 // ============================================================================
 // PAYWALL MODAL COMPONENT
@@ -1122,7 +1123,7 @@ const HistoricalChart = ({ data, label, color = '#10b981' }) => {
 // ============================================================================
 // SIDEBAR COMPONENT (Gemini style - EXACT match)
 // ============================================================================
-const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters, user, searchCount, onOpenAuth, onLogout, hasPremiumAccess, onShowPaywall }) => {
+const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters, user, searchCount, onOpenAuth, onLogout, hasPremiumAccess, onShowPaywall, mpPlatformFilter, setMpPlatformFilter, mpMinPlatforms, setMpMinPlatforms, availablePlatforms }) => {
   // Premium tabs require sign-in AND payment
   const PREMIUM_TABS = ['new_managers', 'cross_reference'];
   const isPremiumTab = (tabId) => PREMIUM_TABS.includes(tabId);
@@ -1159,6 +1160,7 @@ const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters,
             { id: 'advisers', icon: BriefcaseIcon, label: 'Advisers' },
             { id: 'funds', icon: Building2Icon, label: 'Funds' },
             { id: 'new_managers', icon: TrendingUpIcon, label: 'New Managers', premium: true },
+            { id: 'multi_platform', icon: LayersIcon, label: 'Multi-Platform', premium: true },
             { id: 'cross_reference', icon: FileWarningIcon, label: 'Intelligence Radar', premium: true }
           ].map(item => (
             <button
@@ -1196,7 +1198,7 @@ const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters,
         <div className="space-y-4">
           <div className="px-2 flex items-center justify-between pb-2 border-b border-gray-100">
             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-              {activeTab === 'advisers' ? 'Adviser Parameters' : activeTab === 'funds' ? 'Fund Parameters' : activeTab === 'new_managers' ? 'Discovery Parameters' : 'Analysis Parameters'}
+              {activeTab === 'advisers' ? 'Adviser Parameters' : activeTab === 'funds' ? 'Fund Parameters' : activeTab === 'new_managers' ? 'Discovery Parameters' : activeTab === 'multi_platform' ? 'Platform Parameters' : 'Analysis Parameters'}
             </span>
           </div>
 
@@ -1423,6 +1425,44 @@ const Sidebar = ({ activeTab, setActiveTab, filters, setFilters, onResetFilters,
                   <option value="reviewing">Reviewing</option>
                   <option value="ignored">Ignored</option>
                 </select>
+              </div>
+            </div>
+          )}
+
+          {/* Multi-Platform Filters */}
+          {activeTab === 'multi_platform' && (
+            <div className="space-y-4 px-1">
+              <div className="space-y-2">
+                <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block">PLATFORMS</label>
+                <select
+                  className="w-full px-2.5 py-1.5 text-[11px] border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-gray-400 text-gray-700 bg-white"
+                  value={mpPlatformFilter}
+                  onChange={(e) => setMpPlatformFilter(e.target.value)}
+                >
+                  <option value="">All Platforms</option>
+                  {(availablePlatforms || []).map(p => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block">MINIMUM PLATFORMS</label>
+                <select
+                  className="w-full px-2.5 py-1.5 text-[11px] border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-gray-400 text-gray-700 bg-white"
+                  value={mpMinPlatforms}
+                  onChange={(e) => setMpMinPlatforms(parseInt(e.target.value))}
+                >
+                  <option value="2">2+ Platforms</option>
+                  <option value="3">3+ Platforms</option>
+                </select>
+              </div>
+
+              <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                <div className="text-[10px] font-semibold text-gray-700 mb-2">About Multi-Platform</div>
+                <p className="text-[10px] text-gray-500 leading-relaxed">
+                  These managers file Form Ds through multiple fund admin platforms (Assure, AngelList, Sydecar, etc.), indicating active deal flow across ecosystems.
+                </p>
               </div>
             </div>
           )}
@@ -2476,6 +2516,14 @@ function App() {
   const [funds, setFunds] = useState([]);
   const [crossRefMatches, setCrossRefMatches] = useState([]);
   const [newManagers, setNewManagers] = useState([]);
+  const [multiPlatformManagers, setMultiPlatformManagers] = useState([]);
+  const [multiPlatformTotal, setMultiPlatformTotal] = useState(0);
+  const [availablePlatforms, setAvailablePlatforms] = useState([]);
+
+  // Multi-Platform filters
+  const [mpPlatformFilter, setMpPlatformFilter] = useState('');
+  const [mpMinPlatforms, setMpMinPlatforms] = useState(2);
+  const [mpSearchTerm, setMpSearchTerm] = useState('');
 
   // New Manager filters (initialized from URL, default to last 6 months)
   const [nmStartDate, setNmStartDate] = useState(initialURLState.nmStartDate);
@@ -2779,7 +2827,15 @@ function App() {
         ]);
         break;
       case 'funds':
-        headers = ['Fund Name', 'Adviser', 'CRD', 'Form D Offering', 'ADV AUM', 'Type', 'Exemptions', 'Filing Date', 'State', 'CIK', 'Contact Phone', 'Contact Email', 'Related Parties', 'SEC Filing Link'];
+        headers = [
+          'Fund Name', 'Adviser', 'CRD', 'Form D Offering', 'Amount Sold', 'Amount Remaining',
+          'ADV AUM', 'Type', 'Exemptions', 'Filing Date', 'First Sale Date',
+          'State', 'Jurisdiction', 'Address', 'CIK', 'File Number',
+          'Phone', 'Min Investment', 'Num Investors', 'Non-Accredited Investors',
+          'Signer', 'Signer Title', 'Industry', 'Entity Type', 'Amendment',
+          'Sales Commission', 'Finders Fee',
+          'Related Parties', 'SEC Filing Link'
+        ];
         rows = data.map(f => {
           // Get related parties
           let relatedParties = '';
@@ -2798,15 +2854,30 @@ function App() {
             escapeCSV(f.name || f.fund_name),
             escapeCSV(f.adviser_entity_legal_name),
             escapeCSV(f.adviser_entity_crd || f.crd),
-            escapeCSV(f.form_d_offering_amount || 'N/A'),
+            escapeCSV(f.form_d_offering_amount || (f.form_d_indefinite ? 'Indefinite' : 'N/A')),
+            escapeCSV(f.form_d_amount_sold || f.totalamountsold || 'N/A'),
+            escapeCSV(f.form_d_remaining || 'N/A'),
             escapeCSV(f.latest_gross_asset_value || 'N/A'),
-            escapeCSV(f.fund_type || f.investmentfundtype || 'N/A'),
-            escapeCSV(f.exemptions || f.federalexemptions_items_list || 'N/A'),
-            escapeCSV(f.filing_date || f.datesigned || 'N/A'),
-            escapeCSV(f.stateorcountry || f.state_country || 'N/A'),
+            escapeCSV(f.fund_type || f.investment_fund_type || 'N/A'),
+            escapeCSV(f.exemptions || f.federal_exemptions || 'N/A'),
+            escapeCSV(f.filing_date || f.form_d_filing_date || f.adv_filing_date || 'N/A'),
+            escapeCSV(f.form_d_first_sale_date || 'N/A'),
+            escapeCSV(f.stateorcountry || f.state_of_organization || f.state_country || 'N/A'),
+            escapeCSV(f.form_d_jurisdiction || 'N/A'),
+            escapeCSV(f.form_d_address || 'N/A'),
             escapeCSV(f.cik || 'N/A'),
-            escapeCSV(f.contactphonenumber || 'N/A'),
-            escapeCSV(f.contactemail || 'N/A'),
+            escapeCSV(f.form_d_file_number || 'N/A'),
+            escapeCSV(f.form_d_phone || 'N/A'),
+            escapeCSV(f.form_d_min_investment || 'N/A'),
+            escapeCSV(f.form_d_num_investors || 'N/A'),
+            escapeCSV(f.form_d_has_non_accredited === 'Y' ? `Yes (${f.form_d_num_non_accredited || '?'})` : (f.form_d_has_non_accredited === 'N' ? 'No' : 'N/A')),
+            escapeCSV(f.form_d_signer || 'N/A'),
+            escapeCSV(f.form_d_signer_title || 'N/A'),
+            escapeCSV(f.form_d_industry || 'N/A'),
+            escapeCSV(f.form_d_entity_type || 'N/A'),
+            escapeCSV(f.form_d_is_amendment === 'true' || f.form_d_is_amendment === true ? 'Yes' : 'No'),
+            escapeCSV(f.form_d_sales_commission || 'N/A'),
+            escapeCSV(f.form_d_finders_fee || 'N/A'),
             escapeCSV(relatedParties || 'N/A'),
             escapeCSV(secLink || 'N/A')
           ];
@@ -2901,17 +2972,30 @@ function App() {
         break;
       case 'funds':
         title = 'Private Fund Offerings Export';
-        headers = ['Fund Name', 'Adviser', 'AUM/Offering', 'Type', 'State', 'Filing Date', 'Contact'];
+        headers = ['Fund Name', 'Adviser', 'AUM/Offering', 'Amount Sold', 'Type', 'Exemptions', 'State', 'Filing Date', 'Signer', 'Phone', 'Related Parties'];
         rows = data.map(f => {
-          const contact = f.contactemail || f.contactphonenumber || 'N/A';
+          let relatedParties = '';
+          if (f.related_names) {
+            const names = f.related_names.split('|');
+            const roles = f.related_roles ? f.related_roles.split('|') : [];
+            relatedParties = names
+              .map(n => normalizeRelatedPartyName(n.trim()))
+              .filter(n => n)
+              .map((n, i) => `${n}${roles[i] ? ` (${roles[i].trim()})` : ''}`)
+              .join('; ');
+          }
           return [
             f.name || f.fund_name || 'N/A',
             f.adviser_entity_legal_name || 'N/A',
             formatCurrency(f.latest_gross_asset_value || parseCurrency(f.form_d_offering_amount)),
-            f.fund_type || f.investmentfundtype || 'N/A',
-            f.stateorcountry || f.state_country || 'N/A',
-            formatDate(f.filing_date || f.datesigned) || 'N/A',
-            contact
+            f.form_d_amount_sold || f.totalamountsold || 'N/A',
+            f.fund_type || f.investment_fund_type || 'N/A',
+            f.exemptions || f.federal_exemptions || 'N/A',
+            f.stateorcountry || f.state_of_organization || f.state_country || 'N/A',
+            formatDate(f.filing_date || f.form_d_filing_date || f.adv_filing_date) || 'N/A',
+            f.form_d_signer ? `${f.form_d_signer}${f.form_d_signer_title ? ` (${f.form_d_signer_title})` : ''}` : 'N/A',
+            f.form_d_phone || 'N/A',
+            relatedParties || 'N/A'
           ];
         });
         break;
@@ -3049,7 +3133,7 @@ function App() {
   ];
 
   // Simple version tracking for each search function to prevent stale results
-  const searchVersionRef = useRef({ advisers: 0, funds: 0, crossRef: 0, newManagers: 0 });
+  const searchVersionRef = useRef({ advisers: 0, funds: 0, crossRef: 0, newManagers: 0, multiPlatform: 0 });
 
   // Fetch advisers
   const searchAdvisers = async (currentSearchTerm, currentFilters) => {
@@ -3312,7 +3396,25 @@ function App() {
           investment_fund_type: filing.investmentfundtype,
           related_names: filing.related_names,
           related_roles: filing.related_roles,
-          sort_date: formatFilingDate(filing.filing_date)
+          sort_date: formatFilingDate(filing.filing_date),
+          // Additional Form D fields
+          form_d_file_number: filing.form_d_file_number || filing.file_num,
+          form_d_phone: filing.form_d_phone || filing.issuerphonenumber,
+          form_d_min_investment: filing.form_d_min_investment || filing.minimuminvestmentaccepted,
+          form_d_num_investors: filing.form_d_num_investors || filing.totalnumberalreadyinvested,
+          form_d_signer: filing.form_d_signer || filing.nameofsigner,
+          form_d_signer_title: filing.form_d_signer_title || filing.signaturetitle,
+          form_d_address: filing.form_d_address || [filing.street1, filing.city, filing.stateorcountry, filing.zipcode].filter(Boolean).join(', '),
+          form_d_first_sale_date: filing.form_d_first_sale_date || filing.sale_date,
+          form_d_remaining: filing.form_d_remaining || filing.totalremaining,
+          form_d_sales_commission: filing.form_d_sales_commission || filing.salescomm_dollaramount,
+          form_d_finders_fee: filing.form_d_finders_fee || filing.findersfee_dollaramount,
+          form_d_has_non_accredited: filing.form_d_has_non_accredited || filing.hasnonaccreditedinvestors,
+          form_d_num_non_accredited: filing.form_d_num_non_accredited || filing.numbernonaccreditedinvestors,
+          form_d_is_amendment: filing.form_d_is_amendment || filing.isamendment,
+          form_d_industry: filing.form_d_industry || filing.industrygrouptype,
+          form_d_entity_type: filing.form_d_entity_type || filing.entitytype,
+          form_d_jurisdiction: filing.form_d_jurisdiction || filing.jurisdictionofinc
         });
       });
 
@@ -3543,6 +3645,33 @@ function App() {
     }
   };
 
+  // Fetch multi-platform managers
+  const fetchMultiPlatformManagers = async () => {
+    const myVersion = ++searchVersionRef.current.multiPlatform;
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (mpSearchTerm) params.append('searchTerm', mpSearchTerm);
+      if (mpPlatformFilter) params.append('platformFilter', mpPlatformFilter);
+      if (mpMinPlatforms > 1) params.append('minPlatforms', mpMinPlatforms);
+      params.append('limit', '100');
+
+      const res = await fetch(`/api/multi-platform-managers?${params}`);
+      const result = await res.json();
+      if (myVersion === searchVersionRef.current.multiPlatform) {
+        if (result.success) {
+          setMultiPlatformManagers(result.managers || []);
+          setMultiPlatformTotal(result.total || 0);
+          setAvailablePlatforms(result.platforms || []);
+        }
+        setLoading(false);
+      }
+    } catch (err) {
+      console.error('Error fetching multi-platform managers:', err);
+      if (myVersion === searchVersionRef.current.multiPlatform) setLoading(false);
+    }
+  };
+
   // Handle new managers sorting
   const handleNmSort = (field) => {
     if (nmSortField === field) {
@@ -3689,6 +3818,7 @@ function App() {
       else if (activeTab === 'funds') searchFunds(searchTerm, filters);
       else if (activeTab === 'cross_reference') fetchCrossRef(searchTerm, filters);
       else if (activeTab === 'new_managers') fetchNewManagers();
+      else if (activeTab === 'multi_platform') fetchMultiPlatformManagers();
     };
 
     if (tabChanged) {
@@ -3707,6 +3837,12 @@ function App() {
     if (view !== 'dashboard' || activeTab !== 'new_managers') return;
     fetchNewManagers();
   }, [nmStartDate, nmEndDate, nmFundType, nmState]);
+
+  // Multi-platform filter effect
+  useEffect(() => {
+    if (view !== 'dashboard' || activeTab !== 'multi_platform') return;
+    fetchMultiPlatformManagers();
+  }, [mpPlatformFilter, mpMinPlatforms, mpSearchTerm]);
 
   // Navigate to adviser detail - fetch full data from advisers_enriched
   const handleAdviserClick = async (adviser) => {
@@ -3819,7 +3955,7 @@ function App() {
     }
   };
 
-  const activeCount = activeTab === 'advisers' ? advisers.length : activeTab === 'funds' ? funds.length : activeTab === 'new_managers' ? newManagers.length : crossRefMatches.length;
+  const activeCount = activeTab === 'advisers' ? advisers.length : activeTab === 'funds' ? funds.length : activeTab === 'new_managers' ? newManagers.length : activeTab === 'multi_platform' ? multiPlatformTotal : crossRefMatches.length;
 
   return (
     <div className="flex h-screen bg-gray-50 font-sans text-gray-900 overflow-hidden antialiased selection:bg-slate-100 selection:text-slate-900">
@@ -3857,6 +3993,11 @@ function App() {
           onLogout={handleLogout}
           hasPremiumAccess={hasPremiumAccess}
           onShowPaywall={() => setShowPaywallModal(true)}
+          mpPlatformFilter={mpPlatformFilter}
+          setMpPlatformFilter={setMpPlatformFilter}
+          mpMinPlatforms={mpMinPlatforms}
+          setMpMinPlatforms={setMpMinPlatforms}
+          availablePlatforms={availablePlatforms}
         />
       )}
 
@@ -3914,6 +4055,7 @@ function App() {
                       {activeTab === 'advisers' && 'Adviser Registry'}
                       {activeTab === 'funds' && 'Private Fund Offerings'}
                       {activeTab === 'new_managers' && 'New Managers Discovery'}
+                      {activeTab === 'multi_platform' && 'Multi-Platform Managers'}
                       {activeTab === 'cross_reference' && 'Intelligence Radar'}
                     </h2>
                     <p className="text-[11px] text-gray-500 mt-1 flex items-center gap-2 font-medium">
@@ -4934,6 +5076,192 @@ function App() {
                                   </tr>
                                 ))}
                               </React.Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Multi-Platform Managers Table */}
+                {activeTab === 'multi_platform' && (
+                  <div className="px-4 pb-4 overflow-x-auto">
+                    {/* Filter Bar */}
+                    <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                      <div className="flex flex-wrap items-center gap-4">
+                        {/* Search */}
+                        <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm">
+                          <SearchIcon className="w-4 h-4 text-gray-400" />
+                          <input
+                            type="text"
+                            placeholder="Search managers..."
+                            value={mpSearchTerm}
+                            onChange={(e) => setMpSearchTerm(e.target.value)}
+                            className="px-2 py-1 text-[12px] border-0 bg-transparent focus:outline-none w-48"
+                          />
+                        </div>
+                        {/* Platform Filter */}
+                        <select
+                          value={mpPlatformFilter}
+                          onChange={(e) => setMpPlatformFilter(e.target.value)}
+                          className="px-3 py-2 text-[12px] bg-white border border-gray-200 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer"
+                        >
+                          <option value="">All Platforms</option>
+                          {(availablePlatforms || []).map(p => (
+                            <option key={p} value={p}>{p}</option>
+                          ))}
+                        </select>
+                        {/* Min Platforms Filter */}
+                        <select
+                          value={mpMinPlatforms}
+                          onChange={(e) => setMpMinPlatforms(parseInt(e.target.value))}
+                          className="px-3 py-2 text-[12px] bg-white border border-gray-200 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer"
+                        >
+                          <option value="2">2+ Platforms</option>
+                          <option value="3">3+ Platforms</option>
+                        </select>
+                        {/* Result Count */}
+                        <div className="ml-auto flex items-center gap-2">
+                          {(mpSearchTerm || mpPlatformFilter || mpMinPlatforms > 2) && (
+                            <button
+                              onClick={() => { setMpSearchTerm(''); setMpPlatformFilter(''); setMpMinPlatforms(2); }}
+                              className="px-2 py-1 text-[10px] font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
+                            >
+                              Clear Filters
+                            </button>
+                          )}
+                          <span className="text-[11px] text-gray-600 font-medium bg-white px-3 py-1.5 rounded-full border border-gray-200">
+                            {multiPlatformTotal} managers
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border border-gray-200 rounded-lg overflow-hidden shadow-sm bg-white">
+                      <table className="min-w-full divide-y divide-gray-100">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Manager</th>
+                            <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Platforms</th>
+                            <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Filings</th>
+                            <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-gray-600 uppercase tracking-wider">IA Firm</th>
+                            <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Contact</th>
+                            <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Links</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {(multiPlatformManagers || []).map((manager, idx) => {
+                            const platformColors = {
+                              'angellist': 'bg-blue-100 text-blue-700',
+                              'assure': 'bg-green-100 text-green-700',
+                              'sydecar': 'bg-purple-100 text-purple-700',
+                              'republic': 'bg-orange-100 text-orange-700',
+                              'allocations': 'bg-pink-100 text-pink-700',
+                              'equitybee': 'bg-yellow-100 text-yellow-700',
+                              'equityzen': 'bg-cyan-100 text-cyan-700',
+                              'finally': 'bg-indigo-100 text-indigo-700',
+                              'iangels': 'bg-red-100 text-red-700',
+                              'alt_financial': 'bg-emerald-100 text-emerald-700',
+                              'seed_labs': 'bg-amber-100 text-amber-700',
+                              'clutch_capital': 'bg-rose-100 text-rose-700',
+                              'decile': 'bg-sky-100 text-sky-700',
+                              'vauban': 'bg-lime-100 text-lime-700',
+                            };
+                            return (
+                              <tr key={manager.id} className="group hover:bg-blue-50/50 transition-colors">
+                                <td className="px-4 py-3">
+                                  <div className="min-w-0">
+                                    <div className="text-[12px] font-medium text-gray-900 truncate max-w-[200px]" title={manager.display_name}>
+                                      {manager.display_name}
+                                    </div>
+                                    {manager.sample_entities && Array.isArray(manager.sample_entities) && manager.sample_entities.length > 0 && (
+                                      <div className="text-[10px] text-gray-500 mt-0.5 truncate max-w-[200px]" title={manager.sample_entities[0]}>
+                                        {manager.sample_entities[0]}
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-3">
+                                  <div className="flex flex-wrap gap-1 justify-center">
+                                    {(manager.platforms || []).map(p => (
+                                      <span key={p} className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide rounded ${platformColors[p] || 'bg-gray-100 text-gray-700'}`}>
+                                        {p}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-3 text-center">
+                                  <span className="inline-flex items-center justify-center min-w-[28px] px-2.5 py-1 text-[11px] font-bold bg-gray-100 text-gray-700 rounded-full">
+                                    {manager.num_filings}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-3">
+                                  {manager.ia_firm_name ? (
+                                    <div>
+                                      <div className="text-[11px] font-medium text-gray-700 truncate max-w-[180px]" title={manager.ia_firm_name}>
+                                        {manager.ia_firm_name}
+                                      </div>
+                                      {manager.linked_crd && (
+                                        <div className="text-[10px] text-gray-400">CRD {manager.linked_crd}</div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-[11px] text-gray-400 italic">—</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-3">
+                                  {(manager.phone || manager.cco_email || manager.cco_name) ? (
+                                    <div className="text-[11px]">
+                                      {manager.cco_name && <div className="font-medium text-gray-700">{manager.cco_name}</div>}
+                                      {manager.cco_email && <div className="text-gray-500">{manager.cco_email}</div>}
+                                      {manager.phone && <div className="text-gray-500 font-mono text-[10px]">{manager.phone}</div>}
+                                    </div>
+                                  ) : (
+                                    <span className="text-[11px] text-gray-400 italic">—</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-3">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    {manager.website && (
+                                      <a
+                                        href={manager.website.startsWith('http') ? manager.website : `https://${manager.website}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
+                                        title="Website"
+                                      >
+                                        <GlobeIcon className="w-3.5 h-3.5" />
+                                      </a>
+                                    )}
+                                    {manager.linkedin_url && (
+                                      <a
+                                        href={manager.linkedin_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                        title="LinkedIn"
+                                      >
+                                        <LinkedinIcon className="w-3.5 h-3.5" />
+                                      </a>
+                                    )}
+                                    {manager.form_adv_url && (
+                                      <a
+                                        href={manager.form_adv_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="p-1.5 text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 rounded transition-colors"
+                                        title="Form ADV"
+                                      >
+                                        <FileTextIcon className="w-3.5 h-3.5" />
+                                      </a>
+                                    )}
+                                    {!manager.website && !manager.linkedin_url && !manager.form_adv_url && (
+                                      <span className="text-[11px] text-gray-400 italic">—</span>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
                             );
                           })}
                         </tbody>
