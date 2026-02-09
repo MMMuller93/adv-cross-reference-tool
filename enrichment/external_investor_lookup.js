@@ -18,7 +18,10 @@ let loadPromise = null;  // Singleton promise for lazy init
 // NAME NORMALIZATION (must match external_db_loader.js)
 // ============================================================================
 
-const STRIP_SUFFIXES = /\b(llc|lp|ltd|inc|corp|corporation|company|co|group|holdings|management|advisors|advisers|advisory|consulting|consultants|associates|international|global|partners|fund|funds|capital|ventures|investments|investment|asset|assets|wealth|financial|securities|strategies|strategy|solutions|services|limited|partnership|pllc|plc|sa|ag|gmbh|bv|nv)\b/gi;
+// Only strip legal entity type suffixes — business descriptors (capital, ventures,
+// partners, management, etc.) are DISTINCTIVE and must be preserved to prevent
+// false matches like "Backbone Capital" colliding with "Backbone Ventures".
+const STRIP_SUFFIXES = /\b(llc|lp|ltd|inc|corp|corporation|company|co|limited|partnership|pllc|plc|sa|ag|gmbh|bv|nv)\b/gi;
 const STRIP_ROMAN = /\b(i{1,3}|iv|v|vi{0,3}|ix|x|xi{0,3})\b$/i;
 
 function normalizeName(name) {
@@ -117,27 +120,13 @@ function lookupInvestor(name) {
   if (!name) return null;
 
   const normalized = normalizeName(name);
-  if (!normalized) return null;
+  if (!normalized || normalized.length < 5) return null;
 
-  // Exact normalized match
-  const exact = investorMap.get(normalized);
-  if (exact) return exact;
-
-  // Fallback: try stripping additional trailing words that the suffix regex might miss
-  const words = normalized.split(' ');
-  if (words.length > 1) {
-    // Try dropping last word (e.g., "sequoia capital" -> "sequoia" won't match,
-    // but "blackrock fund advisors" -> "blackrock" might)
-    for (let dropCount = 1; dropCount <= Math.min(2, words.length - 1); dropCount++) {
-      const shorter = words.slice(0, words.length - dropCount).join(' ');
-      if (shorter.length >= 3) {
-        const match = investorMap.get(shorter);
-        if (match) return match;
-      }
-    }
-  }
-
-  return null;
+  // Exact normalized match only — no fallback word-dropping.
+  // Fallback matching caused 91.9% false positive rate by reducing
+  // names like "Backbone Capital Management" to "backbone" and matching
+  // unrelated firms.
+  return investorMap.get(normalized) || null;
 }
 
 /**

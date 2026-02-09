@@ -38,7 +38,10 @@ const BATCH_SIZE = 500;
 // NAME NORMALIZATION
 // ============================================================================
 
-const STRIP_SUFFIXES = /\b(llc|lp|ltd|inc|corp|corporation|company|co|group|holdings|management|advisors|advisers|advisory|consulting|consultants|associates|international|global|partners|fund|funds|capital|ventures|investments|investment|asset|assets|wealth|financial|securities|strategies|strategy|solutions|services|limited|partnership|pllc|plc|sa|ag|gmbh|bv|nv)\b/gi;
+// Only strip legal entity type suffixes — business descriptors (capital, ventures,
+// partners, management, etc.) are DISTINCTIVE and must be preserved to prevent
+// false matches like "Backbone Capital" colliding with "Backbone Ventures".
+const STRIP_SUFFIXES = /\b(llc|lp|ltd|inc|corp|corporation|company|co|limited|partnership|pllc|plc|sa|ag|gmbh|bv|nv)\b/gi;
 const STRIP_ROMAN = /\b(i{1,3}|iv|v|vi{0,3}|ix|x|xi{0,3})\b$/i;
 
 function normalizeName(name) {
