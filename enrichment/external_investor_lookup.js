@@ -21,7 +21,7 @@ let loadPromise = null;  // Singleton promise for lazy init
 // Only strip legal entity type suffixes — business descriptors (capital, ventures,
 // partners, management, etc.) are DISTINCTIVE and must be preserved to prevent
 // false matches like "Backbone Capital" colliding with "Backbone Ventures".
-const STRIP_SUFFIXES = /\b(llc|lp|ltd|inc|corp|corporation|company|co|limited|partnership|pllc|plc|sa|ag|gmbh|bv|nv)\b/gi;
+const STRIP_SUFFIXES = /\b(llc|llp|lllp|lp|ltd|inc|corp|corporation|company|co|gp|limited|partnership|pllc|plc|sa|ag|gmbh|bv|nv)\b/gi;
 const STRIP_ROMAN = /\b(i{1,3}|iv|v|vi{0,3}|ix|x|xi{0,3})\b$/i;
 
 function normalizeName(name) {
@@ -122,11 +122,24 @@ function lookupInvestor(name) {
   const normalized = normalizeName(name);
   if (!normalized || normalized.length < 5) return null;
 
-  // Exact normalized match only — no fallback word-dropping.
-  // Fallback matching caused 91.9% false positive rate by reducing
-  // names like "Backbone Capital Management" to "backbone" and matching
-  // unrelated firms.
-  return investorMap.get(normalized) || null;
+  // 1. Exact normalized match (O(1))
+  const exact = investorMap.get(normalized);
+  if (exact) return exact;
+
+  // 2. Prefix fallback: try progressively shorter prefixes of the input.
+  // Fund entities often append fund-specific words to the firm name:
+  //   "Sequoia Capital Growth Fund" → prefix "Sequoia Capital" matches DB.
+  // Safe because business descriptors are preserved in normalization, so
+  // "Backbone Capital" can never prefix-match "Backbone Ventures".
+  // Require 2+ word prefixes to prevent single-word false positives.
+  const words = normalized.split(' ');
+  for (let len = words.length - 1; len >= 2; len--) {
+    const prefix = words.slice(0, len).join(' ');
+    const match = investorMap.get(prefix);
+    if (match) return match;
+  }
+
+  return null;
 }
 
 /**
