@@ -12,6 +12,7 @@ require('dotenv').config();
 
 const { createClient } = require('@supabase/supabase-js');
 const { enrichAndSaveManager, getUnenrichedManagers, batchEnrich, isAdminUmbrella } = require('./enrichment_engine_v2');
+const { ensureLoaded: ensureExternalDbLoaded } = require('./external_investor_lookup');
 
 // Database connection
 const FORMD_URL = 'https://ltdalxkhbbhmkimmogyq.supabase.co';
@@ -78,7 +79,10 @@ async function getNewManagersSinceLastPoll() {
  */
 async function processNewManagers() {
   console.log(`\n[RealTime] Checking for new managers at ${new Date().toISOString()}`);
-  
+
+  // Ensure external investor DB is loaded before enrichment
+  await ensureExternalDbLoaded(formdClient);
+
   const newManagers = await getNewManagersSinceLastPoll();
   
   if (newManagers.length === 0) {

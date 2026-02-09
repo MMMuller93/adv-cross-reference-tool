@@ -3,6 +3,7 @@ const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const path = require('path');
 const fs = require('fs');
+const { ensureLoaded: ensureExternalDbLoaded, lookupInvestor } = require('./enrichment/external_investor_lookup');
 
 // Stripe setup - only initialize if key is present
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
@@ -239,6 +240,11 @@ function loadMultiPlatformManagersCSV() {
 
 // Load CSV at startup
 loadMultiPlatformManagersCSV();
+
+// Load external investor reference data (OpenVC + Ramp) into memory
+ensureExternalDbLoaded(formdClient).catch(err => {
+  console.error('[ExternalDB] Failed to load at startup:', err.message);
+});
 
 // SEO slug utility (used in redirects)
 function generateSlug(name) {
@@ -1345,6 +1351,30 @@ app.get('/api/funds/new-managers', async (req, res) => {
         };
       } else {
         enrichedManager.has_form_adv = false;
+      }
+
+      // Check external investor databases (OpenVC + Ramp) for supplemental data
+      const extMatch = lookupInvestor(parsedName) || lookupInvestor(manager.series_master_llc);
+      if (extMatch) {
+        const ed = enrichedManager.enrichment_data || {};
+        enrichedManager.enrichment_data = {
+          ...ed,
+          website: ed.website || extMatch.website_url,
+          linkedin: ed.linkedin || extMatch.linkedin_url,
+          twitter: ed.twitter || extMatch.twitter_url,
+          email: ed.email || extMatch.primary_contact_email,
+          fund_type: ed.fund_type || extMatch.investor_type,
+          investment_stage: ed.investment_stage || extMatch.investment_stage,
+          investment_sectors: ed.investment_sectors || extMatch.investment_sectors,
+          check_size_min: extMatch.check_size_min_usd,
+          check_size_max: extMatch.check_size_max_usd,
+          contact_name: extMatch.contact_name,
+          description: extMatch.description,
+          founded_year: extMatch.founded_year,
+          hq_location: extMatch.hq_location,
+          external_db_source: extMatch.source,
+        };
+        enrichedManager.has_external_db = true;
       }
 
       return enrichedManager;

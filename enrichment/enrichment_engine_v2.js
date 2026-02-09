@@ -14,10 +14,12 @@
  * for service providers (compliance, legal, accounting, fund admin)
  */
 
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
 const { createClient } = require('@supabase/supabase-js');
 const OpenAI = require('openai');
+const { ensureLoaded, lookupInvestor } = require('./external_investor_lookup');
 
 // ============================================================================
 // CONFIGURATION
@@ -52,9 +54,14 @@ const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 // ============================================================================
 
 const BLOCKED_DOMAINS = [
-  // Data aggregators
+  // Data aggregators (VC/Fund databases)
   'crunchbase.com', 'pitchbook.com', 'bloomberg.com', 'tracxn.com',
   'cbinsights.com', 'signal.nfx.com', 'dealroom.co', 'harmonic.ai',
+  'inc42.com', 'icoanalytics.org', 'ynos.in', 'f6s.com', 'fundz.net',
+  'venture-radar.com', 'startupranking.com',
+  // Contact/data scraping sites
+  'contactout.com', 'rocketreach.co', 'zoominfo.com', 'apollo.io',
+  'lusha.com', 'signalhire.com', 'hunter.io',
   // Social media (extract separately)
   'linkedin.com', 'twitter.com', 'x.com', 'facebook.com', 'instagram.com',
   'youtube.com', 'tiktok.com', 'reddit.com',
@@ -66,7 +73,12 @@ const BLOCKED_DOMAINS = [
   'venture.angellist.com', 'republic.com', 'wefunder.com', 'seedinvest.com',
   // News/press
   'techcrunch.com', 'forbes.com', 'wsj.com', 'businessinsider.com',
-  'prnewswire.com', 'businesswire.com',
+  'prnewswire.com', 'businesswire.com', 'venturebeat.com', 'eu-startups.com',
+  'streetinsider.com', 'seekingalpha.com', 'marketwatch.com', 'yahoo.com/finance',
+  // Pitch deck / analysis sites
+  'bestpitchdeck.com', 'pitchenvy.com', 'slidebean.com',
+  // Investor list/directory sites
+  'alts.co', 'caphall.com', 'dannyleshem.com',
   // Other
   'wikipedia.org', 'ycombinator.com/companies'
 ];
@@ -82,6 +94,36 @@ const ADMIN_UMBRELLAS = [
   // Other SPV umbrellas
   'stonks spv', 'flow spv', 'republic spv', 'wefunder spv'
 ];
+
+// Platform staff names to filter out from related persons
+// These are standard names that appear on many umbrella platform filings
+const PLATFORM_STANDARD_NAMES = [
+  // AngelList
+  'belltower', 'fund gp', 'angellist', 'avlok kohli',
+  // Sydecar
+  'brett sagan', 'sydecar', 'nik talreja',
+  // Assure
+  'assure', 'jeremy johnson',
+  // Carta
+  'carta', 'carta fund admin',
+  // Finally
+  'finally', 'finally fund admin',
+  // Decile
+  'decile', 'long pham', 'adeo ressi',
+  // Forge
+  'forge', 'forge global',
+  // Allocations
+  'allocations', 'kingsley advani'
+];
+
+/**
+ * Check if a person name matches known platform staff
+ */
+function isPlatformStaffName(name) {
+  if (!name) return false;
+  const nameLower = name.toLowerCase();
+  return PLATFORM_STANDARD_NAMES.some(pn => nameLower.includes(pn));
+}
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -106,21 +148,49 @@ function isAdminUmbrella(name) {
 function parseFundName(name) {
   if (!name) return '';
   let parsed = name;
-  
+
   // Remove common suffixes
   parsed = parsed.replace(/,?\s*(LP|LLC|L\.P\.|L\.L\.C\.|Ltd|Limited|Inc|Incorporated)$/i, '');
-  
-  // Handle "A Series of X" pattern - extract the master LLC
-  const seriesMatch = parsed.match(/,?\s+a\s+series\s+of\s+(.+?)$/i);
-  if (seriesMatch) {
-    parsed = seriesMatch[1].trim();
-  }
-  
+
   // Remove fund numbers
   parsed = parsed.replace(/\s+(Fund\s+)?[IVX]+$/i, '');
   parsed = parsed.replace(/\s+Fund\s+\d+$/i, '');
-  
+
   return parsed.trim();
+}
+
+/**
+ * Extract the ACTUAL fund name from umbrella series patterns
+ * E.g., "ROADSTER CAPITAL, A SERIES OF DECILE START FUND, LP" → "ROADSTER CAPITAL"
+ * This is used BEFORE the umbrella check to avoid skipping real funds
+ */
+function extractActualFundName(fullName) {
+  if (!fullName) return fullName;
+
+  // Pattern: "FUND NAME, A SERIES OF UMBRELLA LLC"
+  const seriesMatch = fullName.match(/^(.+?),?\s+a\s+series\s+of\s+/i);
+  if (seriesMatch) {
+    const actualName = seriesMatch[1].trim();
+    // Verify the extracted name looks like a real fund (not just "Fund I" or similar)
+    if (actualName.length > 5 && !actualName.match(/^Fund\s+[IVX\d]+$/i)) {
+      return actualName; // "ROADSTER CAPITAL"
+    }
+  }
+
+  return fullName;
+}
+
+/**
+ * Normalize manager name for deduplication
+ * "ROADSTER CAPITAL" and "Roadster Capital, LP" should match
+ */
+function normalizeManagerName(name) {
+  if (!name) return '';
+  return name
+    .toLowerCase()
+    .replace(/,?\s*(lp|llc|l\.p\.|l\.l\.c\.|ltd|limited|inc|incorporated)\.?$/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function normalizeUrl(url) {
@@ -336,8 +406,22 @@ function isValidHomepage(url) {
 }
 
 /**
+ * Check if URL looks like a news/article page (not a company homepage)
+ */
+function isNewsOrArticlePage(url) {
+  const urlLower = url.toLowerCase();
+  return urlLower.includes('/news/') || urlLower.includes('/article/') ||
+         urlLower.includes('/blog/') || urlLower.includes('/press/') ||
+         urlLower.includes('/2024/') || urlLower.includes('/2023/') ||
+         urlLower.includes('/2025/') || urlLower.includes('/2026/');
+}
+
+/**
  * Extract website URL from search results
- * Uses strict filtering to avoid aggregators, articles, and documents
+ * Uses three-pass approach:
+ *   1. Domain match (HIGHEST PRIORITY): domain contains fund name words
+ *   2. Title match: fund name appears in page title
+ *   3. First valid homepage: fallback for sites with poor SEO
  */
 function extractWebsite(searchResults, fundName) {
   if (!searchResults?.web?.results) return null;
@@ -345,45 +429,82 @@ function extractWebsite(searchResults, fundName) {
   const results = searchResults.web.results;
   const parsedName = parseFundName(fundName).toLowerCase();
 
-  // First pass: Look for homepages with fund name in title
+  // Get significant words from fund name (length > 3 to avoid "LP", "of", etc.)
+  const fundWords = parsedName.split(' ').filter(w => w.length > 3);
+
+  // PASS 1: Domain match (HIGHEST PRIORITY)
+  // E.g., "Patrick of Co" should match "pco.com" or "patrickofc.com"
+  for (const result of results.slice(0, 5)) {
+    const url = result.url;
+    if (isBlockedDomain(url)) continue;
+    if (isFileUrl(url)) continue;
+    if (isNewsOrArticlePage(url)) continue;
+
+    try {
+      const domain = new URL(url).hostname.replace('www.', '').toLowerCase();
+      // Check if domain contains any significant fund word
+      // E.g., "pco.com" contains "pco", "roadstercapital.com" contains "roadster"
+      const domainMatches = fundWords.some(word => domain.includes(word));
+
+      if (domainMatches && isValidHomepage(url)) {
+        console.log(`[Website] Domain match found: ${url} (matched "${fundWords.find(w => domain.includes(w))}")`);
+        return url;
+      }
+    } catch (e) {
+      // Invalid URL, skip
+    }
+  }
+
+  // PASS 2: Title match (original behavior)
   for (const result of results.slice(0, 8)) {
     const url = result.url;
     const title = (result.title || '').toLowerCase();
 
     if (isBlockedDomain(url)) continue;
     if (isFileUrl(url)) continue;
+    if (isNewsOrArticlePage(url)) continue;
 
-    // Check for article/news patterns in URL
-    const urlLower = url.toLowerCase();
-    if (urlLower.includes('/news/') || urlLower.includes('/article/') ||
-        urlLower.includes('/blog/') || urlLower.includes('/press/') ||
-        urlLower.includes('/2024/') || urlLower.includes('/2023/') ||
-        urlLower.includes('/2025/') || urlLower.includes('/2026/')) {
-      continue;
-    }
-
-    // Prefer if fund name appears in title
+    // Check if first word of fund name appears in title
     if (title.includes(parsedName.split(' ')[0].toLowerCase())) {
       if (isValidHomepage(url)) {
+        console.log(`[Website] Title match found: ${url}`);
         return url;
       }
     }
   }
 
-  // Second pass: Accept any non-blocked, non-article URL that looks like a homepage
-  for (const result of results.slice(0, 5)) {
+  // PASS 3: Fallback - but ONLY if site looks like a VC/fund
+  // Don't just take any random homepage
+  for (const result of results.slice(0, 3)) {
     const url = result.url;
     if (isBlockedDomain(url)) continue;
     if (isFileUrl(url)) continue;
+    if (isNewsOrArticlePage(url)) continue;
 
-    const urlLower = url.toLowerCase();
-    if (urlLower.includes('/news/') || urlLower.includes('/article/')) continue;
+    try {
+      const domain = new URL(url).hostname.toLowerCase();
+      const title = (result.title || '').toLowerCase();
+      const snippet = (result.description || '').toLowerCase();
 
-    if (isValidHomepage(url)) {
-      return url;
+      // Require at least ONE signal that this is a VC/fund website
+      const fundIndicators = ['capital', 'ventures', 'partners', 'venture', 'fund',
+        'investment', 'investor', 'portfolio', 'seed', 'series a', 'vc'];
+
+      const looksLikeFund = fundIndicators.some(indicator =>
+        domain.includes(indicator) || title.includes(indicator) || snippet.includes(indicator)
+      );
+
+      if (looksLikeFund && isValidHomepage(url)) {
+        console.log(`[Website] Fallback match found (fund indicator): ${url}`);
+        return url;
+      }
+    } catch (e) {
+      // Invalid URL, skip
     }
   }
 
+  // Better to return null than pick wrong website
+  console.log(`[Website] No match found - returning null to avoid wrong website`);
   return null;
 }
 
@@ -516,27 +637,67 @@ async function searchLinkedIn(fundName) {
 }
 
 /**
+ * Validate if a LinkedIn profile title indicates the person works at the target fund
+ * Uses strict matching: bigrams for multi-word names, word boundaries for single distinctive words
+ *
+ * @param {string} fundName - The parsed fund name
+ * @param {string} profileTitle - The LinkedIn profile title (e.g., "John Doe - Partner at Acme Capital")
+ * @returns {boolean} - True if this profile appears to be from the target fund
+ */
+function isValidLinkedInMatch(fundName, profileTitle) {
+  const lowerTitle = profileTitle.toLowerCase();
+  const lowerName = fundName.toLowerCase();
+
+  // Method 1: Full fund name appears in title (best match)
+  if (lowerTitle.includes(lowerName)) {
+    return true;
+  }
+
+  // Get word parts for additional checks
+  const nameParts = lowerName.split(' ').filter(w => w.length > 2);
+
+  // Method 2: Check consecutive word pairs (bigrams) for multi-word names
+  // E.g., "Renn Global Ventures" -> check for "renn global" or "global ventures"
+  if (nameParts.length >= 2) {
+    for (let i = 0; i < nameParts.length - 1; i++) {
+      const bigram = `${nameParts[i]} ${nameParts[i + 1]}`;
+      if (lowerTitle.includes(bigram)) {
+        return true;
+      }
+    }
+  }
+
+  // Method 3: For single distinctive word, require exact word boundary match
+  // "Acme" should match "Partner at Acme Capital" but NOT "Partner at Academy Ventures"
+  const genericWords = ['ventures', 'capital', 'partners', 'fund', 'investment',
+                        'management', 'holdings', 'group', 'equity', 'global', 'advisors'];
+  const distinctiveWords = nameParts.filter(w => !genericWords.includes(w));
+
+  if (distinctiveWords.length === 1) {
+    const word = distinctiveWords[0];
+    // Word boundary check: word must appear as standalone word
+    const wordBoundaryRegex = new RegExp(`\\b${word}\\b`, 'i');
+    return wordBoundaryRegex.test(lowerTitle);
+  }
+
+  // Method 4: For all-generic names ("Global Ventures Fund"), require ALL words present
+  if (distinctiveWords.length === 0 && nameParts.length >= 2) {
+    return nameParts.every(word => lowerTitle.includes(word));
+  }
+
+  return false;
+}
+
+/**
  * Search for team members via LinkedIn when website extraction fails
  * Uses search API to find "[Fund Name] team linkedin" profiles
  *
- * STRICT VALIDATION: Only accepts profiles that mention the FULL fund name
- * (or its distinctive multi-word prefix) to prevent false matches like
- * "Global Ventures" matching for "Renn Global Ventures"
+ * STRICT VALIDATION: Uses bigram matching and word boundaries to prevent false matches
+ * like "Andrew Ng" matching for "Decile Group" just because "Ng" appears somewhere
  */
 async function searchTeamLinkedIn(fundName) {
   const parsedName = parseFundName(fundName);
   const teamMembers = [];
-
-  // Get distinctive name parts for validation
-  // For "Renn Global Ventures" -> require "Renn Global" or full name
-  const nameParts = parsedName.toLowerCase().split(' ').filter(w => w.length > 2);
-  // Distinctive prefix = first 2 words (e.g., "renn global") or full name if shorter
-  const distinctivePrefix = nameParts.slice(0, 2).join(' ');
-  const fullNameLower = parsedName.toLowerCase();
-
-  // Common generic words that shouldn't count as matches alone
-  const genericWords = ['ventures', 'capital', 'partners', 'fund', 'investment',
-                        'management', 'holdings', 'group', 'equity', 'global'];
 
   // Search for team members on LinkedIn
   const queries = [
@@ -561,28 +722,7 @@ async function searchTeamLinkedIn(fundName) {
       if (!namePart || namePart.includes('LinkedIn') || namePart.length > 50) continue;
 
       // STRICT VALIDATION: Check if profile is actually associated with THIS fund
-      const lowerTitle = title.toLowerCase();
-
-      // Must contain EITHER:
-      // 1. The full fund name, OR
-      // 2. The distinctive prefix (first 2+ words), OR
-      // 3. At least 2 non-generic words from the fund name
-      const hasFullName = lowerTitle.includes(fullNameLower);
-      const hasDistinctivePrefix = lowerTitle.includes(distinctivePrefix);
-
-      // Count how many non-generic words from fund name appear in title
-      const nonGenericMatches = nameParts.filter(word =>
-        !genericWords.includes(word) && lowerTitle.includes(word)
-      );
-      const hasMultipleNonGenericWords = nonGenericMatches.length >= 2;
-
-      // Also check if only generic words match (should reject)
-      const onlyGenericMatches = nameParts.every(word =>
-        genericWords.includes(word) || !lowerTitle.includes(word) || nonGenericMatches.includes(word)
-      ) && nonGenericMatches.length === 0;
-
-      const isValidMatch = (hasFullName || hasDistinctivePrefix || hasMultipleNonGenericWords)
-                           && !onlyGenericMatches;
+      const isValidMatch = isValidLinkedInMatch(parsedName, title);
 
       if (!isValidMatch) {
         console.log(`[LinkedIn Search] Rejected: "${namePart}" - title doesn't match "${parsedName}" strictly`);
@@ -626,10 +766,12 @@ async function extractRelatedPartiesFromFormD(seriesMasterLlc) {
 
   try {
     // Get Form D filings for this master LLC
+    // NOTE: form_d_filings does NOT have series_master_llc column
+    // Must search by entityname containing "a series of {seriesMasterLlc}"
     const { data: filings, error } = await formdClient
       .from('form_d_filings')
       .select('related_names, related_roles, entityname')
-      .eq('series_master_llc', seriesMasterLlc)
+      .ilike('entityname', `%a series of ${seriesMasterLlc}%`)
       .not('related_names', 'is', null)
       .limit(10);
 
@@ -645,9 +787,18 @@ async function extractRelatedPartiesFromFormD(seriesMasterLlc) {
     ];
 
     // Roles that indicate service providers (filter out)
-    const serviceProviderRoles = [
-      'administrator', 'fund admin', 'custodian', 'legal', 'counsel',
-      'accountant', 'auditor', 'compliance', 'secretary'
+    // Use word boundary regex to avoid false positives like "Chief Legal Officer"
+    const serviceProviderRolePatterns = [
+      /\badministrator\b/i,           // Matches "Administrator" not "Chief Administrator"
+      /\bfund admin\b/i,
+      /\bcustodian\b/i,
+      /\boutside counsel\b/i,         // Matches "Outside Counsel" not "General Counsel"
+      /\bexternal counsel\b/i,
+      /\boutside legal\b/i,
+      /\bexternal legal\b/i,
+      /\baccountant\b/i,
+      /\bauditor\b/i,
+      /\bsecretary\b/i                // Keep "Secretary" as it's often a service role
     ];
 
     for (const filing of filings) {
@@ -657,16 +808,24 @@ async function extractRelatedPartiesFromFormD(seriesMasterLlc) {
       for (let i = 0; i < names.length; i++) {
         const name = names[i];
         const role = roles[i] || '';
-        const roleLower = role.toLowerCase();
 
-        // Skip service providers
-        if (serviceProviderRoles.some(sp => roleLower.includes(sp))) continue;
+        // Skip service providers using word boundary matching
+        // This keeps "Chief Legal Officer", "General Counsel", "Chief Compliance Officer"
+        // but filters "Outside Counsel", "Administrator", "Auditor"
+        if (serviceProviderRolePatterns.some(pattern => pattern.test(role))) continue;
+
+        // Skip platform staff names (Belltower, Brett Sagan, etc.)
+        if (isPlatformStaffName(name)) {
+          console.log(`[Form D] Skipping platform staff: ${name}`);
+          continue;
+        }
 
         // Skip if name looks like a company, not a person
         if (name.includes('LLC') || name.includes('LP') || name.includes('Inc') ||
             name.includes('Corp') || name.includes('Ltd') || name.includes('Fund')) continue;
 
         // Check if this looks like an investment team member
+        const roleLower = role.toLowerCase();
         const isInvestmentTeam = investmentRoles.some(ir => roleLower.includes(ir));
 
         // Add to map (dedupe by name)
@@ -794,7 +953,30 @@ async function extractEmailsFromWebsite(websiteUrl) {
  */
 async function validateWebsiteWithAI(websiteUrl, fundName) {
   if (!openai || !websiteUrl) {
-    return { isValid: true, confidence: 0.5 }; // Default if no AI
+    return { isValid: false, confidence: 0, reason: 'No AI available for validation' };
+  }
+
+  // PRE-CHECK: Domain should have SOME relation to fund name
+  // Catches garbage like realestate-tokyo.com for "Cape Tower LLC"
+  try {
+    const domain = new URL(websiteUrl).hostname.toLowerCase().replace('www.', '');
+    const fundWords = parseFundName(fundName).toLowerCase().split(' ')
+      .filter(w => w.length >= 3 && !['the', 'and', 'for', 'llc', 'inc', 'ltd'].includes(w));
+
+    // Check if ANY fund word appears in domain
+    const hasWordOverlap = fundWords.some(word => domain.includes(word));
+
+    // Allow known VC domain patterns even without word overlap
+    const isVcDomainPattern = /\.(vc|ventures|capital|fund|partners)\./.test(domain) ||
+                              domain.endsWith('.vc') ||
+                              /(ventures|capital|fund|partners)/.test(domain);
+
+    if (!hasWordOverlap && !isVcDomainPattern) {
+      console.log(`[AI Validation] Domain pre-check failed: "${domain}" has no overlap with fund words [${fundWords.join(', ')}]`);
+      return { isValid: false, confidence: 0, reason: `Domain "${domain}" has no relation to fund name` };
+    }
+  } catch (urlError) {
+    // If URL parsing fails, continue to AI validation
   }
 
   try {
@@ -856,10 +1038,13 @@ ${truncatedHtml}`
       return result;
     }
 
-    return { isValid: true, confidence: 0.5 };
+    // FAIL CLOSED: If we can't parse AI response, reject the website
+    console.log(`[AI Validation] Could not parse AI response, rejecting website`);
+    return { isValid: false, confidence: 0, reason: 'AI response parse failed' };
   } catch (error) {
     console.error('[AI Validation] Error:', error.message);
-    return { isValid: true, confidence: 0.5 };
+    // FAIL CLOSED: On any error, reject the website (don't accept garbage)
+    return { isValid: false, confidence: 0, reason: `Validation error: ${error.message}` };
   }
 }
 
@@ -949,48 +1134,67 @@ ${truncatedHtml}`
 }
 
 /**
- * Classify fund type using AI
+ * Get fund type from Form D filing data (preferred: uses authoritative SEC data)
+ * Falls back to basic regex classification if Form D data not available
+ *
+ * @param {string} seriesMasterLlc - The series master LLC name to look up
+ * @param {string} fundName - Fallback fund name for regex classification
+ * @param {object} searchResults - Search results for fallback classification
  */
-async function classifyFundTypeWithAI(fundName, searchResults) {
-  if (!openai) {
-    return classifyFundTypeBasic(fundName, searchResults);
-  }
-  
-  const context = searchResults?.web?.results?.slice(0, 5)
-    .map(r => `${r.title}: ${r.description || ''}`)
-    .join('\n') || '';
-  
+async function getFundTypeFromFormD(seriesMasterLlc, fundName, searchResults) {
   try {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `Classify this fund's type based on its name and search results.
-Return JSON only: {"fundType": "type", "confidence": 0.0-1.0, "investmentStage": "stage or null"}
-Fund types: "Venture Capital", "Private Equity", "Hedge Fund", "Real Estate", "Credit", "Fund of Funds", "SPV Platform", "Operating Company", "Unknown"
-Investment stages (for VC/PE): "Pre-seed", "Seed", "Series A", "Series B", "Growth", "Late-stage", or combinations like "Seed to Series A"`
-        },
-        {
-          role: "user",
-          content: `Fund name: "${fundName}"
-Search results:
-${context}`
-        }
-      ],
-      temperature: 0,
-      max_tokens: 150
-    });
-    
-    const aiResponse = completion.choices[0].message.content;
-    const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+    // Query Form D for investmentfundtype
+    // NOTE: form_d_filings does NOT have series_master_llc column
+    // Must search by entityname containing the umbrella name
+    const { data, error } = await formdClient
+      .from('form_d_filings')
+      .select('investmentfundtype')
+      .ilike('entityname', `%a series of ${seriesMasterLlc}%`)
+      .not('investmentfundtype', 'is', null)
+      .limit(1);
+
+    if (!error && data?.length > 0 && data[0].investmentfundtype) {
+      const formDType = data[0].investmentfundtype.toLowerCase();
+      console.log(`[Fund Type] Found in Form D: ${formDType}`);
+
+      // Map Form D types to our normalized types
+      let fundType = 'Unknown';
+      if (formDType.includes('venture capital')) {
+        fundType = 'Venture Capital';
+      } else if (formDType.includes('private equity')) {
+        fundType = 'Private Equity';
+      } else if (formDType.includes('hedge')) {
+        fundType = 'Hedge Fund';
+      } else if (formDType.includes('real estate')) {
+        fundType = 'Real Estate';
+      } else if (formDType.includes('liquidity') || formDType.includes('credit')) {
+        fundType = 'Credit';
+      } else if (formDType.includes('securitized') || formDType.includes('other private fund')) {
+        fundType = 'Other Private Fund';
+      }
+
+      return {
+        fundType: fundType,
+        confidence: 0.95, // High confidence from authoritative source
+        investmentStage: null,
+        source: 'form_d'
+      };
     }
   } catch (error) {
-    console.error('[AI Classification] Error:', error.message);
+    console.error('[Fund Type] Error querying Form D:', error.message);
   }
-  
+
+  // Fallback to regex classification (no AI needed)
+  console.log(`[Fund Type] Not in Form D, using regex classification`);
+  return classifyFundTypeBasic(fundName, searchResults);
+}
+
+/**
+ * Classify fund type using AI (DEPRECATED - keeping for backwards compatibility)
+ * Prefer getFundTypeFromFormD which uses authoritative Form D data
+ */
+async function classifyFundTypeWithAI(fundName, searchResults) {
+  // Just use basic classification now - Form D data is checked separately
   return classifyFundTypeBasic(fundName, searchResults);
 }
 
@@ -1050,16 +1254,26 @@ async function enrichManager(name, options = {}) {
     enrichment_date: new Date().toISOString()
   };
   
-  // Skip admin umbrellas
-  if (isAdminUmbrella(name)) {
-    console.log(`[Enrichment] Skipping admin umbrella: ${name}`);
+  // Extract actual fund name from umbrella series patterns
+  // E.g., "ROADSTER CAPITAL, A SERIES OF DECILE START FUND" → "ROADSTER CAPITAL"
+  const actualFundName = extractActualFundName(name);
+  const isSeriesFund = actualFundName !== name;
+
+  if (isSeriesFund) {
+    console.log(`[Enrichment] Extracted actual fund name: "${actualFundName}" from "${name}"`);
+  }
+
+  // Only skip if the ACTUAL fund name (not the umbrella) is itself an admin platform
+  if (isAdminUmbrella(actualFundName)) {
+    console.log(`[Enrichment] Skipping admin umbrella: ${actualFundName}`);
     enrichmentData.enrichment_status = 'platform_spv';
     enrichmentData.fund_type = 'SPV Platform';
     enrichmentData.confidence_score = 1.0;
     return enrichmentData;
   }
-  
-  const parsedName = parseFundName(name);
+
+  // Use the actual fund name for searching (not the full umbrella string)
+  const parsedName = parseFundName(actualFundName);
   console.log(`[Enrichment] Parsed name: ${parsedName}`);
   
   // Check Form ADV database first
@@ -1086,55 +1300,118 @@ async function enrichManager(name, options = {}) {
   } catch (error) {
     // Not found in ADV, continue with web search
   }
-  
+
+  // Check external investor databases (OpenVC + Ramp) for pre-enrichment data
+  const extMatch = lookupInvestor(parsedName) || lookupInvestor(actualFundName);
+  if (extMatch) {
+    console.log(`[Enrichment] Found in external DB (${extMatch.source}): ${extMatch.investor_name}`);
+
+    // Pre-fill empty fields from external DB
+    if (!enrichmentData.website_url && extMatch.website_url) {
+      enrichmentData.website_url = extMatch.website_url;
+    }
+    if (!enrichmentData.primary_contact_email && extMatch.primary_contact_email) {
+      enrichmentData.primary_contact_email = extMatch.primary_contact_email;
+    }
+    if (!enrichmentData.linkedin_company_url && extMatch.linkedin_url) {
+      enrichmentData.linkedin_company_url = extMatch.linkedin_url;
+    }
+    if (extMatch.twitter_url) {
+      enrichmentData.twitter_handle = enrichmentData.twitter_handle || extMatch.twitter_url;
+    }
+    if (extMatch.investor_type && !enrichmentData.fund_type) {
+      enrichmentData.fund_type = extMatch.investor_type;
+    }
+    if (extMatch.investment_stage && !enrichmentData.investment_stage) {
+      enrichmentData.investment_stage = extMatch.investment_stage;
+    }
+    if (extMatch.founded_year) {
+      enrichmentData.founded_year = extMatch.founded_year;
+    }
+    if (extMatch.investment_sectors) {
+      enrichmentData.investment_sectors = extMatch.investment_sectors;
+    }
+    if (extMatch.geography_focus || extMatch.hq_location) {
+      enrichmentData.geography_focus = extMatch.geography_focus || extMatch.hq_location;
+    }
+    if (extMatch.check_size_min_usd || extMatch.check_size_max_usd) {
+      enrichmentData.check_size_min = extMatch.check_size_min_usd;
+      enrichmentData.check_size_max = extMatch.check_size_max_usd;
+    }
+
+    // Track provenance
+    if (extMatch.openvc_record) enrichmentData.data_sources.push('openvc');
+    if (extMatch.ramp_record) enrichmentData.data_sources.push('ramp');
+
+    // Add contact as team member if team is empty
+    if (extMatch.contact_name && enrichmentData.team_members.length === 0) {
+      enrichmentData.team_members.push({
+        name: extMatch.contact_name,
+        source: 'external_db'
+      });
+    }
+
+    // Skip web search if core fields already filled (website + email + LinkedIn)
+    if (enrichmentData.website_url && enrichmentData.primary_contact_email && enrichmentData.linkedin_company_url) {
+      enrichmentData.skipped_web_search = true;
+      console.log('[Enrichment] Core fields filled from ADV + external DB, skipping web search');
+    }
+  }
+
   // Search strategies for retry - start with unquoted (more results) then get specific
-  const searchStrategies = [
-    `${parsedName}`,  // Simple unquoted search first - most likely to find website
-    `${parsedName} venture capital`,
-    `"${parsedName}"`,  // Exact match
-    `${parsedName} fund manager`
-  ];
-  
   let searchResults = null;
   let strategyUsed = 0;
-  
-  // Try each search strategy
-  for (let i = 0; i < searchStrategies.length; i++) {
-    const query = searchStrategies[i];
-    enrichmentData.search_queries_used.push(query);
-    
-    console.log(`[Enrichment] Search strategy ${i + 1}: ${query}`);
-    searchResults = await search(query);
-    
-    if (searchResults?.web?.results?.length > 0) {
-      strategyUsed = i + 1;
-      console.log(`[Enrichment] Found ${searchResults.web.results.length} results`);
-      break;
+
+  if (!enrichmentData.skipped_web_search) {
+    const searchStrategies = [
+      `${parsedName}`,  // Simple unquoted search first - most likely to find website
+      `${parsedName} venture capital`,
+      `"${parsedName}"`,  // Exact match
+      `${parsedName} fund manager`
+    ];
+
+    // Try each search strategy
+    for (let i = 0; i < searchStrategies.length; i++) {
+      const query = searchStrategies[i];
+      enrichmentData.search_queries_used.push(query);
+
+      console.log(`[Enrichment] Search strategy ${i + 1}: ${query}`);
+      searchResults = await search(query);
+
+      if (searchResults?.web?.results?.length > 0) {
+        strategyUsed = i + 1;
+        console.log(`[Enrichment] Found ${searchResults.web.results.length} results`);
+        break;
+      }
+
+      await delay(RATE_LIMIT_DELAY_MS);
     }
-    
-    await delay(RATE_LIMIT_DELAY_MS);
-  }
-  
-  if (!searchResults?.web?.results?.length) {
-    console.log(`[Enrichment] No web search results found, trying LinkedIn fallback...`);
 
-    // LinkedIn fallback: Try to find company LinkedIn page even when website search fails
-    await delay(RATE_LIMIT_DELAY_MS);
-    enrichmentData.linkedin_company_url = await searchLinkedIn(parsedName);
+    if (!searchResults?.web?.results?.length) {
+      console.log(`[Enrichment] No web search results found, trying LinkedIn fallback...`);
 
-    if (enrichmentData.linkedin_company_url) {
-      console.log(`[Enrichment] LinkedIn fallback found: ${enrichmentData.linkedin_company_url}`);
-      enrichmentData.data_sources.push('linkedin');
-      enrichmentData.enrichment_status = 'linkedin_only';
-      enrichmentData.flagged_issues.push('no_website_found');
+      // LinkedIn fallback: Try to find company LinkedIn page even when website search fails
+      if (!enrichmentData.linkedin_company_url) {
+        await delay(RATE_LIMIT_DELAY_MS);
+        enrichmentData.linkedin_company_url = await searchLinkedIn(parsedName);
+      }
 
-      // Try to get team info from Form D related parties as additional fallback
-      // (This is done later in the flow for cases with website, but we need it here too)
-    } else {
-      console.log(`[Enrichment] No search results or LinkedIn found`);
-      enrichmentData.enrichment_status = 'no_data_found';
-      enrichmentData.flagged_issues.push('no_search_results');
-      return enrichmentData;
+      if (enrichmentData.linkedin_company_url) {
+        console.log(`[Enrichment] LinkedIn fallback found: ${enrichmentData.linkedin_company_url}`);
+        if (!enrichmentData.data_sources.includes('linkedin')) {
+          enrichmentData.data_sources.push('linkedin');
+        }
+        enrichmentData.enrichment_status = 'linkedin_only';
+        enrichmentData.flagged_issues.push('no_website_found');
+
+        // Try to get team info from Form D related parties as additional fallback
+        // (This is done later in the flow for cases with website, but we need it here too)
+      } else {
+        console.log(`[Enrichment] No search results or LinkedIn found`);
+        enrichmentData.enrichment_status = 'no_data_found';
+        enrichmentData.flagged_issues.push('no_search_results');
+        return enrichmentData;
+      }
     }
   }
   
@@ -1147,21 +1424,29 @@ async function enrichManager(name, options = {}) {
     }
   }
   
-  // Validate website with AI
+  // Validate website with AI - use tiered confidence thresholds
   if (enrichmentData.website_url && !skipValidation) {
-    const validation = await validateWebsiteWithAI(enrichmentData.website_url, name);
+    const validation = await validateWebsiteWithAI(enrichmentData.website_url, actualFundName);
     console.log(`[Enrichment] Website validation: ${JSON.stringify(validation)}`);
-    
+
     if (!validation.isValid || validation.confidence < 0.5) {
-      console.log(`[Enrichment] Website failed validation, clearing`);
+      // Low confidence (< 0.5): Discard website - be strict to avoid garbage
+      console.log(`[Enrichment] Website failed validation (confidence ${validation.confidence}), clearing`);
       enrichmentData.website_url = null;
       enrichmentData.data_sources = enrichmentData.data_sources.filter(s => s !== 'website');
       enrichmentData.flagged_issues.push('website_validation_failed');
+    } else if (validation.confidence < 0.75) {
+      // Medium confidence (0.5-0.75): Keep but flag for review
+      console.log(`[Enrichment] Website borderline (confidence ${validation.confidence}), flagging for review`);
+      enrichmentData.flagged_issues.push('website_needs_review');
     }
+    // High confidence (>= 0.75): Accept without flagging
   }
   
   // Extract LinkedIn - try multiple methods
-  enrichmentData.linkedin_company_url = extractLinkedIn(searchResults);
+  if (!enrichmentData.linkedin_company_url) {
+    enrichmentData.linkedin_company_url = extractLinkedIn(searchResults);
+  }
 
   // Method 2: Extract directly from website HTML (no API needed!)
   let websiteLinkedInData = null;
@@ -1203,10 +1488,12 @@ async function enrichManager(name, options = {}) {
     console.log(`[Enrichment] LinkedIn: ${enrichmentData.linkedin_company_url}`);
   }
   
-  // Extract Twitter
-  console.log(`[Enrichment] Searching Twitter...`);
-  await delay(RATE_LIMIT_DELAY_MS);
-  enrichmentData.twitter_handle = await searchTwitter(parsedName);
+  // Extract Twitter (skip API call if already have from external DB)
+  if (!enrichmentData.twitter_handle) {
+    console.log(`[Enrichment] Searching Twitter...`);
+    await delay(RATE_LIMIT_DELAY_MS);
+    enrichmentData.twitter_handle = await searchTwitter(parsedName);
+  }
   if (enrichmentData.twitter_handle) {
     enrichmentData.data_sources.push('twitter');
     console.log(`[Enrichment] Twitter: ${enrichmentData.twitter_handle}`);
@@ -1277,10 +1564,11 @@ async function enrichManager(name, options = {}) {
   }
 
   // FALLBACK 1: If no team members from website, search LinkedIn for team
+  // Use actualFundName (not full umbrella string) for better search results
   if (enrichmentData.team_members.length === 0) {
     console.log(`[Enrichment] No team from website - trying LinkedIn search fallback...`);
     await delay(RATE_LIMIT_DELAY_MS);
-    const linkedInTeam = await searchTeamLinkedIn(name);
+    const linkedInTeam = await searchTeamLinkedIn(actualFundName);
     if (linkedInTeam.length > 0) {
       enrichmentData.team_members = linkedInTeam;
       enrichmentData.data_sources.push('team_linkedin_search');
@@ -1289,50 +1577,49 @@ async function enrichManager(name, options = {}) {
   }
 
   // FALLBACK 2: Cross-reference with Form D related parties
-  // SKIP for fund admin platforms - their related parties are platform contacts, not the actual fund team
-  if (!isAdminUmbrella(name)) {
-    console.log(`[Enrichment] Cross-referencing with Form D related parties...`);
-    const formDRelatedParties = await extractRelatedPartiesFromFormD(name);
+  // For umbrella series, the related parties may include the actual fund manager
+  console.log(`[Enrichment] Cross-referencing with Form D related parties...`);
+  const formDRelatedParties = await extractRelatedPartiesFromFormD(name); // Use original name to match DB
 
-    if (formDRelatedParties.length > 0) {
-      // Merge with existing team (Form D as supplementary, not replacement)
-      const existingNames = new Set(enrichmentData.team_members.map(m => m.name?.toLowerCase()));
+  if (formDRelatedParties.length > 0) {
+    // Merge with existing team (Form D as supplementary, not replacement)
+    const existingNames = new Set(enrichmentData.team_members.map(m => m.name?.toLowerCase()));
 
-      for (const formDPerson of formDRelatedParties) {
-        const nameKey = formDPerson.name?.toLowerCase();
-        if (nameKey && !existingNames.has(nameKey)) {
-          // Add Form D person to team
-          enrichmentData.team_members.push({
-            name: formDPerson.name,
-            title: formDPerson.title,
-            email: null,
-            linkedin: null,
-            source: 'form_d'
-          });
-          existingNames.add(nameKey);
-        } else if (nameKey && existingNames.has(nameKey)) {
-          // Fill in title from Form D if missing
-          const existing = enrichmentData.team_members.find(m => m.name?.toLowerCase() === nameKey);
-          if (existing && !existing.title && formDPerson.title) {
-            existing.title = formDPerson.title;
-          }
+    for (const formDPerson of formDRelatedParties) {
+      const nameKey = formDPerson.name?.toLowerCase();
+      if (nameKey && !existingNames.has(nameKey)) {
+        // Add Form D person to team
+        enrichmentData.team_members.push({
+          name: formDPerson.name,
+          title: formDPerson.title,
+          email: null,
+          linkedin: null,
+          source: 'form_d'
+        });
+        existingNames.add(nameKey);
+      } else if (nameKey && existingNames.has(nameKey)) {
+        // Fill in title from Form D if missing
+        const existing = enrichmentData.team_members.find(m => m.name?.toLowerCase() === nameKey);
+        if (existing && !existing.title && formDPerson.title) {
+          existing.title = formDPerson.title;
         }
       }
-
-      if (!enrichmentData.data_sources.includes('form_d_related')) {
-        enrichmentData.data_sources.push('form_d_related');
-      }
-      console.log(`[Enrichment] Team after Form D merge: ${enrichmentData.team_members.length} members`);
     }
-  } else {
-    console.log(`[Enrichment] Skipping Form D related parties for admin umbrella platform`);
+
+    if (!enrichmentData.data_sources.includes('form_d_related')) {
+      enrichmentData.data_sources.push('form_d_related');
+    }
+    console.log(`[Enrichment] Team after Form D merge: ${enrichmentData.team_members.length} members`);
   }
 
-  // Classify fund type
-  const classification = await classifyFundTypeWithAI(name, searchResults);
+  // Classify fund type - use Form D data first (authoritative), then regex fallback
+  const classification = await getFundTypeFromFormD(name, actualFundName, searchResults);
   enrichmentData.fund_type = classification.fundType;
   enrichmentData.investment_stage = classification.investmentStage || null;
-  console.log(`[Enrichment] Classification: ${enrichmentData.fund_type} (${classification.confidence})`);
+  if (classification.source === 'form_d') {
+    enrichmentData.data_sources.push('form_d_fundtype');
+  }
+  console.log(`[Enrichment] Classification: ${enrichmentData.fund_type} (${classification.confidence}, source: ${classification.source || 'regex'})`);
   
   // Calculate confidence score
   let confidence = 0;
@@ -1364,22 +1651,65 @@ async function enrichManager(name, options = {}) {
 }
 
 /**
- * Save enrichment data to database
+ * Save enrichment data to database with deduplication
+ * Checks for existing records by normalized name (if column exists) to prevent duplicates like
+ * "ROADSTER CAPITAL" and "Roadster Capital, LP" creating separate entries
  */
 async function saveEnrichment(enrichmentData) {
   try {
-    const { data, error } = await formdClient
+    const normalizedName = normalizeManagerName(enrichmentData.series_master_llc);
+
+    // Try to find existing record by series_master_llc first (always works)
+    const { data: existingByName } = await formdClient
+      .from('enriched_managers')
+      .select('id, series_master_llc')
+      .eq('series_master_llc', enrichmentData.series_master_llc)
+      .limit(1);
+
+    // Also check by normalized name using ilike (case-insensitive partial match)
+    // This catches "ROADSTER CAPITAL" and "Roadster Capital, LP" as same manager
+    const { data: existingByNormalized } = await formdClient
+      .from('enriched_managers')
+      .select('id, series_master_llc')
+      .ilike('series_master_llc', `%${normalizedName}%`)
+      .limit(5);
+
+    // Find exact normalized match
+    const exactMatch = (existingByNormalized || []).find(e =>
+      normalizeManagerName(e.series_master_llc) === normalizedName
+    );
+
+    const existing = existingByName?.[0] || exactMatch;
+
+    if (existing) {
+      // Update existing record
+      console.log(`[Save] Found existing record for "${existing.series_master_llc}", updating...`);
+      const { error } = await formdClient
+        .from('enriched_managers')
+        .update(enrichmentData)
+        .eq('id', existing.id);
+
+      if (error) {
+        console.error('[Save] Update error:', error.message);
+        return false;
+      }
+      console.log(`[Save] Updated enrichment for: ${enrichmentData.series_master_llc}`);
+      return true;
+    }
+
+    // No existing record, insert new
+    const { error } = await formdClient
       .from('enriched_managers')
       .upsert(enrichmentData, {
         onConflict: 'series_master_llc',
         ignoreDuplicates: false
       });
-    
+
     if (error) {
       console.error('[Save] Error:', error.message);
       return false;
     }
-    
+
     console.log(`[Save] Saved enrichment for: ${enrichmentData.series_master_llc}`);
     return true;
   } catch (error) {
@@ -1403,23 +1733,32 @@ async function enrichAndSaveManager(name, options = {}) {
 async function getUnenrichedManagers(limit = 50, daysBack = 30) {
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - daysBack);
-  
-  // Get recent Form D filings with series master pattern
+
+  // Get recent Form D filings with series pattern in entityname
+  // NOTE: form_d_filings does NOT have series_master_llc column - must parse from entityname
   const { data: filings, error } = await formdClient
     .from('form_d_filings')
-    .select('series_master_llc, first_time_detected_date')
-    .not('series_master_llc', 'is', null)
-    .gte('first_time_detected_date', cutoffDate.toISOString())
-    .order('first_time_detected_date', { ascending: false })
+    .select('entityname, filing_date')
+    .ilike('entityname', '%a series of%')
+    .gte('filing_date', cutoffDate.toISOString().split('T')[0])
+    .order('filing_date', { ascending: false })
     .limit(500);
-  
+
   if (error || !filings) {
     console.error('[GetUnenriched] Error:', error?.message);
     return [];
   }
-  
-  // Get unique series masters
-  const uniqueManagers = [...new Set(filings.map(f => f.series_master_llc))];
+
+  // Parse umbrella names from entity names
+  const seriesPattern = /,?\s+a\s+series\s+of\s+(.+?)(?:\s*,?\s*$|$)/i;
+  const uniqueManagers = [...new Set(
+    filings
+      .map(f => {
+        const match = (f.entityname || '').match(seriesPattern);
+        return match ? match[1].trim() : null;
+      })
+      .filter(Boolean)
+  )];
   
   // Filter out already enriched
   const { data: enriched } = await formdClient
@@ -1430,8 +1769,13 @@ async function getUnenrichedManagers(limit = 50, daysBack = 30) {
   const enrichedSet = new Set((enriched || []).map(e => e.series_master_llc));
   
   // Filter out admin umbrellas and already enriched
+  // Use extractActualFundName to avoid skipping umbrella series with real fund names
   const unenriched = uniqueManagers
-    .filter(m => !enrichedSet.has(m) && !isAdminUmbrella(m))
+    .filter(m => {
+      if (enrichedSet.has(m)) return false;
+      const actualName = extractActualFundName(m);
+      return !isAdminUmbrella(actualName); // Check the actual fund name, not the umbrella
+    })
     .slice(0, limit);
   
   console.log(`[GetUnenriched] Found ${unenriched.length} unenriched managers`);
@@ -1480,7 +1824,9 @@ module.exports = {
   getUnenrichedManagers,
   batchEnrich,
   parseFundName,
+  extractActualFundName,
   isAdminUmbrella,
+  isValidLinkedInMatch,
   extractEmailsFromWebsite,
   extractTeamWithAI,
   validateWebsiteWithAI,
