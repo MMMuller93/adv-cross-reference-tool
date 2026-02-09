@@ -1153,6 +1153,9 @@ app.get('/api/funds/new-managers', async (req, res) => {
         q = q.ilike('entityname', '%a series of%');
       }
 
+      // Exclude amendments - only show original Form D filings (not D/A)
+      q = q.neq('isamendment', 'true');
+
       // Always apply date filter (default to last 12 months for performance)
       q = q.gte('filing_date', defaultStartDate);
       if (endDate) q = q.lte('filing_date', endDate);
