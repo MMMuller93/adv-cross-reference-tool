@@ -1,0 +1,30 @@
+name: Check Cross-Reference Freshness
+
+on:
+  schedule:
+    # Run every Tuesday at 5 AM UTC (12 AM EST) — gives Sunday refresh
+    # ~36 hours to land before tripwire would otherwise consider it stale.
+    - cron: '0 5 * * 2'
+  workflow_dispatch:
+
+jobs:
+  check-freshness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # No deps needed — script uses stdlib only
+
+      - name: Check cross_reference_matches freshness
+        env:
+          FORMD_URL: ${{ secrets.FORMD_SUPABASE_URL }}
+          FORMD_KEY: ${{ secrets.FORMD_SUPABASE_KEY }}
+        run: |
+          python scripts/check_cross_reference_freshness.py --max-days 14

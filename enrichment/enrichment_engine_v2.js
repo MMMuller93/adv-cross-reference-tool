@@ -1749,18 +1749,42 @@ async function enrichManager(name, options = {}) {
 }
 
 /**
- * Save enrichment data to database with deduplication
- * Checks for existing records by normalized name (if column exists) to prevent duplicates like
- * "ROADSTER CAPITAL" and "Roadster Capital, LP" creating separate entries
+ * Save enrichment data to database with deduplication AND preserve-existing.
+ *
+ * Per Codex review 2026-05-11: previously, this function did `update(enrichmentData)`
+ * which overwrote the ENTIRE row including manually-edited fields. A user who had
+ * curated a manager's portfolio_companies, internal_notes, or fixed a wrong
+ * website would lose that work the next time enrich_recent.js ran.
+ *
+ * Preserve-existing policy (default):
+ *   - existing.enrichment_status = 'manually_verified' → skip update entirely
+ *     (preserve all manual work)
+ *   - existing.enrichment_status = 'auto_enriched' → field-by-field merge;
+ *     only fill fields where the existing value is null/empty
+ *     (don't undo previous successful auto enrichment)
+ *   - existing.enrichment_status in {null, 'no_data_found', 'needs_manual_review',
+ *     'platform_spv', 'pending'} → overwrite (those states have no useful data
+ *     to preserve)
+ *
+ * Override: pass `{ forceRefresh: true }` to overwrite regardless of status.
+ *
+ * @param {object} enrichmentData - The enrichment payload (return value of enrichManager)
+ * @param {object} [opts]
+ * @param {boolean} [opts.forceRefresh=false] - Bypass preserve-existing logic
  */
-async function saveEnrichment(enrichmentData) {
+async function saveEnrichment(enrichmentData, opts = {}) {
+  const forceRefresh = !!opts.forceRefresh;
+
+  // Never-overwrite columns (audit/identity)
+  const IMMUTABLE_FIELDS = new Set(['id', 'created_at', 'reviewed_at', 'reviewed_by']);
+
   try {
     const normalizedName = normalizeManagerName(enrichmentData.series_master_llc);
 
     // Try to find existing record by series_master_llc first (always works)
     const { data: existingByName } = await formdClient
       .from('enriched_managers')
-      .select('id, series_master_llc')
+      .select('*')
       .eq('series_master_llc', enrichmentData.series_master_llc)
       .limit(1);
 
@@ -1768,7 +1792,7 @@ async function saveEnrichment(enrichmentData) {
     // This catches "ROADSTER CAPITAL" and "Roadster Capital, LP" as same manager
     const { data: existingByNormalized } = await formdClient
       .from('enriched_managers')
-      .select('id, series_master_llc')
+      .select('*')
       .ilike('series_master_llc', `%${normalizedName}%`)
       .limit(5);
 
@@ -1780,25 +1804,67 @@ async function saveEnrichment(enrichmentData) {
     const existing = existingByName?.[0] || exactMatch;
 
     if (existing) {
-      // Update existing record
-      console.log(`[Save] Found existing record for "${existing.series_master_llc}", updating...`);
+      const existingStatus = existing.enrichment_status;
+
+      // Preserve manually-verified rows entirely
+      if (!forceRefresh && existingStatus === 'manually_verified') {
+        console.log(`[Save] Skipping "${existing.series_master_llc}" — enrichment_status=manually_verified (use forceRefresh:true to override)`);
+        return true;
+      }
+
+      // Decide which existing fields to preserve
+      let payload;
+      if (forceRefresh) {
+        // Overwrite everything (legacy behavior)
+        payload = { ...enrichmentData };
+      } else if (existingStatus === 'auto_enriched') {
+        // Field-by-field merge: only fill nulls in the existing row
+        payload = {};
+        for (const [k, v] of Object.entries(enrichmentData)) {
+          if (IMMUTABLE_FIELDS.has(k)) continue;
+          const cur = existing[k];
+          const curIsEmpty = cur === null || cur === undefined ||
+            (typeof cur === 'string' && cur.trim() === '') ||
+            (Array.isArray(cur) && cur.length === 0);
+          const newIsEmpty = v === null || v === undefined ||
+            (typeof v === 'string' && v.trim() === '') ||
+            (Array.isArray(v) && v.length === 0);
+          // Only set if existing is empty AND new has a value
+          if (curIsEmpty && !newIsEmpty) payload[k] = v;
+        }
+        // Always refresh the bookkeeping fields
+        payload.last_updated = new Date().toISOString();
+        payload.enrichment_date = enrichmentData.enrichment_date || payload.last_updated;
+        if (Object.keys(payload).length <= 2) {
+          // Only bookkeeping changed → nothing meaningful to update
+          console.log(`[Save] "${existing.series_master_llc}" already populated; only timestamps updated`);
+        }
+      } else {
+        // Status in {null, no_data_found, needs_manual_review, platform_spv, pending}
+        // → overwrite (no useful prior data)
+        payload = { ...enrichmentData };
+        IMMUTABLE_FIELDS.forEach(k => delete payload[k]);
+      }
+
+      console.log(`[Save] Updating "${existing.series_master_llc}" (existing_status=${existingStatus || 'null'}, mode=${forceRefresh ? 'force' : existingStatus === 'auto_enriched' ? 'fill-empty' : 'overwrite'})`);
       const { error } = await formdClient
         .from('enriched_managers')
-        .update(enrichmentData)
+        .update(payload)
         .eq('id', existing.id);
 
       if (error) {
         console.error('[Save] Update error:', error.message);
         return false;
       }
-      console.log(`[Save] Updated enrichment for: ${enrichmentData.series_master_llc}`);
       return true;
     }
 
     // No existing record, insert new
+    const insertPayload = { ...enrichmentData };
+    IMMUTABLE_FIELDS.forEach(k => delete insertPayload[k]);
     const { error } = await formdClient
       .from('enriched_managers')
-      .upsert(enrichmentData, {
+      .upsert(insertPayload, {
         onConflict: 'series_master_llc',
         ignoreDuplicates: false
       });
@@ -1808,7 +1874,7 @@ async function saveEnrichment(enrichmentData) {
       return false;
     }
 
-    console.log(`[Save] Saved enrichment for: ${enrichmentData.series_master_llc}`);
+    console.log(`[Save] Inserted enrichment for: ${enrichmentData.series_master_llc}`);
     return true;
   } catch (error) {
     console.error('[Save] Error:', error.message);

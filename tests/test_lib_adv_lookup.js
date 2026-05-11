@@ -110,6 +110,26 @@ t('Sydecar via signer name (Brett Sagan) → detected', () => {
   assert.strictEqual(p.platform_name, 'Sydecar');
 });
 
+console.log('\nMeaningful-base-name guard (prevents substring-collision FPs):');
+// These tests document Strategy 1's gating behavior. Strategy 1 should run on
+// names that have a distinctive token, and should NOT run on names that reduce
+// to generic vocabulary alone.
+const advLookup = require('../lib/adv_lookup');
+function shouldRunStrategy1(name) {
+  const base = advLookup.extractBaseName(name);
+  const ROMAN_RE = /^[ivx]+$/i;
+  const meaningful = base.split(/\s+/).filter(tok =>
+    tok.length >= 3 && !advLookup.NAME_STOPWORDS.has(tok.toLowerCase()) && !ROMAN_RE.test(tok)
+  );
+  return Boolean(base && base.length >= 3 && meaningful.length >= 1);
+}
+t('"Fund I, LP" → strategy 1 skipped (would FP-match Fund II)', () => assert.strictEqual(shouldRunStrategy1('Fund I, LP'), false));
+t('"Capital LP" → strategy 1 skipped', () => assert.strictEqual(shouldRunStrategy1('Capital LP'), false));
+t('"The Fund" → strategy 1 skipped', () => assert.strictEqual(shouldRunStrategy1('The Fund'), false));
+t('"Patricof Co. Master, LLC" → strategy 1 runs', () => assert.strictEqual(shouldRunStrategy1('Patricof Co. Master, LLC'), true));
+t('"KIG GP, LLC" → strategy 1 runs', () => assert.strictEqual(shouldRunStrategy1('KIG GP, LLC'), true));
+t('"Sequoia Capital" → strategy 1 runs (distinctive Sequoia)', () => assert.strictEqual(shouldRunStrategy1('Sequoia Capital'), true));
+
 console.log('\nManagement title allowlist sanity:');
 t('MANAGING MEMBER present', () => assert.ok(MANAGEMENT_OWNER_TITLES.includes('MANAGING MEMBER')));
 t('CHIEF COMPLIANCE OFFICER NOT present (service title)', () => assert.ok(!MANAGEMENT_OWNER_TITLES.includes('CHIEF COMPLIANCE OFFICER')));

@@ -175,6 +175,29 @@ def normalize_file_number(file_num):
     return str(file_num).strip()
 
 
+def split_file_numbers(file_num):
+    """
+    Split a file_number field that may contain MULTIPLE values.
+
+    funds_enriched.form_d_file_number can have multi-value strings like
+    '021-288066; 021-288065' when a fund has multiple Form D filings. The
+    semicolon-joined form is from raw IAPD data. POC5b (2026-05-06) found
+    at least 61 funds with this pattern.
+
+    Returns a list of normalized file numbers, or [] if input is empty.
+    """
+    if not file_num:
+        return []
+    raw = str(file_num).strip()
+    # Split on common multi-value delimiters: semicolon, comma, pipe
+    parts = []
+    for chunk in raw.replace('|', ';').replace(',', ';').split(';'):
+        normalized = chunk.strip()
+        if normalized:
+            parts.append(normalized)
+    return parts
+
+
 def compute_matches():
     """
     Main matching algorithm - uses TWO strategies:
@@ -256,12 +279,15 @@ def compute_matches():
         match_method = None
 
         # PRIMARY: Try file number matching first (100% accurate)
-        adv_file_num = normalize_file_number(adv_fund.get('form_d_file_number'))
-        if adv_file_num:
-            formd_filing = formd_file_num_map.get(adv_file_num)
-            if formd_filing:
+        # ADV side can have multi-value strings like "021-X; 021-Y" — try each.
+        adv_file_nums = split_file_numbers(adv_fund.get('form_d_file_number'))
+        for fn in adv_file_nums:
+            candidate = formd_file_num_map.get(fn)
+            if candidate:
+                formd_filing = candidate
                 match_method = 'file_num'
                 file_num_match_count += 1
+                break
 
         # FALLBACK: Try name matching if no file number match
         if not formd_filing:
