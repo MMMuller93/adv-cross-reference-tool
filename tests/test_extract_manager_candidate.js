@@ -114,5 +114,17 @@ t('Large related-persons list → NO family-office tag', () => {
   assert.ok(!tags.some(t => t.tag === 'likely_family_office'), 'should not tag family-office on 10-person list');
 });
 
+t('Entity related_names ending in LLC → NO family-office FP (prod bug 2026-05-11)', () => {
+  // Form D's "related_names" list often includes ENTITY owners ending in LLC/LP.
+  // The old code took "LLC" as the surname and falsely clustered them.
+  const tags = classifyExemptions({ stateorcountry: 'NY', related_names: 'Acme Holdings LLC|Beta Capital LLC|Gamma Group LLC' });
+  assert.ok(!tags.some(t => t.tag === 'likely_family_office'), `entity suffixes must not count as shared surname; got: ${JSON.stringify(tags)}`);
+});
+
+t('Mixed entities and one person with shared surname → still no family-office on entities', () => {
+  const tags = classifyExemptions({ stateorcountry: 'NY', related_names: 'Acme Holdings LLC|John Doe' });
+  assert.ok(!tags.some(t => t.tag === 'likely_family_office'), 'one person + one entity should not match');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

@@ -163,12 +163,22 @@ function classifyExemptions(data) {
     }
 
     if (data.related_names) {
+        // Strip legal entity suffixes that get picked up as "surnames" otherwise.
+        // Production bug 2026-05-11: "2/3 related persons share surname 'LLC'"
+        // because related_names list contained entity names ending in LLC.
+        const ENTITY_SUFFIXES = new Set(['LLC','L.L.C.','LP','L.P.','LLP','LTD','LIMITED','INC','INCORPORATED','CORP','CORPORATION','CO','GP','LLLP','PLLC','PLC','SA','AG','GMBH','BV','NV','TRUST','TRUSTEE']);
         const persons = data.related_names.split('|').map(n => n.trim()).filter(Boolean);
         if (persons.length > 0 && persons.length <= 4) {
             const surnames = persons.map(p => {
-                const parts = p.split(/[\s,]+/).filter(Boolean);
-                return (parts[parts.length - 1] || '').toUpperCase();
+                // Strip trailing entity suffixes before extracting last token
+                let cleaned = p.replace(/[,.]?\s*(LLC|L\.L\.C\.|LP|L\.P\.|LLP|LTD|LIMITED|INC|INCORPORATED|CORP|CORPORATION|GP|LLLP|PLLC|PLC|SA|AG|GMBH|BV|NV|TRUST|TRUSTEE)\.?\s*$/i, '').trim();
+                const parts = cleaned.split(/[\s,]+/).filter(Boolean);
+                const last = (parts[parts.length - 1] || '').toUpperCase();
+                // Also reject any single token that IS itself a legal suffix
+                if (ENTITY_SUFFIXES.has(last)) return '';
+                return last;
             }).filter(s => s.length >= 3);
+            if (surnames.length < 2) return tags; // not enough person-level surnames
             const surnameCounts = {};
             surnames.forEach(s => { surnameCounts[s] = (surnameCounts[s] || 0) + 1; });
             const sharedSurname = Object.entries(surnameCounts).find(([s, c]) => c >= 2);
