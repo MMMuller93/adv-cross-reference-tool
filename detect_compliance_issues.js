@@ -14,6 +14,8 @@
  */
 
 const { createClient } = require('@supabase/supabase-js');
+const { extractBaseName, checkAdvDatabase, parseRelatedPersons } = require('./lib/adv_lookup');
+const { detectPlatform } = require('./lib/platform_detection');
 
 // Database configuration - use environment variables for GitHub Actions, fallback to defaults for local dev
 const SUPABASE_URL = process.env.ADV_URL || 'https://ezuqwwffjgfzymqxsctq.supabase.co';
@@ -71,82 +73,112 @@ function parseFundName(name) {
 }
 
 /**
- * Extract base company name for ADV registration matching
- *
- * IMPORTANT: GP entity names in Form D often differ from registered adviser names.
- * Examples:
- *   - "KIG GP, LLC" registers as "KIG INVESTMENT MANAGEMENT, LLC"
- *   - "Akahi Capital Management, LLC" registers as "AKAHI CAPITAL MANAGEMENT"
- *   - "HighVista GP LLC" registers as "HIGHVISTA STRATEGIES LLC"
- *
- * This function strips suffixes to find the base company name for matching.
- *
- * @param {string} name - Full entity name from Form D
- * @returns {string} - Base company name for matching
+ * extractBaseName and checkAdvDatabase are now in lib/adv_lookup.js.
+ * They are imported at the top of this file and shared with enrichment scripts.
+ * The shared version adds the A6 adviser_owners cross-check (title-filtered,
+ * owner_type='I' individuals only, requires ≥2-token first+last agreement).
  */
-function extractBaseName(name) {
-    if (!name) return '';
 
-    let base = name;
+/**
+ * A3 + A4: Extract a manager-identity candidate from a Form D filing.
+ *
+ * Strategy:
+ *   1. Detect whether the filing is platform-admin-filed (Sydecar, AngelList, etc.)
+ *   2. For platform filings: series-master IS the platform admin — DON'T use it as
+ *      the manager identity. Instead pick the pre-series prefix or the first
+ *      executive-role related person.
+ *   3. For non-platform filings:
+ *      a. If entityname matches "X, a series of Y", use Y (the series master)
+ *      b. Otherwise, strip fund-numbering suffix and use the prefix
+ *
+ * Returns { primary, alternates, is_platform, platform_name, source }.
+ */
+function extractManagerCandidate(filing) {
+    const en = filing.entityname || '';
+    const platform = detectPlatform(filing);
 
-    // Remove GP/Manager/Management/Advisors variations
-    base = base.replace(/\s+(GP|General Partner|Manager|Management|Advisors?|Advisers?)\s*,?\s*(LLC|LP|L\.?P\.?)?$/i, '');
+    const seriesMatch = en.match(/,?\s+a\s+series\s+of\s+(.+?)(?:\s*,?\s*$|$)/i);
+    let seriesMaster = seriesMatch ? seriesMatch[1].trim() : null;
 
-    // Remove entity types
-    base = base.replace(/\s*,?\s*(LLC|L\.?L\.?C\.?|LP|L\.?P\.?|LTD|LIMITED|INC|INCORPORATED)\.?$/i, '');
+    let prefix = seriesMatch
+        ? en.substring(0, seriesMatch.index).trim().replace(/,\s*$/, '')
+        : en;
 
-    // Remove fund-specific terms
-    base = base.replace(/\s+(Fund|Capital|Ventures?|Partners?|Holdings?|Group)\s+(I{1,3}|IV|V|VI|VII|VIII|IX|X|\d+)$/i, '');
+    if (!seriesMatch) {
+        prefix = prefix
+            .replace(/,?\s*(LP|LLC|L\.P\.|L\.L\.C\.|Ltd|Limited|Inc|Incorporated)\.?\s*$/i, '')
+            .replace(/\s+(Fund\s+)?[IVX]+$/i, '')
+            .replace(/\s+Fund\s+\d+$/i, '')
+            .trim();
+    }
 
-    return base.trim();
+    const principals = parseRelatedPersons(filing.related_names, filing.related_roles);
+
+    let primary, source;
+    let alternates = [];
+
+    if (platform.is_platform) {
+        if (prefix && prefix.length >= 4 && !platform.platform_name.toLowerCase().includes(prefix.toLowerCase().slice(0, 6))) {
+            primary = prefix;
+            source = `platform_${platform.platform_name}_prefix`;
+        } else if (principals.length > 0) {
+            primary = principals[0].name;
+            source = `platform_${platform.platform_name}_principal`;
+        } else {
+            primary = seriesMaster || en;
+            source = `platform_${platform.platform_name}_fallback_master`;
+        }
+        alternates = principals.slice(0, 5).map(p => p.name);
+    } else {
+        primary = seriesMaster || prefix || en;
+        source = seriesMaster ? 'series_master' : 'entity_prefix';
+        alternates = principals.slice(0, 3).map(p => p.name);
+    }
+
+    return {
+        primary,
+        alternates,
+        is_platform: platform.is_platform,
+        platform_name: platform.platform_name,
+        platform_signals: platform.signals,
+        source,
+    };
 }
 
 /**
- * Check if a manager is registered in the ADV database
- * Uses base name extraction to handle GP entity name vs registered adviser name differences
+ * A10: Classify likely-exemption tags (review tags, NOT hard suppressions).
  *
- * @param {string} managerName - Manager entity name from Form D
- * @returns {Promise<{found: boolean, crd?: number, adviser_name?: string}>}
+ * Only flag the two exemptions that genuinely require NO Form ADV filing:
+ *   - Foreign private adviser (§202(a)(30))
+ *   - Family office (Rule 202(a)(11)(G)-1)
+ *
+ * Do NOT tag §203(l) VC or §203(m) PF — those advisers DO file Form ADV (as ERAs).
  */
-async function checkAdvDatabase(managerName) {
-    const baseName = extractBaseName(managerName);
-
-    // Try exact base name match first
-    const { data: exact } = await advDb
-        .from('advisers_enriched')
-        .select('crd, adviser_name')
-        .ilike('adviser_name', `%${baseName}%`)
-        .limit(5);
-
-    if (exact && exact.length > 0) {
-        return {
-            found: true,
-            source: 'database',
-            crd: exact[0].crd,
-            adviser_name: exact[0].adviser_name
-        };
+function classifyExemptions(data) {
+    const tags = [];
+    const country = (data.stateorcountry || '').toUpperCase().trim();
+    const usStates = new Set(['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC','PR','VI','GU','AS','MP']);
+    if (country && country.length > 0 && !usStates.has(country) && !['UNITED STATES','USA','US'].includes(country)) {
+        tags.push({ tag: 'likely_foreign_private_adviser', evidence: `issuer jurisdiction = ${country}` });
     }
 
-    // Try first word only (e.g., "KIG" from "KIG Investment Management")
-    const firstWord = baseName.split(' ')[0];
-    if (firstWord && firstWord.length >= 3) {
-        const { data: partial } = await advDb
-            .from('advisers_enriched')
-            .select('crd, adviser_name')
-            .ilike('adviser_name', `${firstWord}%`)
-            .limit(10);
-
-        if (partial && partial.length > 0) {
-            return {
-                found: true,
-                source: 'database_partial',
-                crd: partial[0].crd,
-                adviser_name: partial[0].adviser_name
-            };
+    if (data.related_names) {
+        const persons = data.related_names.split('|').map(n => n.trim()).filter(Boolean);
+        if (persons.length > 0 && persons.length <= 4) {
+            const surnames = persons.map(p => {
+                const parts = p.split(/[\s,]+/).filter(Boolean);
+                return (parts[parts.length - 1] || '').toUpperCase();
+            }).filter(s => s.length >= 3);
+            const surnameCounts = {};
+            surnames.forEach(s => { surnameCounts[s] = (surnameCounts[s] || 0) + 1; });
+            const sharedSurname = Object.entries(surnameCounts).find(([s, c]) => c >= 2);
+            if (sharedSurname) {
+                tags.push({ tag: 'likely_family_office', evidence: `${sharedSurname[1]}/${persons.length} related persons share surname "${sharedSurname[0]}"` });
+            }
         }
     }
 
-    return { found: false };
+    return tags;
 }
 
 /**
@@ -179,8 +211,10 @@ async function detectNeedsInitialADVFiling() {
 
     const { data: formDFilings, error: formDError } = await formDDb
         .from('form_d_filings')
-        .select('accessionnumber, cik, entityname, filing_date, totalofferingamount, related_names')
+        .select('accessionnumber, cik, entityname, filing_date, totalofferingamount, related_names, related_roles, stateorcountry, isamendment, industrygrouptype, street1, city, zipcode, issuerphonenumber, nameofsigner')
         .not('cik', 'is', null)
+        .eq('industrygrouptype', 'Pooled Investment Fund')  // A1: hard scope gate
+        .neq('isamendment', 'true')                          // exclude amendments
         .gte('filing_date', sixMonthsAgoStr)
         .order('filing_date', { ascending: false })
         .limit(5000);
@@ -228,8 +262,9 @@ async function detectNeedsInitialADVFiling() {
 
         // Only consider if more than 60 days have passed (grace period for initial ADV filing)
         if (daysSinceFiling > DETECTION_CONFIG.initialFilingGracePeriodDays) {
-            // Extract manager name using series/master LLC pattern
-            const managerName = parseFundName(filing.entityname) || filing.entityname;
+            // A3 + A4: extract manager identity via multi-strategy + platform routing
+            const cand = extractManagerCandidate(filing);
+            const managerName = cand.primary || filing.entityname;
 
             if (!managerFilings.has(managerName)) {
                 managerFilings.set(managerName, {
@@ -237,8 +272,16 @@ async function detectNeedsInitialADVFiling() {
                     earliest_date: filing.filing_date,
                     latest_date: filing.filing_date,
                     total_offering: 0,
-                    primary_cik: filing.cik, // Use first CIK for EDGAR link
-                    related_names: filing.related_names // Store for GP entity extraction
+                    primary_cik: filing.cik,
+                    related_names: filing.related_names,
+                    related_roles: filing.related_roles,           // A6
+                    stateorcountry: filing.stateorcountry,         // A10
+                    is_platform_filing: cand.is_platform,          // A4
+                    platform_name: cand.platform_name,             // A4
+                    extraction_source: cand.source,                // diagnostic
+                    issuer_address: filing.street1 || null,        // A4
+                    issuer_phone: filing.issuerphonenumber || null,// A4
+                    issuer_signer: filing.nameofsigner || null,    // diagnostic
                 });
             }
 
@@ -251,11 +294,9 @@ async function detectNeedsInitialADVFiling() {
                 offering_amount: filing.totalofferingamount
             });
 
-            // Track date range
             if (filing.filing_date < manager.earliest_date) manager.earliest_date = filing.filing_date;
             if (filing.filing_date > manager.latest_date) manager.latest_date = filing.filing_date;
 
-            // Sum offerings
             if (filing.totalofferingamount && !isNaN(filing.totalofferingamount)) {
                 manager.total_offering += parseFloat(filing.totalofferingamount);
             }
@@ -271,34 +312,69 @@ async function detectNeedsInitialADVFiling() {
     let checkedCount = 0;
 
     for (const [managerName, data] of managerFilings) {
-        // Check if manager is registered in ADV database
-        const dbResult = await checkAdvDatabase(managerName);
+        // A6: Check ADV with multi-strategy lookup (now in lib/adv_lookup.js).
+        // We pass related_names AND related_roles so the lib can do title-filtered
+        // adviser_owners cross-check on Form D principals with executive roles.
+        const dbResult = await checkAdvDatabase(advDb, managerName, {
+            relatedNames: data.related_names,
+            relatedRoles: data.related_roles,
+        });
 
         if (dbResult.found) {
-            // Manager IS registered - skip (not a violator)
-            console.log(`  ✓ Found: ${managerName} → ${dbResult.adviser_name} (CRD ${dbResult.crd})`);
+            console.log(`  ✓ Found: ${managerName} → ${dbResult.adviser_name} (CRD ${dbResult.crd}, via ${dbResult.source}${dbResult.matched_person ? `, person: ${dbResult.matched_person}` : ''})`);
             continue;
         }
 
-        // Manager NOT found - this is a true violator
+        // A8: Form D timing-lag suppression — if this firm has any Form ADV filing
+        // within the last 12 months under a related-person/owner identity, suppress.
+        // We approximate this by re-running checkAdvDatabase with each of the
+        // executive-role related persons as the candidate firm name. If ANY hit
+        // resolves to an existing adviser, the firm is registered and this Form D
+        // is just a new fund of an already-registered firm.
+        let timingLagSkip = false;
+        if (data.related_names) {
+            const personList = data.related_names.split('|').map(n => n.trim()).filter(n => n.length > 3);
+            for (const p of personList.slice(0, 5)) {
+                const altCheck = await checkAdvDatabase(advDb, p, { relatedNames: data.related_names, relatedRoles: data.related_roles });
+                if (altCheck.found) {
+                    console.log(`  ↻ Timing-lag suppress: ${managerName} (resolved via principal "${p}" → CRD ${altCheck.crd})`);
+                    timingLagSkip = true;
+                    break;
+                }
+            }
+        }
+        if (timingLagSkip) continue;
+
+        // A10: classify likely exemptions (FOREIGN / FAMILY_OFFICE only — these are
+        // the regulatorily-real "no Form ADV required" exemptions per §202(a)(30) and
+        // Rule 202(a)(11)(G)-1. §203(l)/§203(m) are NOT suppressions because those
+        // firms still file Form ADV as ERAs.)
+        const exemptionTags = classifyExemptions(data);
+
+        // Manager NOT found - this is a candidate for review
         const daysSinceFirst = Math.floor((nowDate.getTime() - new Date(data.earliest_date).getTime()) / (1000 * 60 * 60 * 24));
 
         issues.push({
             form_d_cik: data.primary_cik,
             adviser_crd: null,
             discrepancy_type: 'needs_initial_adv_filing',
-            severity: 'high',
+            severity: exemptionTags.length > 0 ? 'low' : 'high',
             description: `Manager "${managerName}" has ${data.filings.length} Form D filing(s) since ${data.earliest_date} but has not filed Form ADV (${daysSinceFirst} days since first filing, verified against ADV database)`,
             metadata: {
                 manager_name: managerName,
-                entity_name: managerName, // For display compatibility
+                entity_name: managerName,
                 fund_count: data.filings.length,
                 earliest_filing_date: data.earliest_date,
                 latest_filing_date: data.latest_date,
                 days_since_first_filing: daysSinceFirst,
                 total_offering_amount: data.total_offering,
                 cik: data.primary_cik,
-                validation_method: 'database_check',
+                validation_method: 'database_check_v2',
+                extraction_source: data.extraction_source,
+                is_platform_filing: data.is_platform_filing || false,
+                platform_name: data.platform_name || null,
+                stateorcountry: data.stateorcountry || null,
+                likely_exemptions: exemptionTags, // A10: tags, not hard suppression
                 sample_funds: data.filings.slice(0, 5).map(f => ({
                     name: f.entity_name,
                     cik: f.cik,
@@ -310,7 +386,7 @@ async function detectNeedsInitialADVFiling() {
 
         checkedCount++;
         if (checkedCount % 50 === 0) {
-            console.log(`  Validated ${checkedCount}/${managerFilings.size} managers, found ${issues.length} violators...`);
+            console.log(`  Validated ${checkedCount}/${managerFilings.size} managers, found ${issues.length} candidates...`);
         }
     }
 
@@ -438,6 +514,7 @@ async function detectOverdueAnnualAmendment() {
 
             issues.push({
                 adviser_crd: crd,
+                form_d_cik: formDsAfterAdv[0]?.cik || null,  // Bug 3 fix: Add CIK at root for EDGAR link
                 discrepancy_type: 'overdue_annual_amendment',
                 severity: 'high',
                 description: `Manager "${data.adviser_name}" has not filed current year ADV amendment (last filing: ${actualLatestYear || 'unknown'})${formDsAfterAdv.length > 0 ? `. ${formDsAfterAdv.length} Form D filings since then.` : ''}`,
@@ -465,13 +542,34 @@ async function detectOverdueAnnualAmendment() {
  * Detector 3: VC Exemption Violation
  * Manager claims venture capital exemption (Rule 203(l)-1) but manages non-VC funds
  *
+ * REGULATORY BASIS (Section 203(l)):
+ * - Adviser must manage ONLY venture capital funds
+ * - ANY non-VC fund blows the entire exemption
+ *
+ * NON-VC FUND TYPES (per Form ADV Section 7.B Q10):
+ * - Hedge Fund = VIOLATION
+ * - Private Equity Fund = VIOLATION
+ * - Real Estate Fund = VIOLATION
+ * - Liquidity Fund = VIOLATION
+ * - Securitized Asset Fund = VIOLATION
+ * - Other Private Fund = VIOLATION
+ *
  * IMPORTANT: exemption_2b1 = VC exemption (Rule 203(l)-1)
  *            exemption_2b2 = Private fund adviser exemption (Rule 203(m)-1, under $150M)
- *
- * Enhanced: Shows which funds blow the exemption (from ADV), includes Form D if matched
  */
 async function detectVCExemptionViolation() {
     console.log('\n[3/6] Detecting: VC Exemption Violation...');
+
+    // Non-VC fund types that blow the 203(l) exemption
+    // Per SEC: VC exemption requires adviser to manage ONLY VC funds
+    const NON_VC_FUND_TYPES = [
+        'hedge fund',
+        'private equity fund',
+        'real estate fund',
+        'liquidity fund',
+        'securitized asset fund',
+        'other private fund'
+    ];
 
     // Get advisers who claim VC exemption (exemption_2b1 = 'Y' or true)
     // Note: Data has mixed formats - 'Y'/'N' strings and true/false booleans
@@ -501,6 +599,85 @@ async function detectVCExemptionViolation() {
 
     console.log(`  Found ${advisers.length} advisers claiming VC exemption (2b1=Y or true)`);
 
+    // Bug 1 fix: Pre-fetch Form D CIKs via cross_reference_matches -> form_d_filings join
+    // form_d_file_number in ADV is often NULL, so we need this fallback
+    // NOTE: cross_reference_matches has formd_accession, NOT formd_cik
+    // We must look up CIK from form_d_filings using the accession number
+    const adviserCrds = advisers.map(a => a.crd);
+    const crossRefCiks = new Map();  // CRD -> [CIK1, CIK2, ...]
+
+    console.log('  Pre-fetching Form D accessions from cross_reference_matches...');
+    const crdToAccessions = new Map();  // CRD -> [accession1, accession2, ...]
+
+    let crOffset = 0;
+    while (crOffset < 200000) {
+        const { data: crossRefs, error: crError } = await formDDb
+            .from('cross_reference_matches')
+            .select('adviser_entity_crd, formd_accession')
+            .in('adviser_entity_crd', adviserCrds)
+            .not('formd_accession', 'is', null)
+            .range(crOffset, crOffset + 1000 - 1);
+
+        if (crError) {
+            console.error('  Warning: Could not fetch cross_reference_matches:', crError.message);
+            break;
+        }
+        if (!crossRefs || crossRefs.length === 0) break;
+
+        for (const cr of crossRefs) {
+            if (!crdToAccessions.has(cr.adviser_entity_crd)) {
+                crdToAccessions.set(cr.adviser_entity_crd, []);
+            }
+            if (cr.formd_accession && !crdToAccessions.get(cr.adviser_entity_crd).includes(cr.formd_accession)) {
+                crdToAccessions.get(cr.adviser_entity_crd).push(cr.formd_accession);
+            }
+        }
+
+        crOffset += 1000;
+        if (crossRefs.length < 1000) break;
+    }
+    console.log(`  Found ${crdToAccessions.size} advisers with Form D accessions`);
+
+    // Now batch-fetch CIKs from form_d_filings using the accession numbers
+    const allAccessions = [...new Set([...crdToAccessions.values()].flat())];
+    const accessionToCik = new Map();  // accession -> CIK
+
+    if (allAccessions.length > 0) {
+        console.log(`  Looking up CIKs for ${allAccessions.length} Form D filings...`);
+        let accOffset = 0;
+        while (accOffset < allAccessions.length) {
+            const batch = allAccessions.slice(accOffset, accOffset + 500);
+            const { data: filings, error: filingsError } = await formDDb
+                .from('form_d_filings')
+                .select('accessionnumber, cik')
+                .in('accessionnumber', batch)
+                .not('cik', 'is', null);
+
+            if (filingsError) {
+                console.error('  Warning: Could not fetch form_d_filings:', filingsError.message);
+                break;
+            }
+            if (filings) {
+                for (const f of filings) {
+                    if (f.cik) accessionToCik.set(f.accessionnumber, f.cik);
+                }
+            }
+            accOffset += 500;
+        }
+        console.log(`  Found CIKs for ${accessionToCik.size} filings`);
+    }
+
+    // Build CRD -> CIK map by joining the two lookups
+    for (const [crd, accessions] of crdToAccessions) {
+        const ciks = accessions
+            .map(acc => accessionToCik.get(acc))
+            .filter(Boolean);
+        if (ciks.length > 0) {
+            crossRefCiks.set(crd, [...new Set(ciks)]);
+        }
+    }
+    console.log(`  Built CIK map for ${crossRefCiks.size} advisers`);
+
     const issues = [];
 
     for (const adviser of advisers) {
@@ -513,10 +690,22 @@ async function detectVCExemptionViolation() {
         if (fundsError) continue;
 
         // Find non-VC funds in the ADV filing
+        // CRITICAL: VC exemption requires ALL funds to be VC funds
+        // ANY of these fund types blows the exemption
         const nonVCFunds = funds.filter(fund => {
-            const type = (fund.fund_type || '').toLowerCase();
-            // Fund type must be specified AND not be VC-related
-            return type !== '' && !type.includes('venture') && !type.includes('vc');
+            const type = (fund.fund_type || '').toLowerCase().trim();
+            // Skip if no fund type specified
+            if (!type) return false;
+
+            // Check if this is a non-VC fund type
+            // Venture Capital Fund is the ONLY acceptable type
+            const isVentureCapital = type.includes('venture capital') || type === 'vc' || type === 'venture capital fund';
+
+            // If it's explicitly a non-VC type, it's a violation
+            const isExplicitNonVC = NON_VC_FUND_TYPES.some(nonVC => type.includes(nonVC));
+
+            // Return true if: has a type AND (explicitly non-VC OR not explicitly VC)
+            return isExplicitNonVC || !isVentureCapital;
         });
 
         if (nonVCFunds.length > 0) {
@@ -541,18 +730,29 @@ async function detectVCExemptionViolation() {
             const primaryFund = nonVCFunds[0];
             const primaryFormD = formDMatches.find(f => f.file_num === primaryFund.form_d_file_number);
 
+            // Categorize the non-VC funds by type for clarity
+            const fundTypeBreakdown = {};
+            nonVCFunds.forEach(f => {
+                const type = (f.fund_type || 'Unknown').trim();
+                fundTypeBreakdown[type] = (fundTypeBreakdown[type] || 0) + 1;
+            });
+
+            // Bug 1 fix: Use cross_reference_matches fallback when form_d_file_number is NULL
+            const fallbackCik = crossRefCiks.get(adviser.crd)?.[0] || null;
+
             issues.push({
                 adviser_crd: adviser.crd,
                 fund_reference_id: primaryFund.reference_id,  // For linking to fund detail
-                form_d_cik: primaryFormD?.cik || null,  // For EDGAR link if Form D exists
+                form_d_cik: primaryFormD?.cik || fallbackCik,  // Primary from file_num, fallback from cross_ref
                 discrepancy_type: 'vc_exemption_violation',
-                severity: 'high',
-                description: `Manager "${adviser.adviser_name}" claims VC exemption (203(l)-1) but manages ${nonVCFunds.length} non-VC fund(s) per Form ADV`,
+                severity: 'critical',  // Upgraded: this is a serious exemption violation
+                description: `Manager "${adviser.adviser_name}" claims VC exemption (203(l)-1) but manages ${nonVCFunds.length} non-VC fund(s): ${Object.entries(fundTypeBreakdown).map(([t, c]) => `${c} ${t}`).join(', ')}`,
                 metadata: {
                     exemption_claimed: 'vc_203l1',  // Clear label
                     exemption_2b1: 'Y',
                     non_vc_fund_count: nonVCFunds.length,
                     total_funds: funds.length,
+                    fund_type_breakdown: fundTypeBreakdown,
                     // Primary fund details
                     primary_fund_name: primaryFund.fund_name,
                     primary_fund_type: primaryFund.fund_type,
@@ -692,27 +892,210 @@ async function detectFundTypeMismatch() {
  * Detector 5: Missing Fund in ADV
  * Form D filing exists but fund not found in latest ADV
  *
- * LOGIC:
- * cross_reference_matches only contains MATCHED records (where ADV fund matched Form D).
- * To find "missing" funds, we need to:
- * 1. Get advisers who have at least one match in cross_reference_matches
- * 2. Get ALL Form D filings (from form_d_filings table)
- * 3. Find Form Ds that share adviser name patterns but aren't in cross_reference_matches
+ * REGULATORY BASIS: ADV Section 7.B must list all managed private funds
  *
- * Per user: "This mostly applies to Form Ds filed in a previous year, not reflected in ADV filed after"
+ * CRITICAL DATA LIMITATION:
+ * The form_d_file_number field in ADV Section 7.B Q22 is OPTIONAL and often unpopulated.
+ * Cannot rely solely on direct file number matching.
  *
- * SIMPLIFIED APPROACH:
- * Since we can't easily link Form Ds to advisers without matches, we look for:
- * - Form D filings where related_names/roles suggest they're managed by a known adviser
- * - But the fund itself isn't in cross_reference_matches
+ * DETECTION STRATEGIES (in order of reliability):
  *
- * For now: Use a name-based heuristic - find Form Ds with similar names to matched funds
- * from the same adviser but not in the matches themselves.
+ * 1. DIRECT FILE NUMBER MATCHING (highest confidence, but often unavailable):
+ *    - Get form_d_file_numbers from funds_enriched for each adviser
+ *    - Find Form D filings with those file_nums
+ *    - Check if they're in cross_reference_matches
+ *    - If Form D exists but no match, fund may be missing
+ *
+ * 2. NAME MATCHING (medium confidence):
+ *    - Find Form Ds where entity_name is similar to adviser name or related_names
+ *    - But fund not in cross_reference_matches
+ *
+ * 3. TIMING ANALYSIS:
+ *    - Form D filed before latest ADV should be reflected in that ADV
+ *    - Focus on Form Ds filed in previous years not yet in ADV
  */
 async function detectMissingFundInADV() {
     console.log('\n[5/6] Detecting: Missing Fund in ADV...');
 
-    // Step 1: Get all unique advisers from cross_reference_matches with their matched Form Ds
+    const issues = [];
+    const currentYear = new Date().getFullYear();
+    const advDeadlinePassed = (new Date().getMonth() >= 3); // After April
+
+    // =====================================================
+    // STRATEGY 1: Direct form_d_file_number matching
+    // =====================================================
+    console.log('  Strategy 1: Checking form_d_file_number matches...');
+
+    // Get all advisers with their funds that have form_d_file_numbers
+    let adviserFundFileNums = new Map(); // crd -> { name, file_numbers: Set, funds: [] }
+    let fundOffset = 0;
+
+    while (fundOffset < DETECTION_CONFIG.maxRecords) {
+        const { data: funds, error } = await advDb
+            .from('funds_enriched')
+            .select('adviser_entity_crd, fund_name, form_d_file_number, reference_id')
+            .not('form_d_file_number', 'is', null)
+            .not('adviser_entity_crd', 'is', null)
+            .range(fundOffset, fundOffset + DETECTION_CONFIG.batchSize - 1);
+
+        if (error) throw error;
+        if (!funds || funds.length === 0) break;
+
+        for (const fund of funds) {
+            if (!fund.form_d_file_number) continue;
+
+            if (!adviserFundFileNums.has(fund.adviser_entity_crd)) {
+                adviserFundFileNums.set(fund.adviser_entity_crd, {
+                    file_numbers: new Set(),
+                    funds: []
+                });
+            }
+
+            const advData = adviserFundFileNums.get(fund.adviser_entity_crd);
+            advData.file_numbers.add(fund.form_d_file_number);
+            advData.funds.push({
+                name: fund.fund_name,
+                file_num: fund.form_d_file_number,
+                reference_id: fund.reference_id
+            });
+        }
+
+        fundOffset += DETECTION_CONFIG.batchSize;
+        if (funds.length < DETECTION_CONFIG.batchSize) break;
+    }
+
+    console.log(`  Found ${adviserFundFileNums.size} advisers with form_d_file_number data`);
+
+    // Collect all file numbers to check against Form D filings
+    const allFileNums = new Set();
+    for (const [_, advData] of adviserFundFileNums) {
+        for (const fn of advData.file_numbers) {
+            allFileNums.add(fn);
+        }
+    }
+
+    console.log(`  Total unique file numbers to check: ${allFileNums.size}`);
+
+    // Get Form D filings for these file numbers
+    if (allFileNums.size > 0) {
+        const fileNumArray = Array.from(allFileNums);
+        let formDByFileNum = new Map();
+
+        // Query in batches
+        for (let i = 0; i < fileNumArray.length; i += 500) {
+            const batch = fileNumArray.slice(i, i + 500);
+            const { data: filings } = await formDDb
+                .from('form_d_filings')
+                .select('file_num, accessionnumber, cik, entityname, filing_date')
+                .in('file_num', batch);
+
+            if (filings) {
+                for (const f of filings) {
+                    if (!formDByFileNum.has(f.file_num)) {
+                        formDByFileNum.set(f.file_num, []);
+                    }
+                    formDByFileNum.get(f.file_num).push(f);
+                }
+            }
+        }
+
+        console.log(`  Found ${formDByFileNum.size} file numbers with Form D filings`);
+
+        // Get all matched accessions from cross_reference_matches
+        const allMatchedAccessions = new Set();
+        let matchOffset = 0;
+
+        while (matchOffset < DETECTION_CONFIG.maxRecords) {
+            const { data: matches, error } = await formDDb
+                .from('cross_reference_matches')
+                .select('formd_accession')
+                .range(matchOffset, matchOffset + DETECTION_CONFIG.batchSize - 1);
+
+            if (error) throw error;
+            if (!matches || matches.length === 0) break;
+
+            for (const m of matches) {
+                if (m.formd_accession) allMatchedAccessions.add(m.formd_accession);
+            }
+
+            matchOffset += DETECTION_CONFIG.batchSize;
+            if (matches.length < DETECTION_CONFIG.batchSize) break;
+        }
+
+        console.log(`  Total matched accessions: ${allMatchedAccessions.size}`);
+
+        // Get adviser names
+        const adviserCrds = Array.from(adviserFundFileNums.keys());
+        const adviserNames = new Map();
+
+        for (let i = 0; i < adviserCrds.length; i += 500) {
+            const batch = adviserCrds.slice(i, i + 500);
+            const { data: advisers } = await advDb
+                .from('advisers_enriched')
+                .select('crd, adviser_name')
+                .in('crd', batch);
+
+            if (advisers) {
+                for (const a of advisers) {
+                    adviserNames.set(a.crd, a.adviser_name);
+                }
+            }
+        }
+
+        // Check each adviser's file numbers for unmatched Form Ds
+        for (const [crd, advData] of adviserFundFileNums) {
+            const adviserName = adviserNames.get(crd) || 'Unknown';
+
+            for (const fund of advData.funds) {
+                const formDFilings = formDByFileNum.get(fund.file_num) || [];
+
+                for (const filing of formDFilings) {
+                    // Skip if already matched
+                    if (allMatchedAccessions.has(filing.accessionnumber)) continue;
+
+                    // Check timing
+                    const filingDate = new Date(filing.filing_date);
+                    const filingYear = filingDate.getFullYear();
+
+                    // Only flag if Form D was filed in a previous year
+                    // (should have been reflected in latest ADV)
+                    const shouldBeInAdv = filingYear < currentYear ||
+                        (filingYear === currentYear - 1 && advDeadlinePassed);
+
+                    if (shouldBeInAdv) {
+                        issues.push({
+                            adviser_crd: crd,
+                            fund_reference_id: fund.reference_id,
+                            form_d_cik: filing.cik,
+                            discrepancy_type: 'missing_fund_in_adv',
+                            severity: 'medium',
+                            description: `Fund "${filing.entityname}" (Form D filed ${filing.filing_date}) has file number ${fund.file_num} listed in ADV fund "${fund.name}" but Form D not matched to ADV fund record`,
+                            metadata: {
+                                detection_strategy: 'form_d_file_number',
+                                fund_name: filing.entityname,
+                                adv_fund_name: fund.name,
+                                adv_fund_reference_id: fund.reference_id,
+                                form_d_file_number: fund.file_num,
+                                formd_accession: filing.accessionnumber,
+                                formd_filing_date: filing.filing_date,
+                                formd_cik: filing.cik,
+                                adviser_name: adviserName
+                            }
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    console.log(`  Strategy 1 found ${issues.length} issues`);
+
+    // =====================================================
+    // STRATEGY 2: Name-based matching for advisers
+    // =====================================================
+    console.log('  Strategy 2: Checking name-based matches...');
+
+    // Get advisers with existing cross_reference_matches
     const adviserMatches = new Map();  // adviser_crd -> { name, matchedAccessions, latestAdvYear }
 
     let offset = 0;
@@ -741,15 +1124,7 @@ async function detectMissingFundInADV() {
         if (matches.length < DETECTION_CONFIG.batchSize) break;
     }
 
-    console.log(`  Found ${adviserMatches.size} advisers with Form D matches`);
-
-    // Step 2: For each adviser, get their ADV funds and check for unmatched Form Ds
-    // We look for Form D filings that share the adviser's name pattern
-    const issues = [];
-    const currentYear = new Date().getFullYear();
-    const advDeadlinePassed = (new Date().getMonth() >= 3); // After April
-
-    // Get all Form D filings to check
+    // Get recent Form D filings for name matching
     const { data: allFormDFilings, error: formDError } = await formDDb
         .from('form_d_filings')
         .select('accessionnumber, cik, entityname, filing_date, totalofferingamount, related_names')
@@ -758,7 +1133,7 @@ async function detectMissingFundInADV() {
 
     if (formDError) throw formDError;
 
-    // Build a set of all matched accessions for quick lookup
+    // Build set of all matched accessions (including from Strategy 1)
     const allMatchedAccessions = new Set();
     for (const [_, advData] of adviserMatches) {
         for (const acc of advData.matchedAccessions) {
@@ -766,9 +1141,10 @@ async function detectMissingFundInADV() {
         }
     }
 
-    console.log(`  Total matched accessions: ${allMatchedAccessions.size}`);
+    // Also exclude any we already flagged in Strategy 1
+    const strategy1Accessions = new Set(issues.map(i => i.metadata.formd_accession));
 
-    // Step 3: For each adviser, find Form Ds that mention their name but aren't matched
+    // For each adviser, find Form Ds that mention their name but aren't matched
     for (const [crd, advData] of adviserMatches) {
         const adviserName = (advData.name || '').toUpperCase();
         if (!adviserName || adviserName.length < 3) continue;
@@ -781,10 +1157,10 @@ async function detectMissingFundInADV() {
 
         if (adviserKeyWords.length === 0) continue;
 
-        // Find Form Ds that mention adviser name in related_names or entity name
         for (const filing of allFormDFilings) {
-            // Skip if already matched
+            // Skip if already matched or flagged in Strategy 1
             if (allMatchedAccessions.has(filing.accessionnumber)) continue;
+            if (strategy1Accessions.has(filing.accessionnumber)) continue;
 
             // Check if this Form D is related to this adviser
             const relatedNames = (filing.related_names || '').toUpperCase();
@@ -795,7 +1171,7 @@ async function detectMissingFundInADV() {
             const matchCount = adviserKeyWords.filter(w => combinedText.includes(w)).length;
             if (matchCount < 2) continue;  // Need at least 2 matching key words
 
-            // Check timing - Form D should have been filed before latest ADV
+            // Check timing
             const filingDate = new Date(filing.filing_date);
             const filingYear = filingDate.getFullYear();
             const latestAdvYear = advData.latestAdvYear || currentYear;
@@ -811,6 +1187,7 @@ async function detectMissingFundInADV() {
                     severity: 'medium',
                     description: `Fund "${filing.entityname}" filed Form D on ${filing.filing_date} but not in latest Form ADV (${latestAdvYear}) for "${advData.name}"`,
                     metadata: {
+                        detection_strategy: 'name_matching',
                         fund_name: filing.entityname,
                         formd_accession: filing.accessionnumber,
                         formd_filing_date: filing.filing_date,
@@ -825,7 +1202,7 @@ async function detectMissingFundInADV() {
         }
     }
 
-    // Deduplicate by accession number (same Form D might match multiple advisers)
+    // Deduplicate by accession number (same Form D might match multiple strategies/advisers)
     const seenAccessions = new Set();
     const dedupedIssues = issues.filter(issue => {
         const acc = issue.metadata.formd_accession;
@@ -834,7 +1211,7 @@ async function detectMissingFundInADV() {
         return true;
     });
 
-    console.log(`  Found ${dedupedIssues.length} issues (Form Ds potentially missing from ADV)`);
+    console.log(`  Found ${dedupedIssues.length} total issues (Form Ds potentially missing from ADV)`);
     return dedupedIssues;
 }
 

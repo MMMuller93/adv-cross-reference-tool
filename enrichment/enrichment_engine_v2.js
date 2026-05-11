@@ -406,14 +406,66 @@ function isValidHomepage(url) {
 }
 
 /**
- * Check if URL looks like a news/article page (not a company homepage)
+ * Check if URL looks like a news/article page (not a company homepage).
+ * A11.4: extended with broader path patterns + media-host substrings.
+ *
+ * Note: og:type=article check (async fetch) is in isArticleByMeta() below;
+ * this synchronous version covers the most common URL-shape cases.
  */
 function isNewsOrArticlePage(url) {
   const urlLower = url.toLowerCase();
-  return urlLower.includes('/news/') || urlLower.includes('/article/') ||
-         urlLower.includes('/blog/') || urlLower.includes('/press/') ||
-         urlLower.includes('/2024/') || urlLower.includes('/2023/') ||
-         urlLower.includes('/2025/') || urlLower.includes('/2026/');
+  // Path-based article markers
+  const pathPatterns = [
+    '/news/', '/article/', '/articles/', '/blog/', '/posts/', '/post/',
+    '/press/', '/press-release', '/press-releases/', '/insights/', '/stories/',
+    '/2020/', '/2021/', '/2022/', '/2023/', '/2024/', '/2025/', '/2026/',
+    '/pulse/',  // LinkedIn pulse articles
+  ];
+  if (pathPatterns.some(p => urlLower.includes(p))) return true;
+  // Hostname-based article markers (subdomain pattern common for blog/news hosts)
+  const hostPatterns = [
+    'news.', 'blog.', 'press.', 'insights.',
+  ];
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (hostPatterns.some(p => host.startsWith(p))) return true;
+  } catch (e) {
+    // invalid URL
+  }
+  return false;
+}
+
+/**
+ * A11.4: async check for og:type=article meta tag.
+ * Fetches first 4KB of HTML and inspects head metadata.
+ * Returns true if og:type indicates article; false otherwise (or on fetch error).
+ */
+async function isArticleByMeta(url) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(url, {
+      method: 'GET',
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (PFR-Enrichment)' },
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return false;
+    const reader = res.body && res.body.getReader ? res.body.getReader() : null;
+    let chunk = '';
+    if (reader) {
+      const { value } = await reader.read();
+      if (value) chunk = new TextDecoder().decode(value).slice(0, 4096);
+    } else {
+      const text = await res.text();
+      chunk = text.slice(0, 4096);
+    }
+    // og:type="article" — any quote style
+    return /og:type["']?\s*content=["']article["']/i.test(chunk) ||
+           /content=["']article["']\s+property=["']og:type["']/i.test(chunk);
+  } catch (e) {
+    return false;
+  }
 }
 
 /**
@@ -473,8 +525,32 @@ function extractWebsite(searchResults, fundName) {
     }
   }
 
-  // PASS 3: Fallback - but ONLY if site looks like a VC/fund
-  // Don't just take any random homepage
+  // PASS 3: Fallback — HARDENED per A11.2 / A11.3.
+  //
+  // The old fallback accepted any homepage that mentioned a generic VC word
+  // ("capital", "ventures", "partners", "fund") anywhere in domain/title/snippet.
+  // This was the article-URL bug source: a news article about a "venture
+  // capital fund" matched the indicator without the domain having anything to
+  // do with the actual fund.
+  //
+  // New rule: require a DISTINCTIVE fund-name token (≥4 chars, NOT a generic
+  // VC word) to appear in the domain. If no candidate satisfies that, return
+  // null — better no website than a wrong one (per past project correction).
+  const genericTokens = new Set([
+    'capital', 'ventures', 'venture', 'partners', 'partner', 'fund', 'funds',
+    'management', 'mgmt', 'advisors', 'advisers', 'group', 'holdings', 'invest',
+    'investment', 'investments', 'investor', 'investors', 'portfolio', 'seed',
+    'series', 'private', 'equity', 'asset', 'company', 'global', 'international',
+    'wealth', 'financial', 'finance',
+  ]);
+  const distinctiveTokens = fundWords.filter(w => !genericTokens.has(w.toLowerCase()) && w.length >= 4);
+
+  // If we have no distinctive token, pass-3 cannot safely run — return null.
+  if (distinctiveTokens.length === 0) {
+    console.log(`[Website] No distinctive fund-name tokens; skipping pass-3 to avoid FP`);
+    return null;
+  }
+
   for (const result of results.slice(0, 3)) {
     const url = result.url;
     if (isBlockedDomain(url)) continue;
@@ -482,28 +558,18 @@ function extractWebsite(searchResults, fundName) {
     if (isNewsOrArticlePage(url)) continue;
 
     try {
-      const domain = new URL(url).hostname.toLowerCase();
-      const title = (result.title || '').toLowerCase();
-      const snippet = (result.description || '').toLowerCase();
-
-      // Require at least ONE signal that this is a VC/fund website
-      const fundIndicators = ['capital', 'ventures', 'partners', 'venture', 'fund',
-        'investment', 'investor', 'portfolio', 'seed', 'series a', 'vc'];
-
-      const looksLikeFund = fundIndicators.some(indicator =>
-        domain.includes(indicator) || title.includes(indicator) || snippet.includes(indicator)
-      );
-
-      if (looksLikeFund && isValidHomepage(url)) {
-        console.log(`[Website] Fallback match found (fund indicator): ${url}`);
-        return url;
-      }
+      const domain = new URL(url).hostname.replace('www.', '').toLowerCase();
+      const domainHasDistinctive = distinctiveTokens.some(w => domain.includes(w.toLowerCase()));
+      if (!domainHasDistinctive) continue;  // A11.3
+      if (!isValidHomepage(url)) continue;
+      console.log(`[Website] Pass-3 distinctive-token match: ${url} (matched "${distinctiveTokens.find(w => domain.includes(w.toLowerCase()))}")`);
+      return url;
     } catch (e) {
       // Invalid URL, skip
     }
   }
 
-  // Better to return null than pick wrong website
+  // Better to return null than pick wrong website (project policy)
   console.log(`[Website] No match found - returning null to avoid wrong website`);
   return null;
 }

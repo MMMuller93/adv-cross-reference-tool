@@ -1162,6 +1162,13 @@ app.get('/api/funds/new-managers', async (req, res) => {
       // Exclude amendments - only show original Form D filings (not D/A)
       q = q.neq('isamendment', 'true');
 
+      // Hard scope gate: only pooled-investment-fund issuers.
+      // industrygrouptype is essentially 100% populated; this drops operating-co
+      // Reg D, real-estate syndications, biotech raises, etc. that should never
+      // appear in a fund-manager view. Verified: POC1 (.poc-stress-test) showed 0
+      // NULL values on this column in 2025+ data.
+      q = q.eq('industrygrouptype', 'Pooled Investment Fund');
+
       // Always apply date filter (default to last 12 months for performance)
       q = q.gte('filing_date', defaultStartDate);
       if (endDate) q = q.lte('filing_date', endDate);

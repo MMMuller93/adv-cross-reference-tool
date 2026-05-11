@@ -9,16 +9,24 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { createClient } = require('@supabase/supabase-js');
 // USE V2 ENGINE - has Twitter, email extraction, and AI team extraction
 const { enrichManager, saveEnrichment } = require('./enrichment_engine_v2');
+// A11.1: shared ADV lookup so we can skip enriching managers who ARE already registered
+const { checkAdvDatabase } = require('../lib/adv_lookup');
 
 // Form D database - use environment variables for GitHub Actions, fallback to defaults for local dev
 const SUPABASE_FORMD_URL = process.env.FORMD_URL || 'https://ltdalxkhbbhmkimmogyq.supabase.co';
 const SUPABASE_FORMD_KEY = process.env.FORMD_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0ZGFseGtoYmJobWtpbW1vZ3lxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1OTg3NTMsImV4cCI6MjA3NTE3NDc1M30.TS9uNMRqPKcthHCSMKAcFfhFEP-7Q6XbDHQNujBDOtc';
 
+// ADV database (separate from Form D)
+const ADV_URL = process.env.ADV_URL || 'https://ezuqwwffjgfzymqxsctq.supabase.co';
+const ADV_KEY = process.env.ADV_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6dXF3d2ZmamdmenltcXhzY3RxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMzMjY0NDAsImV4cCI6MjA3ODkwMjQ0MH0.RGMhIb7yMXmOQpysiPgazxJzflGKNCdzRZ8XBgPDCAE';
+
 console.log(`[Config] Form D URL: ${SUPABASE_FORMD_URL.substring(0, 30)}...`);
+console.log(`[Config] ADV URL:    ${ADV_URL.substring(0, 30)}...`);
 console.log(`[Config] Using ${process.env.FORMD_SERVICE_KEY ? 'environment' : 'default'} credentials`);
 
 const formdClient = createClient(SUPABASE_FORMD_URL, SUPABASE_FORMD_KEY);
 const enrichedClient = createClient(SUPABASE_FORMD_URL, SUPABASE_FORMD_KEY);
+const advClient = createClient(ADV_URL, ADV_KEY);
 
 const LIMIT = parseInt(process.argv[2]) || 100;
 const DELAY_MS = 2000; // 2 seconds between requests
@@ -138,10 +146,29 @@ async function getUnenrichedManagers(managers) {
   }
 
   const enrichedNames = new Set((enriched || []).map(e => e.series_master_llc.toLowerCase()));
-  const unenriched = managers.filter(m => !enrichedNames.has(m.series_master_llc.toLowerCase()));
+  const notInEnrichedTable = managers.filter(m => !enrichedNames.has(m.series_master_llc.toLowerCase()));
+  console.log(`[Filter] ${enriched?.length || 0} in enriched_managers, ${notInEnrichedTable.length} not yet enriched`);
 
-  console.log(`[Filter] ${enriched?.length || 0} already enriched, ${unenriched.length} need enrichment`);
-  return unenriched;
+  // A11.1: also check advisers_enriched (ADV DB). If a manager is already a
+  // registered RIA or ERA, we don't need to web-enrich them — their website,
+  // phone, and CCO email are already in Form ADV. Skip and pull from ADV instead.
+  // Per docs/ANALYSIS_COMPLIANCE_ENRICHMENT_FIXES.md Enrichment Issue #1
+  // (documented Jan 8, 2026, never previously shipped).
+  console.log('[Filter] Cross-checking advisers_enriched to skip already-registered managers...');
+  const trulyUnenriched = [];
+  let skippedRegistered = 0;
+  for (const m of notInEnrichedTable) {
+    const advHit = await checkAdvDatabase(advClient, m.series_master_llc);
+    if (advHit.found) {
+      skippedRegistered++;
+      console.log(`  ⏭️  Skipping ${m.series_master_llc} (already registered: ${advHit.adviser_name}, CRD ${advHit.crd}, via ${advHit.source})`);
+      // Optionally pre-seed enriched_managers from ADV here in the future
+      continue;
+    }
+    trulyUnenriched.push(m);
+  }
+  console.log(`[Filter] Skipped ${skippedRegistered} already-registered managers; ${trulyUnenriched.length} truly need web enrichment`);
+  return trulyUnenriched;
 }
 
 async function main() {
