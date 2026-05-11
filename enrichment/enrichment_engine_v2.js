@@ -133,6 +133,25 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/**
+ * fetch with AbortController-based timeout.
+ *
+ * Node's `fetch({timeout})` option is silently ignored — it's not part of the
+ * undici/standard fetch spec. We need AbortController to enforce timeouts.
+ * Codex review 2026-05-11 flagged 5 sites in this file that were passing
+ * `timeout: 10000` and not getting timeout behavior.
+ */
+async function fetchWithTimeout(url, opts = {}, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const { timeout, ...rest } = opts; // strip ignored timeout key for clarity
+    return await fetch(url, { ...rest, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function isBlockedDomain(url) {
   if (!url) return true;
   const lowerUrl = url.toLowerCase();
@@ -602,10 +621,9 @@ async function extractLinkedInFromWebsite(websiteUrl) {
   for (const path of teamPaths) {
     try {
       const url = websiteUrl.replace(/\/$/, '') + path;
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FundRadar/1.0)' },
-        timeout: 10000
-      });
+      }, 10000);
 
       if (!response.ok) continue;
 
@@ -671,9 +689,8 @@ async function extractCompanyLinkedInFromProfile(personalLinkedInUrl) {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
         'Accept': 'text/html,application/xhtml+xml'
       },
-      timeout: 10000,
       redirect: 'follow'
-    });
+    }, 10000);
 
     if (!response.ok) return null;
 
@@ -961,10 +978,9 @@ async function extractEmailsFromWebsite(websiteUrl) {
   for (const path of contactPaths) {
     try {
       const url = websiteUrl.replace(/\/$/, '') + path;
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FundRadar/1.0)' },
-        timeout: 10000
-      });
+      }, 10000);
       
       if (!response.ok) continue;
       
@@ -1046,10 +1062,9 @@ async function validateWebsiteWithAI(websiteUrl, fundName) {
   }
 
   try {
-    const response = await fetch(websiteUrl, {
+    const response = await fetchWithTimeout(websiteUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FundRadar/1.0)' },
-      timeout: 10000
-    });
+    }, 10000);
 
     if (!response.ok) {
       return { isValid: false, confidence: 0, reason: 'Website not accessible' };
@@ -1125,10 +1140,9 @@ async function extractTeamWithAI(websiteUrl, fundName) {
   for (const path of teamPaths) {
     try {
       const url = websiteUrl.replace(/\/$/, '') + path;
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FundRadar/1.0)' },
-        timeout: 10000
-      });
+      }, 10000);
 
       if (!response.ok) continue;
 
@@ -1367,7 +1381,13 @@ async function enrichManager(name, options = {}) {
     // Not found in ADV, continue with web search
   }
 
-  // Check external investor databases (OpenVC + Ramp) for pre-enrichment data
+  // Check external investor databases (OpenVC + Ramp) for pre-enrichment data.
+  // ensureLoaded is idempotent — caches the 8k-row map after first call, so this
+  // is free on every subsequent enrichment. Without this call in the batch/CLI
+  // flow (only server.js was loading it at startup), lookupInvestor would return
+  // null and the OpenVC/Ramp prefill never fired in cron runs (Codex review,
+  // 2026-05-11).
+  await ensureLoaded(formdClient);
   const extMatch = lookupInvestor(parsedName) || lookupInvestor(actualFundName);
   if (extMatch) {
     console.log(`[Enrichment] Found in external DB (${extMatch.source}): ${extMatch.investor_name}`);
@@ -1483,10 +1503,22 @@ async function enrichManager(name, options = {}) {
   
   // Extract website
   if (!enrichmentData.website_url) {
-    enrichmentData.website_url = extractWebsite(searchResults, name);
-    if (enrichmentData.website_url) {
-      enrichmentData.data_sources.push('website');
-      console.log(`[Enrichment] Website: ${enrichmentData.website_url}`);
+    const candidate = extractWebsite(searchResults, name);
+    if (candidate) {
+      // A11.4 wire-in (Codex review 2026-05-11): the URL-shape filter inside
+      // extractWebsite catches the common cases, but article pages sometimes
+      // live at paths the filter doesn't recognize. Fetch the candidate and
+      // check og:type=article as a final gate. Costs one HTTP request per
+      // candidate; cheap insurance against article-URL FPs.
+      const isArticle = await isArticleByMeta(candidate);
+      if (isArticle) {
+        console.log(`[Enrichment] Discarded candidate ${candidate} — og:type=article`);
+        enrichmentData.flagged_issues.push('discarded_article_url');
+      } else {
+        enrichmentData.website_url = candidate;
+        enrichmentData.data_sources.push('website');
+        console.log(`[Enrichment] Website: ${enrichmentData.website_url}`);
+      }
     }
   }
   

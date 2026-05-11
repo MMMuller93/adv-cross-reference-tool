@@ -326,16 +326,23 @@ async function detectNeedsInitialADVFiling() {
         }
 
         // A8: Form D timing-lag suppression — if this firm has any Form ADV filing
-        // within the last 12 months under a related-person/owner identity, suppress.
-        // We approximate this by re-running checkAdvDatabase with each of the
-        // executive-role related persons as the candidate firm name. If ANY hit
-        // resolves to an existing adviser, the firm is registered and this Form D
-        // is just a new fund of an already-registered firm.
+        // discoverable through one of its named principals (Schedule A/B control
+        // persons in adviser_owners), suppress the flag. The principal is
+        // registered ⇒ their firm is registered ⇒ this fund is just a new fund
+        // pending next annual amendment.
+        //
+        // Use personOnly: true so checkAdvDatabase skips firm-name strategies
+        // (which would otherwise resolve "John" → any adviser starting with John,
+        // producing false-positive suppressions). Person-graph match only.
         let timingLagSkip = false;
         if (data.related_names) {
             const personList = data.related_names.split('|').map(n => n.trim()).filter(n => n.length > 3);
             for (const p of personList.slice(0, 5)) {
-                const altCheck = await checkAdvDatabase(advDb, p, { relatedNames: data.related_names, relatedRoles: data.related_roles });
+                const altCheck = await checkAdvDatabase(advDb, p, {
+                    relatedNames: data.related_names,
+                    relatedRoles: data.related_roles,
+                    personOnly: true,
+                });
                 if (altCheck.found) {
                     console.log(`  ↻ Timing-lag suppress: ${managerName} (resolved via principal "${p}" → CRD ${altCheck.crd})`);
                     timingLagSkip = true;
@@ -1487,5 +1494,8 @@ module.exports = {
     detectVCExemptionViolation,
     detectFundTypeMismatch,
     detectMissingFundInADV,
-    detectExemptionMismatch
+    detectExemptionMismatch,
+    // Exported for tests:
+    extractManagerCandidate,
+    classifyExemptions,
 };
