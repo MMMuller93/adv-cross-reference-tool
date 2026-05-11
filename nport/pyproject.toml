@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nport"
+version = "0.1.0"
+description = "N-PORT private-company holdings ingestion subsystem (PrivateFundsRadar)."
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31",
+    "lxml>=5.2",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8",
+    "pytest-mock>=3",
+    "psycopg[binary]>=3.1",
+]
+supabase = [
+    "supabase>=2.7",
+]
+postgres = [
+    "psycopg[binary]>=3.1",
+]
+
+[project.scripts]
+nport-backfill = "nport.scraper.backfill_bulk:main"
+nport-daily    = "nport.scraper.daily_scraper:main"
+nport-load-identifiers = "nport.scraper.load_identifiers:main"
+nport-deltas   = "nport.delta_detection.compute_deltas:main"
+nport-seed-merge = "nport.seed_loader.merge_and_emit:main"
+nport-ncen     = "nport.enrichment.ncen_ingest.daily_ncen:main"
+nport-n1a-pm   = "nport.enrichment.n1a_extract.dispatcher:main"
+nport-ncsr     = "nport.enrichment.ncsr_enrich.dispatcher:main"
+
+# Map the top-level package name "nport" to this directory itself so
+# `from nport.scraper.config import ...` resolves both in editable
+# installs and via the sys.path shim in conftest.py.
+[tool.setuptools]
+package-dir = {"nport" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = [
+    "tests*",
+    "docs*",
+    "migrations*",
+    "frontend*",
+    "api*",
+]
+
+[tool.setuptools.package-data]
+"nport.resolver" = ["aliases_seed.json"]
+"nport.seed_loader" = ["*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["resolver/tests", "scraper/tests", "delta_detection/tests", "seed_loader/tests", "enrichment", "tests"]
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-ra"

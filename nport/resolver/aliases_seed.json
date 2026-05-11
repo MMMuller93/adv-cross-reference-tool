@@ -1,0 +1,207 @@
+{
+  "_meta": {
+    "description": "Seed aliases for the top 20 tracked private companies (PLAN §3.2). Each company has exact_normalized + prefix (8+ chars) + any known vendor codes (LEI/BBGID/LoanX) from §3.4 and POC findings.",
+    "source": "PLAN_NPORT_HOLDINGS.md §3.2 ranking + /tmp/nport_research/poc_resolution_findings.md",
+    "validated_at": "2026-05-11"
+  },
+  "companies": [
+    {
+      "slug": "anthropic",
+      "display_name": "Anthropic",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "ANTHROPIC"},
+        {"pattern_type": "exact_normalized", "pattern": "ANTHROPIC PBC"},
+        {"pattern_type": "exact_normalized", "pattern": "ANTHROPIC INC"},
+        {"pattern_type": "prefix", "pattern": "ANTHROPIC"},
+        {"pattern_type": "vendor_code", "pattern": "984500B6DEB8CEBC4Z70", "vendor_code_type": "LEI"}
+      ]
+    },
+    {
+      "slug": "databricks",
+      "display_name": "Databricks",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "DATABRICKS"},
+        {"pattern_type": "exact_normalized", "pattern": "DATABRICKS INC"},
+        {"pattern_type": "prefix", "pattern": "DATABRICKS"}
+      ]
+    },
+    {
+      "slug": "openai",
+      "display_name": "OpenAI",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "OPENAI"},
+        {"pattern_type": "exact_normalized", "pattern": "OPENAI GLOBAL"},
+        {"pattern_type": "exact_normalized", "pattern": "OPENAI OPCO"},
+        {"pattern_type": "prefix", "pattern": "OPENAI"}
+      ]
+    },
+    {
+      "slug": "spacex",
+      "display_name": "SpaceX",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "SPACEX"},
+        {"pattern_type": "exact_normalized", "pattern": "SPACE EXPLORATION TECHNOLOGIES"},
+        {"pattern_type": "exact_normalized", "pattern": "SPACE EXPLORATION TECHNOLOGIES CORP"},
+        {"pattern_type": "prefix", "pattern": "SPACE EXPLORATION"},
+        {"pattern_type": "prefix", "pattern": "SPACEX"}
+      ]
+    },
+    {
+      "slug": "xai",
+      "display_name": "xAI",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "XAI"},
+        {"pattern_type": "exact_normalized", "pattern": "X AI"},
+        {"pattern_type": "exact_normalized", "pattern": "X AI HOLDINGS"},
+        {"pattern_type": "regex", "pattern": "\\bX\\.?AI\\b"}
+      ]
+    },
+    {
+      "slug": "stripe",
+      "display_name": "Stripe",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "STRIPE"},
+        {"pattern_type": "exact_normalized", "pattern": "STRIPE INC"},
+        {"pattern_type": "prefix", "pattern": "STRIPE INC"}
+      ]
+    },
+    {
+      "slug": "canva",
+      "display_name": "Canva",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "CANVA"},
+        {"pattern_type": "exact_normalized", "pattern": "CANVA PTY"},
+        {"pattern_type": "exact_normalized", "pattern": "CANVA AUSTRALIA"},
+        {"pattern_type": "exact_normalized", "pattern": "CANVA PTY LIMITED"},
+        {"pattern_type": "prefix", "pattern": "CANVA PTY"}
+      ]
+    },
+    {
+      "slug": "anduril",
+      "display_name": "Anduril",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "ANDURIL"},
+        {"pattern_type": "exact_normalized", "pattern": "ANDURIL INDUSTRIES"},
+        {"pattern_type": "prefix", "pattern": "ANDURIL"}
+      ]
+    },
+    {
+      "slug": "epic-games",
+      "display_name": "Epic Games",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "EPIC GAMES"},
+        {"pattern_type": "prefix", "pattern": "EPIC GAMES"}
+      ]
+    },
+    {
+      "slug": "zipline",
+      "display_name": "Zipline",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "ZIPLINE"},
+        {"pattern_type": "exact_normalized", "pattern": "ZIPLINE INTERNATIONAL"},
+        {"pattern_type": "prefix", "pattern": "ZIPLINE INTERNATIONAL"}
+      ]
+    },
+    {
+      "slug": "icapital",
+      "display_name": "iCapital",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "ICAPITAL"},
+        {"pattern_type": "exact_normalized", "pattern": "ICAPITAL NETWORK"},
+        {"pattern_type": "prefix", "pattern": "ICAPITAL NETWORK"}
+      ]
+    },
+    {
+      "slug": "revolut",
+      "display_name": "Revolut",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "REVOLUT"},
+        {"pattern_type": "exact_normalized", "pattern": "REVOLUT GROUP"},
+        {"pattern_type": "exact_normalized", "pattern": "REVOLUT GROUP HOLDINGS"},
+        {"pattern_type": "exact_normalized", "pattern": "REVOLUT LTD"},
+        {"pattern_type": "prefix", "pattern": "REVOLUT GROUP"}
+      ]
+    },
+    {
+      "slug": "skyryse",
+      "display_name": "Skyryse",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "SKYRYSE"},
+        {"pattern_type": "prefix", "pattern": "SKYRYSE INC"}
+      ]
+    },
+    {
+      "slug": "oura",
+      "display_name": "Oura Health",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "OURA HEALTH"},
+        {"pattern_type": "exact_normalized", "pattern": "OURA HEALTH OY"},
+        {"pattern_type": "prefix", "pattern": "OURA HEALTH"}
+      ]
+    },
+    {
+      "slug": "physical-intelligence",
+      "display_name": "Physical Intelligence",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "PHYSICAL INTELLIGENCE"},
+        {"pattern_type": "prefix", "pattern": "PHYSICAL INTELLIGENCE"}
+      ]
+    },
+    {
+      "slug": "sila-nano",
+      "display_name": "Sila Nano",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "SILA NANOTECHNOLOGIES"},
+        {"pattern_type": "exact_normalized", "pattern": "SILA NANO"},
+        {"pattern_type": "prefix", "pattern": "SILA NANOTECHNOLOGIES"}
+      ]
+    },
+    {
+      "slug": "diamond-foundry",
+      "display_name": "Diamond Foundry",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "DIAMOND FOUNDRY"},
+        {"pattern_type": "prefix", "pattern": "DIAMOND FOUNDRY"}
+      ]
+    },
+    {
+      "slug": "kardigan",
+      "display_name": "Kardigan",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "KARDIGAN"},
+        {"pattern_type": "exact_normalized", "pattern": "KARDIGAN INC"}
+      ]
+    },
+    {
+      "slug": "juul",
+      "display_name": "Juul Labs",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "JUUL"},
+        {"pattern_type": "exact_normalized", "pattern": "JUUL LABS"},
+        {"pattern_type": "prefix", "pattern": "JUUL LABS"}
+      ]
+    },
+    {
+      "slug": "bytedance",
+      "display_name": "ByteDance / Douyin",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "BYTEDANCE"},
+        {"pattern_type": "exact_normalized", "pattern": "DOUYIN"},
+        {"pattern_type": "exact_normalized", "pattern": "DOUYIN GROUP"},
+        {"pattern_type": "exact_normalized", "pattern": "BEIJING BYTEDANCE"},
+        {"pattern_type": "prefix", "pattern": "BYTEDANCE"},
+        {"pattern_type": "prefix", "pattern": "DOUYIN GROUP"}
+      ]
+    },
+    {
+      "slug": "sberbank",
+      "display_name": "Sberbank of Russia (sanctioned)",
+      "is_sanctioned": true,
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "SBERBANK"},
+        {"pattern_type": "exact_normalized", "pattern": "SBERBANK OF RUSSIA"},
+        {"pattern_type": "prefix", "pattern": "SBERBANK"}
+      ]
+    }
+  ]
+}

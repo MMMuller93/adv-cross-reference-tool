@@ -1,0 +1,1072 @@
+{
+  "_comment": "Hand-curated top-50 tracked private companies with FULL alias details. Covers all 20 from PLAN §3.2 top-distinct-filers ranking, plus 30 from the user-supplied N-PORT discovery list. Each entry has the schema fields from §4.1 of private_companies + a list of alias rows shaped like private_company_aliases. Where N-PORT-discovered raw titles imply share-class variants, those are encoded as exact_normalized aliases; we also generate a prefix alias on the canonical normalized name. Vendor codes (LEI etc.) are placeholders where the real code was not directly observed — they're shaped correctly but should be replaced by the resolution pipeline once it scans IDENTIFIERS.tsv.",
+  "_source": "PLAN_NPORT_HOLDINGS.md §3.2 + N-PORT entity-resolution research",
+  "_generated_at": "2026-05-11",
+  "_alias_schema_note": "pattern_type ∈ {'exact_normalized','prefix','contains','regex','vendor_code'}; exposure_type ∈ {'direct','spv','feeder','derivative','credit'}; vendor_code_type ∈ {'BlackRock','BBGID','FIGI','LoanX','LEI'} when pattern_type='vendor_code'",
+  "entries": [
+    {
+      "slug": "anthropic",
+      "display_name": "Anthropic",
+      "primary_domain": "anthropic.com",
+      "sector": "ai_ml",
+      "founded_year": 2021,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Anthropic PBC", "jurisdiction": "Delaware", "role": "pbc"},
+        {"name": "Anthropic, Inc.", "jurisdiction": "Delaware", "role": "predecessor"}
+      ],
+      "most_recent_round": "Series G",
+      "most_recent_round_date": "2026-02-12",
+      "latest_known_valuation_usd": 380000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "ANTHROPIC", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "ANTHROPIC PBC", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "ANTHROPIC INC", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "ANTHROPIC", "exposure_type": "direct"},
+        {"pattern_type": "vendor_code",      "pattern": "BYDP5QT36", "vendor_code_type": "BlackRock"}
+      ]
+    },
+    {
+      "slug": "openai",
+      "display_name": "OpenAI",
+      "primary_domain": "openai.com",
+      "sector": "ai_ml",
+      "founded_year": 2015,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "OpenAI Global LLC", "jurisdiction": "Delaware", "role": "operating"},
+        {"name": "OpenAI OpCo LLC", "jurisdiction": "Delaware", "role": "sub"},
+        {"name": "OpenAI, Inc.", "jurisdiction": "Delaware", "role": "parent_nonprofit"}
+      ],
+      "most_recent_round": "Tender (Q1 2026)",
+      "most_recent_round_date": "2026-03-31",
+      "latest_known_valuation_usd": 850000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "OPENAI", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "OPENAI GLOBAL", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "OPENAI OPCO", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "OPENAI", "exposure_type": "direct"},
+        {"pattern_type": "regex",            "pattern": "(?i)economic exposure to OpenAI", "exposure_type": "spv"},
+        {"pattern_type": "regex",            "pattern": "(?i)\\bdba\\s+OPENAI\\b", "exposure_type": "spv"},
+        {"pattern_type": "exact_normalized", "pattern": "DXYZ OAI I", "exposure_type": "spv"},
+        {"pattern_type": "exact_normalized", "pattern": "AESTAS DBA OPENAI", "exposure_type": "spv"}
+      ]
+    },
+    {
+      "slug": "spacex",
+      "display_name": "SpaceX",
+      "primary_domain": "spacex.com",
+      "sector": "space_defense",
+      "founded_year": 2002,
+      "hq_country": "US",
+      "hq_state": "TX",
+      "legal_entities": [
+        {"name": "Space Exploration Technologies Corp.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Tender (December 2024)",
+      "most_recent_round_date": "2024-12-01",
+      "latest_known_valuation_usd": 1250000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "SPACEX", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "SPACE EXPLORATION TECHNOLOGIES", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "SPACE EXPLORATION TECH", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "SPACE EXPLORATION TECH", "exposure_type": "direct"},
+        {"pattern_type": "regex",            "pattern": "(?i)economic exposure to Space Exploration", "exposure_type": "spv"},
+        {"pattern_type": "regex",            "pattern": "(?i)\\bSpaceX-?I+\\b.*LLC", "exposure_type": "spv"},
+        {"pattern_type": "exact_normalized", "pattern": "MWAM VC SPACEX-II", "exposure_type": "spv"},
+        {"pattern_type": "exact_normalized", "pattern": "SPV EXPOSURE TO SPACEX", "exposure_type": "spv"}
+      ]
+    },
+    {
+      "slug": "databricks",
+      "display_name": "Databricks",
+      "primary_domain": "databricks.com",
+      "sector": "ai_ml",
+      "founded_year": 2013,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Databricks, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series J",
+      "most_recent_round_date": "2024-12-17",
+      "latest_known_valuation_usd": 62000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "DATABRICKS", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "DATABRICKS INC", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "DATABRICKS", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "xai",
+      "display_name": "xAI",
+      "primary_domain": "x.ai",
+      "sector": "ai_ml",
+      "founded_year": 2023,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "X.AI Holdings Corp.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series C",
+      "most_recent_round_date": "2025-12-01",
+      "latest_known_valuation_usd": 50000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "XAI", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "X AI", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "XAI HOLDINGS", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "X AI HOLDINGS", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "XAI HOLDINGS", "exposure_type": "direct"},
+        {"pattern_type": "regex",            "pattern": "(?i)\\bxAI\\s+Term\\s+Loan\\b", "exposure_type": "credit"}
+      ]
+    },
+    {
+      "slug": "stripe",
+      "display_name": "Stripe",
+      "primary_domain": "stripe.com",
+      "sector": "fintech",
+      "founded_year": 2010,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Stripe, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Tender (March 2025)",
+      "most_recent_round_date": "2025-02-27",
+      "latest_known_valuation_usd": 91500000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "STRIPE", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "STRIPE INC", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "STRIPE INCORPORATED", "exposure_type": "direct"}
+      ],
+      "_excluded_substrings": ["Pinstripes Holdings", "Stripes VI Rainier"]
+    },
+    {
+      "slug": "canva",
+      "display_name": "Canva",
+      "primary_domain": "canva.com",
+      "sector": "consumer",
+      "founded_year": 2012,
+      "hq_country": "AU",
+      "legal_entities": [
+        {"name": "Canva Pty Ltd", "jurisdiction": "Australia", "role": "operating"},
+        {"name": "Canva Australia Holdings Pty Ltd", "jurisdiction": "Australia", "role": "parent"}
+      ],
+      "most_recent_round": "Tender (November 2024)",
+      "most_recent_round_date": "2024-11-01",
+      "latest_known_valuation_usd": 42000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "CANVA", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "CANVA PTY", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "CANVA AUSTRALIA HOLDINGS PTY", "exposure_type": "direct"}
+      ],
+      "_excluded_substrings": ["Under Canvas"]
+    },
+    {
+      "slug": "bytedance",
+      "display_name": "ByteDance",
+      "primary_domain": "bytedance.com",
+      "sector": "consumer",
+      "founded_year": 2012,
+      "hq_country": "CN",
+      "legal_entities": [
+        {"name": "ByteDance Ltd.", "jurisdiction": "Cayman Islands", "role": "parent"},
+        {"name": "Douyin Group (Cayman) Ltd.", "jurisdiction": "Cayman Islands", "role": "sub"}
+      ],
+      "most_recent_round": "Tender (Q1 2025)",
+      "most_recent_round_date": "2025-01-15",
+      "latest_known_valuation_usd": 330000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "BYTEDANCE", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "BYTEDANCE LTD", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "DOUYIN", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "DOUYIN GROUP", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "BYTEDANCE", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "DOUYIN", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "anduril",
+      "display_name": "Anduril Industries",
+      "primary_domain": "anduril.com",
+      "sector": "space_defense",
+      "founded_year": 2017,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Anduril Industries, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series G",
+      "most_recent_round_date": "2025-08-01",
+      "latest_known_valuation_usd": 30500000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "ANDURIL", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "ANDURIL INDUSTRIES", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "ANDURIL", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "epic-games",
+      "display_name": "Epic Games",
+      "primary_domain": "epicgames.com",
+      "sector": "consumer",
+      "founded_year": 1991,
+      "hq_country": "US",
+      "hq_state": "NC",
+      "legal_entities": [
+        {"name": "Epic Games, Inc.", "jurisdiction": "Maryland", "role": "operating"}
+      ],
+      "most_recent_round": "Series E",
+      "most_recent_round_date": "2022-04-11",
+      "latest_known_valuation_usd": 31500000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "EPIC GAMES", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "EPIC GAMES", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "zipline",
+      "display_name": "Zipline",
+      "primary_domain": "flyzipline.com",
+      "sector": "mobility",
+      "founded_year": 2014,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Zipline International, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series F",
+      "most_recent_round_date": "2023-04-19",
+      "latest_known_valuation_usd": 4200000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "ZIPLINE", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "ZIPLINE INTERNATIONAL", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "ZIPLINE INTERNATIONAL", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "icapital",
+      "display_name": "iCapital",
+      "primary_domain": "icapital.com",
+      "sector": "fintech",
+      "founded_year": 2013,
+      "hq_country": "US",
+      "hq_state": "NY",
+      "legal_entities": [
+        {"name": "Institutional Capital Network, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Strategic Round",
+      "most_recent_round_date": "2024-12-05",
+      "latest_known_valuation_usd": 7500000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "ICAPITAL", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "ICAPITAL NETWORK", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "INSTITUTIONAL CAPITAL NETWORK", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "ICAPITAL", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "revolut",
+      "display_name": "Revolut",
+      "primary_domain": "revolut.com",
+      "sector": "fintech",
+      "founded_year": 2015,
+      "hq_country": "GB",
+      "legal_entities": [
+        {"name": "Revolut Ltd", "jurisdiction": "United Kingdom", "role": "operating"},
+        {"name": "Revolut Group Holdings Ltd", "jurisdiction": "United Kingdom", "role": "parent"}
+      ],
+      "most_recent_round": "Tender (August 2024)",
+      "most_recent_round_date": "2024-08-16",
+      "latest_known_valuation_usd": 45000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "REVOLUT", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "REVOLUT LTD", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "REVOLUT GROUP HOLDINGS", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "REVOLUT", "exposure_type": "direct"}
+      ],
+      "_excluded_substrings": ["Revolution Medicines", "Carbon Revolution"]
+    },
+    {
+      "slug": "skyryse",
+      "display_name": "Skyryse",
+      "primary_domain": "skyryse.com",
+      "sector": "mobility",
+      "founded_year": 2017,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Skyryse, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series C",
+      "most_recent_round_date": "2024-09-25",
+      "latest_known_valuation_usd": 700000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "SKYRYSE", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "SKYRYSE", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "oura",
+      "display_name": "Oura",
+      "primary_domain": "ouraring.com",
+      "sector": "consumer",
+      "founded_year": 2013,
+      "hq_country": "FI",
+      "legal_entities": [
+        {"name": "Oura Health Oy", "jurisdiction": "Finland", "role": "operating"},
+        {"name": "Oura Health Ltd", "jurisdiction": "United States", "role": "us_sub"}
+      ],
+      "most_recent_round": "Series E",
+      "most_recent_round_date": "2024-12-19",
+      "latest_known_valuation_usd": 5200000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "OURA", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "OURA HEALTH", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "OURA HEALTH", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "physical-intelligence",
+      "display_name": "Physical Intelligence",
+      "primary_domain": "physicalintelligence.company",
+      "sector": "ai_ml",
+      "founded_year": 2024,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Physical Intelligence, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series B",
+      "most_recent_round_date": "2024-11-04",
+      "latest_known_valuation_usd": 2400000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "PHYSICAL INTELLIGENCE", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "PHYSICAL INTELLIGENCE", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "sila-nano",
+      "display_name": "Sila Nanotechnologies",
+      "primary_domain": "silanano.com",
+      "sector": "other",
+      "founded_year": 2011,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Sila Nanotechnologies, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series G",
+      "most_recent_round_date": "2024-02-15",
+      "latest_known_valuation_usd": 3300000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "SILA NANO", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "SILA NANOTECHNOLOGIES", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "SILA NAN", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "diamond-foundry",
+      "display_name": "Diamond Foundry",
+      "primary_domain": "diamondfoundry.com",
+      "sector": "consumer",
+      "founded_year": 2012,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Diamond Foundry, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series D",
+      "most_recent_round_date": "2024-07-10",
+      "latest_known_valuation_usd": 1800000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "DIAMOND FOUNDRY", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "DIAMOND FOUNDRY", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "kardigan",
+      "display_name": "Kardigan",
+      "primary_domain": "kardigan.com",
+      "sector": "biotech",
+      "founded_year": 2022,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Kardigan, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series A",
+      "most_recent_round_date": "2024-10-01",
+      "latest_known_valuation_usd": 400000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "KARDIGAN", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "KARDIGAN", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "juul",
+      "display_name": "Juul Labs",
+      "primary_domain": "juul.com",
+      "sector": "consumer",
+      "founded_year": 2017,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Juul Labs, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Convertible Note",
+      "most_recent_round_date": "2024-01-31",
+      "latest_known_valuation_usd": 1600000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "JUUL", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "JUUL LABS", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "JUUL LABS", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "fanatics",
+      "display_name": "Fanatics",
+      "primary_domain": "fanatics.com",
+      "sector": "consumer",
+      "founded_year": 2011,
+      "hq_country": "US",
+      "hq_state": "FL",
+      "legal_entities": [
+        {"name": "Fanatics Holdings, Inc.", "jurisdiction": "Delaware", "role": "parent"},
+        {"name": "Fanatics, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series G",
+      "most_recent_round_date": "2024-12-18",
+      "latest_known_valuation_usd": 31000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "FANATICS", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "FANATICS HOLDINGS", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "FANATICS", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "cerebras",
+      "display_name": "Cerebras Systems",
+      "primary_domain": "cerebras.net",
+      "sector": "ai_ml",
+      "founded_year": 2016,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Cerebras Systems, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series F",
+      "most_recent_round_date": "2024-08-30",
+      "latest_known_valuation_usd": 4250000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "CEREBRAS", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "CEREBRAS SYSTEMS", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "CEREBRAS", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "tenstorrent",
+      "display_name": "Tenstorrent",
+      "primary_domain": "tenstorrent.com",
+      "sector": "ai_ml",
+      "founded_year": 2016,
+      "hq_country": "CA",
+      "legal_entities": [
+        {"name": "Tenstorrent Inc.", "jurisdiction": "Canada", "role": "operating"}
+      ],
+      "most_recent_round": "Series D",
+      "most_recent_round_date": "2024-12-02",
+      "latest_known_valuation_usd": 2700000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "TENSTORRENT", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "TENSTORRENT", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "lightmatter",
+      "display_name": "Lightmatter",
+      "primary_domain": "lightmatter.co",
+      "sector": "ai_ml",
+      "founded_year": 2017,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Lightmatter, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series D",
+      "most_recent_round_date": "2024-10-15",
+      "latest_known_valuation_usd": 4400000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "LIGHTMATTER", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "LIGHTMATTER", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "sambanova",
+      "display_name": "SambaNova Systems",
+      "primary_domain": "sambanova.ai",
+      "sector": "ai_ml",
+      "founded_year": 2017,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "SambaNova Systems, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series D",
+      "most_recent_round_date": "2021-04-13",
+      "latest_known_valuation_usd": 5100000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "SAMBANOVA", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "SAMBANOVA SYSTEMS", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "SAMBANOVA", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "groq",
+      "display_name": "Groq",
+      "primary_domain": "groq.com",
+      "sector": "ai_ml",
+      "founded_year": 2016,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Groq, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series D",
+      "most_recent_round_date": "2024-08-05",
+      "latest_known_valuation_usd": 2800000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "GROQ", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "GROQ INC", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "GROQ", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "figure-ai",
+      "display_name": "Figure AI",
+      "primary_domain": "figure.ai",
+      "sector": "ai_ml",
+      "founded_year": 2022,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Figure AI, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series B",
+      "most_recent_round_date": "2024-02-29",
+      "latest_known_valuation_usd": 2600000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "FIGURE AI", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "FIGURE INC", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "FIGURE AI", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "applied-intuition",
+      "display_name": "Applied Intuition",
+      "primary_domain": "appliedintuition.com",
+      "sector": "mobility",
+      "founded_year": 2017,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Applied Intuition, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series E",
+      "most_recent_round_date": "2024-03-12",
+      "latest_known_valuation_usd": 6000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "APPLIED INTUITION", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "APPLIED INTUITION", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "moloco",
+      "display_name": "Moloco",
+      "primary_domain": "moloco.com",
+      "sector": "ai_ml",
+      "founded_year": 2013,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Moloco, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series E",
+      "most_recent_round_date": "2024-09-25",
+      "latest_known_valuation_usd": 5500000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "MOLOCO", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "MOLOCO", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "elevatebio",
+      "display_name": "ElevateBio",
+      "primary_domain": "elevate.bio",
+      "sector": "biotech",
+      "founded_year": 2017,
+      "hq_country": "US",
+      "hq_state": "MA",
+      "legal_entities": [
+        {"name": "ElevateBio LLC", "jurisdiction": "Delaware", "role": "operating"},
+        {"name": "ElevateBio Management, Inc.", "jurisdiction": "Delaware", "role": "manager"}
+      ],
+      "most_recent_round": "Series D",
+      "most_recent_round_date": "2024-03-15",
+      "latest_known_valuation_usd": 1500000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "ELEVATEBIO", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "ELEVATEBIO MANAGEMENT", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "ELEVATEBIO", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "insitro",
+      "display_name": "Insitro",
+      "primary_domain": "insitro.com",
+      "sector": "biotech",
+      "founded_year": 2018,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Insitro, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series D",
+      "most_recent_round_date": "2023-04-12",
+      "latest_known_valuation_usd": 2500000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "INSITRO", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "INSITRO", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "aledade",
+      "display_name": "Aledade",
+      "primary_domain": "aledade.com",
+      "sector": "biotech",
+      "founded_year": 2014,
+      "hq_country": "US",
+      "hq_state": "MD",
+      "legal_entities": [
+        {"name": "Aledade, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series F",
+      "most_recent_round_date": "2023-06-08",
+      "latest_known_valuation_usd": 3500000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "ALEDADE", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "ALEDADE", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "kobold-metals",
+      "display_name": "KoBold Metals",
+      "primary_domain": "koboldmetals.com",
+      "sector": "other",
+      "founded_year": 2018,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "KoBold Metals Company", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series C",
+      "most_recent_round_date": "2025-01-29",
+      "latest_known_valuation_usd": 2960000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "KOBOLD METALS", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "KOBOLD METALS", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "psiquantum",
+      "display_name": "PsiQuantum",
+      "primary_domain": "psiquantum.com",
+      "sector": "ai_ml",
+      "founded_year": 2016,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "PsiQuantum Corp.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series E",
+      "most_recent_round_date": "2024-09-12",
+      "latest_known_valuation_usd": 6000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "PSIQUANTUM", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "PSIQUANTUM", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "shield-ai",
+      "display_name": "Shield AI",
+      "primary_domain": "shield.ai",
+      "sector": "space_defense",
+      "founded_year": 2015,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Shield AI, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series F",
+      "most_recent_round_date": "2024-11-19",
+      "latest_known_valuation_usd": 5300000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "SHIELD AI", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "SHIELD AI", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "astranis",
+      "display_name": "Astranis",
+      "primary_domain": "astranis.com",
+      "sector": "space_defense",
+      "founded_year": 2015,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Astranis Space Technologies Corp.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series D",
+      "most_recent_round_date": "2024-04-30",
+      "latest_known_valuation_usd": 1900000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "ASTRANIS", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "ASTRANIS SPACE TECHNOLOGIES", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "ASTRANIS", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "relativity-space",
+      "display_name": "Relativity Space",
+      "primary_domain": "relativityspace.com",
+      "sector": "space_defense",
+      "founded_year": 2015,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Relativity Space, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series F",
+      "most_recent_round_date": "2023-08-15",
+      "latest_known_valuation_usd": 4200000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "RELATIVITY SPACE", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "RELATIVITY SPACE", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "waymo",
+      "display_name": "Waymo",
+      "primary_domain": "waymo.com",
+      "sector": "mobility",
+      "founded_year": 2009,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Waymo LLC", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series C",
+      "most_recent_round_date": "2024-10-25",
+      "latest_known_valuation_usd": 45000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "WAYMO", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "WAYMO HOLDINGS", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "WAYMO", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "nuro",
+      "display_name": "Nuro",
+      "primary_domain": "nuro.ai",
+      "sector": "mobility",
+      "founded_year": 2016,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Nuro, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series D",
+      "most_recent_round_date": "2024-04-15",
+      "latest_known_valuation_usd": 6000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "NURO", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "NURO", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "plaid",
+      "display_name": "Plaid",
+      "primary_domain": "plaid.com",
+      "sector": "fintech",
+      "founded_year": 2013,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Plaid Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series D",
+      "most_recent_round_date": "2021-04-07",
+      "latest_known_valuation_usd": 13400000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "PLAID", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "PLAID INC", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "PLAID INC", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "brex",
+      "display_name": "Brex",
+      "primary_domain": "brex.com",
+      "sector": "fintech",
+      "founded_year": 2017,
+      "hq_country": "US",
+      "hq_state": "UT",
+      "legal_entities": [
+        {"name": "Brex Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series D-2",
+      "most_recent_round_date": "2022-01-11",
+      "latest_known_valuation_usd": 12300000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "BREX", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "BREX INC", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "BREX", "exposure_type": "direct"},
+        {"pattern_type": "regex",            "pattern": "(?i)invested in Brex", "exposure_type": "spv"}
+      ]
+    },
+    {
+      "slug": "discord",
+      "display_name": "Discord",
+      "primary_domain": "discord.com",
+      "sector": "consumer",
+      "founded_year": 2015,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Discord Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series I",
+      "most_recent_round_date": "2024-08-15",
+      "latest_known_valuation_usd": 15000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "DISCORD", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "DISCORD INC", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "DISCORD INC", "exposure_type": "direct"},
+        {"pattern_type": "regex",            "pattern": "(?i)invested in Discord", "exposure_type": "spv"}
+      ]
+    },
+    {
+      "slug": "notion",
+      "display_name": "Notion Labs",
+      "primary_domain": "notion.so",
+      "sector": "consumer",
+      "founded_year": 2013,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Notion Labs, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series C",
+      "most_recent_round_date": "2021-10-08",
+      "latest_known_valuation_usd": 10000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "NOTION", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "NOTION LABS", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "NOTION LABS", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "figma",
+      "display_name": "Figma",
+      "primary_domain": "figma.com",
+      "sector": "consumer",
+      "founded_year": 2012,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Figma, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Tender (April 2024)",
+      "most_recent_round_date": "2024-04-30",
+      "latest_known_valuation_usd": 12500000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "FIGMA", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "FIGMA INC", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "FIGMA", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "klarna",
+      "display_name": "Klarna",
+      "primary_domain": "klarna.com",
+      "sector": "fintech",
+      "founded_year": 2005,
+      "hq_country": "SE",
+      "legal_entities": [
+        {"name": "Klarna Bank AB", "jurisdiction": "Sweden", "role": "operating"},
+        {"name": "Klarna Holding AB", "jurisdiction": "Sweden", "role": "parent"}
+      ],
+      "most_recent_round": "IPO Pending",
+      "most_recent_round_date": "2024-03-31",
+      "latest_known_valuation_usd": 14600000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "KLARNA", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "KLARNA BANK", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "KLARNA HOLDING", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "KLARNA", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "scale-ai",
+      "display_name": "Scale AI",
+      "primary_domain": "scale.com",
+      "sector": "ai_ml",
+      "founded_year": 2016,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Scale AI, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series F",
+      "most_recent_round_date": "2024-05-21",
+      "latest_known_valuation_usd": 13800000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "SCALE AI", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "SCALE AI INC", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "SCALE AI", "exposure_type": "direct"}
+      ],
+      "_excluded_substrings": ["Anyscale"]
+    },
+    {
+      "slug": "carta",
+      "display_name": "Carta",
+      "primary_domain": "carta.com",
+      "sector": "fintech",
+      "founded_year": 2012,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Carta, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Tender (December 2023)",
+      "most_recent_round_date": "2023-12-15",
+      "latest_known_valuation_usd": 6500000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "CARTA", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "CARTA INC", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "CARTA INC", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "formlabs",
+      "display_name": "Formlabs",
+      "primary_domain": "formlabs.com",
+      "sector": "other",
+      "founded_year": 2011,
+      "hq_country": "US",
+      "hq_state": "MA",
+      "legal_entities": [
+        {"name": "Formlabs Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series E",
+      "most_recent_round_date": "2024-04-09",
+      "latest_known_valuation_usd": 2000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "FORMLABS", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "FORMLABS", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "rippling",
+      "display_name": "Rippling",
+      "primary_domain": "rippling.com",
+      "sector": "fintech",
+      "founded_year": 2016,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Rippling People Center Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series G",
+      "most_recent_round_date": "2025-05-20",
+      "latest_known_valuation_usd": 16800000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "RIPPLING", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "RIPPLING PEOPLE CENTER", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "RIPPLING", "exposure_type": "direct"}
+      ]
+    },
+    {
+      "slug": "perplexity",
+      "display_name": "Perplexity AI",
+      "primary_domain": "perplexity.ai",
+      "sector": "ai_ml",
+      "founded_year": 2022,
+      "hq_country": "US",
+      "hq_state": "CA",
+      "legal_entities": [
+        {"name": "Perplexity AI, Inc.", "jurisdiction": "Delaware", "role": "operating"}
+      ],
+      "most_recent_round": "Series C",
+      "most_recent_round_date": "2024-12-19",
+      "latest_known_valuation_usd": 9000000000,
+      "lifecycle_status": "private",
+      "aliases": [
+        {"pattern_type": "exact_normalized", "pattern": "PERPLEXITY", "exposure_type": "direct"},
+        {"pattern_type": "exact_normalized", "pattern": "PERPLEXITY AI", "exposure_type": "direct"},
+        {"pattern_type": "prefix",           "pattern": "PERPLEXITY", "exposure_type": "direct"}
+      ]
+    }
+  ]
+}

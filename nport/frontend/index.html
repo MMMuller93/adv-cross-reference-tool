@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>N-PORT Holdings — Private Funds Radar</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
+    </style>
+  </head>
+  <body class="bg-gray-50 text-slate-800">
+    <header class="bg-white border-b border-slate-200">
+      <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+        <h1 class="text-xl font-semibold tracking-tight">N-PORT Holdings (standalone)</h1>
+        <a class="text-sm text-slate-500 hover:text-slate-700" href="/admin/unresolved">Admin</a>
+      </div>
+    </header>
+    <main>
+      <div id="root" class="max-w-7xl mx-auto px-6 py-6">
+        <p class="text-slate-500">
+          Visit <code class="bg-slate-100 px-1 rounded">/company/anthropic</code>,
+          <code class="bg-slate-100 px-1 rounded">/fund/24238/S000004007</code>, or
+          <code class="bg-slate-100 px-1 rounded">/admin/unresolved</code>
+          to render a page.
+        </p>
+      </div>
+    </main>
+    <script src="mocks/nport.js"></script>
+    <script src="nport_pages.js"></script>
+    <script>
+      // Mount NportRouter on the matched route. This file lives in
+      // nport/frontend/ and is served by nport/api/server.js as static.
+      (function () {
+        const route = window.matchNportRoute && window.matchNportRoute(window.location.pathname);
+        if (route && typeof window.NportRouter !== 'undefined') {
+          const root = ReactDOM.createRoot(document.getElementById('root'));
+          root.render(React.createElement(window.NportRouter, { route }));
+        }
+      })();
+    </script>
+  </body>
+</html>

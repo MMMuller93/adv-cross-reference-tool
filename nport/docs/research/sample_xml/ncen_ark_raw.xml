@@ -1,0 +1,559 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<edgarSubmission xmlns="http://www.sec.gov/edgar/ncen" xmlns:com="http://www.sec.gov/edgar/common">
+  <schemaVersion>X0505</schemaVersion>
+  <headerData>
+    <submissionType>N-CEN</submissionType>
+    <filerInfo>
+      <liveTestFlag>LIVE</liveTestFlag>
+      <filer>
+        <issuerCredentials>
+          <cik>0001905088</cik>
+          <ccc>XXXXXXXX</ccc>
+        </issuerCredentials>
+        <fileNumber>811-23778</fileNumber>
+      </filer>
+      <flags>
+        <overrideInternetFlag>false</overrideInternetFlag>
+        <confirmingCopyFlag>false</confirmingCopyFlag>
+      </flags>
+      <investmentCompanyType>N-2</investmentCompanyType>
+    </filerInfo>
+  </headerData>
+  <formData>
+    <generalInfo reportEndingPeriod="2025-07-31" isReportPeriodLt12="N"/>
+    <registrantInfo>
+      <registrantFullName>ARK Venture Fund</registrantFullName>
+      <investmentCompFileNo>811-23778</investmentCompFileNo>
+      <registrantCik>0001905088</registrantCik>
+      <registrantLei>549300NU5FJOOC8NMZ08</registrantLei>
+      <registrantstreet1>200 Central Avenue</registrantstreet1>
+      <registrantstreet2>Suite 220</registrantstreet2>
+      <registrantcity>St. Petersburg</registrantcity>
+      <registrantzipCode>33701</registrantzipCode>
+      <registrantstate>US-FL</registrantstate>
+      <registrantcountry>US</registrantcountry>
+      <registrantphoneNumber>727-810-8160</registrantphoneNumber>
+      <websites>
+        <website webpage="http://ark-ventures.com"/>
+      </websites>
+      <locationBooksRecords>
+        <locationBooksRecord>
+          <officeName>The Bank of New York Mellon</officeName>
+          <officeAddress1>240 Greenwich Street</officeAddress1>
+          <officeCity>New York</officeCity>
+          <officeStateCountry officeCountry="US" officeState="US-NY"/>
+          <officeRecordsZipCode>10286</officeRecordsZipCode>
+          <officePhone>212-495-1784</officePhone>
+          <booksRecordsDesc>Records relating to its function as custodian, administrator and transfer agent.</booksRecordsDesc>
+        </locationBooksRecord>
+        <locationBooksRecord>
+          <officeName>ACA Global</officeName>
+          <officeAddress1>Three Canal Plaza</officeAddress1>
+          <officeAddress2>Suite 100</officeAddress2>
+          <officeCity>Portland</officeCity>
+          <officeStateCountry officeCountry="US" officeState="US-ME"/>
+          <officeRecordsZipCode>04101</officeRecordsZipCode>
+          <officePhone>207-553-7111</officePhone>
+          <booksRecordsDesc>Records relating to its function as distributor.</booksRecordsDesc>
+        </locationBooksRecord>
+        <locationBooksRecord>
+          <officeName>ARK Investment Management LLC</officeName>
+          <officeAddress1>200 Central Avenue</officeAddress1>
+          <officeAddress2>Suite 220</officeAddress2>
+          <officeCity>St. Petersburg</officeCity>
+          <officeStateCountry officeCountry="US" officeState="US-FL"/>
+          <officeRecordsZipCode>33701</officeRecordsZipCode>
+          <officePhone>727-810-8160</officePhone>
+          <booksRecordsDesc>Records related to its function as Investment Adviser.</booksRecordsDesc>
+        </locationBooksRecord>
+      </locationBooksRecords>
+      <isRegistrantFirstFiling>N</isRegistrantFirstFiling>
+      <isRegistrantLastFiling>N</isRegistrantLastFiling>
+      <registrantFamilyInvComp isRegistrantFamilyInvComp="Y" familyInvCompFullName="ARKETFTRUS"/>
+      <registrantClassificationType>N-2</registrantClassificationType>
+      <isSecuritiesActRegistration>Y</isSecuritiesActRegistration>
+      <directors>
+        <director>
+          <directorName>Catherine D. Wood</directorName>
+          <crdNumber>N/A</crdNumber>
+          <isDirectorInterestedPerson>Y</isDirectorInterestedPerson>
+          <fileNumbers>
+            <fileNumberInfo fileNumber="811-22883"/>
+          </fileNumbers>
+        </director>
+        <director>
+          <directorName>Scott R. Chichester</directorName>
+          <crdNumber>N/A</crdNumber>
+          <isDirectorInterestedPerson>N</isDirectorInterestedPerson>
+          <fileNumbers>
+            <fileNumberInfo fileNumber="811-22883"/>
+          </fileNumbers>
+        </director>
+        <director>
+          <directorName>Darlene T. DeRemer</directorName>
+          <crdNumber>001306882</crdNumber>
+          <isDirectorInterestedPerson>N</isDirectorInterestedPerson>
+          <fileNumbers>
+            <fileNumberInfo fileNumber="811-22883"/>
+          </fileNumbers>
+        </director>
+        <director>
+          <directorName>Robert G. Zack</directorName>
+          <crdNumber>N/A</crdNumber>
+          <isDirectorInterestedPerson>N</isDirectorInterestedPerson>
+          <fileNumbers>
+            <fileNumberInfo fileNumber="811-22883"/>
+          </fileNumbers>
+        </director>
+      </directors>
+      <chiefComplianceOfficers>
+        <chiefComplianceOfficer>
+          <ccoName>Kellen Carter</ccoName>
+          <crdNumber>N/A</crdNumber>
+          <ccoStreet1>200 Central Avenue</ccoStreet1>
+          <ccoStreet2>Suite 220</ccoStreet2>
+          <ccoCity>St. Petersburg</ccoCity>
+          <ccoStateCountry ccoCountry="US" ccoState="US-FL"/>
+          <ccoZipCode>33701</ccoZipCode>
+          <ccoPhone>XXXXXX</ccoPhone>
+          <isCcoChangedSinceLastFiling>N</isCcoChangedSinceLastFiling>
+          <ccoEmployers>
+            <ccoEmployer ccoEmployerName="N/A" ccoEmployerId="N/A"/>
+          </ccoEmployers>
+        </chiefComplianceOfficer>
+      </chiefComplianceOfficers>
+      <isRegistrantSubmittedMatter>N</isRegistrantSubmittedMatter>
+      <isPreviousLegalProceeding>N</isPreviousLegalProceeding>
+      <isPreviousProceedingTerminated>N</isPreviousProceedingTerminated>
+      <isClaimFiled>N</isClaimFiled>
+      <coveredByInsurancePolicy isCoveredByInsurancePolicy="Y" isClaimFiledDuringPeriod="N"/>
+      <isFinancialSupportDuringPeriod>N</isFinancialSupportDuringPeriod>
+      <isExemptionFromAct>N</isExemptionFromAct>
+      <principalUnderwriters>
+        <principalUnderwriter>
+          <principalUnderwriterName>ACA Global</principalUnderwriterName>
+          <principalUnderwriterFileNumber>008-51293</principalUnderwriterFileNumber>
+          <principalUnderwriterCrdNumber>000046106</principalUnderwriterCrdNumber>
+          <principalUnderwriterLei>N/A</principalUnderwriterLei>
+          <principalUnderWriterStateCountry principalUnderWriterCountry="US" principalUnderWriterState="US-ME"/>
+          <isPrincipalUnderwriterAffiliatedWithRegistrant>N</isPrincipalUnderwriterAffiliatedWithRegistrant>
+        </principalUnderwriter>
+      </principalUnderwriters>
+      <isUnderwriterHiredOrTerminated>N</isUnderwriterHiredOrTerminated>
+      <publicAccountants>
+        <publicAccountant>
+          <publicAccountantName>Ernst &amp; Young LLP</publicAccountantName>
+          <pcaobNumber>42</pcaobNumber>
+          <publicAccountantLei>254900H1VLSDPE6LJK37</publicAccountantLei>
+          <publicAccountantStateCountry publicAccountantCountry="US" publicAccountantState="US-NY"/>
+        </publicAccountant>
+      </publicAccountants>
+      <isPublicAccountantChanged>N</isPublicAccountantChanged>
+      <isMaterialWeakness>N</isMaterialWeakness>
+      <isOpinionOffered>N</isOpinionOffered>
+      <isMaterialChange>N</isMaterialChange>
+      <isAccountingPrincipleChange>N</isAccountingPrincipleChange>
+      <isPaymentErrorInNetAssetValue>N</isPaymentErrorInNetAssetValue>
+      <paymentDividendSeries isPaymentDividend="Y"/>
+    </registrantInfo>
+    <managementInvestmentQuestionSeriesInfo>
+      <managementInvestmentQuestion>
+        <mgmtInvFundName>ARK Venture Fund</mgmtInvFundName>
+        <mgmtInvLei>549300NU5FJOOC8NMZ08</mgmtInvLei>
+        <isFirstFilingByFund>N</isFirstFilingByFund>
+        <fundTypes>
+          <fundType>Interval Fund</fundType>
+        </fundTypes>
+        <isNonDiversifiedCompany>Y</isNonDiversifiedCompany>
+        <isForeignSubsidiary>N</isForeignSubsidiary>
+        <isFundSecuritiesLending>N</isFundSecuritiesLending>
+        <didFundLendSecurities>N</didFundLendSecurities>
+        <paymentToAgentManagerType>N/A</paymentToAgentManagerType>
+        <avgPortfolioSecuritiesValue>N/A</avgPortfolioSecuritiesValue>
+        <netIncomeSecuritiesLending>N/A</netIncomeSecuritiesLending>
+        <relyOnRuleTypes>
+          <relyOnRuleType>Rule 22d-1 (17 CFR 270.22d-1)</relyOnRuleType>
+        </relyOnRuleTypes>
+        <isExpenseLimitationInPlace>Y</isExpenseLimitationInPlace>
+        <isExpenseReducedOrWaived>Y</isExpenseReducedOrWaived>
+        <isFeesWaivedRecoupable>N</isFeesWaivedRecoupable>
+        <isExpenseWaivedRecoupable>N</isExpenseWaivedRecoupable>
+        <investmentAdvisers>
+          <investmentAdviser>
+            <investmentAdviserName>ARK Investment Management LLC</investmentAdviserName>
+            <investmentAdviserFileNo>801-79081</investmentAdviserFileNo>
+            <investmentAdviserCrdNo>000169525</investmentAdviserCrdNo>
+            <investmentAdviserLei>2549006XVFMEF9PIPN63</investmentAdviserLei>
+            <investmentAdviserStateCountry investmentAdviserState="US-FL" investmentAdviserCountry="US"/>
+            <isInvestmentAdviserHired>N</isInvestmentAdviserHired>
+          </investmentAdviser>
+        </investmentAdvisers>
+        <transferAgents>
+          <transferAgent>
+            <transferAgentName>The Bank of New York Mellon</transferAgentName>
+            <transferAgentFileNo>085-05006</transferAgentFileNo>
+            <transferAgentLei>HPFHU0OQ28E4N0NFVK49</transferAgentLei>
+            <transferAgentStateCountry transferAgentState="US-NY" transferAgentCountry="US"/>
+            <isTransferAgentAffiliated>N</isTransferAgentAffiliated>
+            <isTransferAgentSubAgent>N</isTransferAgentSubAgent>
+          </transferAgent>
+        </transferAgents>
+        <isTransferAgentHiredOrTerminated>N</isTransferAgentHiredOrTerminated>
+        <pricingServices>
+          <pricingService>
+            <pricingServiceName>Intercontinental Exchange, Inc.</pricingServiceName>
+            <pricingServiceLei>5493000F4ZO33MV32P92</pricingServiceLei>
+            <pricingServiceStateCountry pricingServiceState="US-GA" pricingServiceCountry="US"/>
+            <isPricingServiceAffiliated>N</isPricingServiceAffiliated>
+          </pricingService>
+          <pricingService>
+            <pricingServiceName>Bloomberg Finance L.P.</pricingServiceName>
+            <pricingServiceLei>5493001KJTIIGC8Y1R12</pricingServiceLei>
+            <pricingServiceStateCountry pricingServiceState="US-NY" pricingServiceCountry="US"/>
+            <isPricingServiceAffiliated>N</isPricingServiceAffiliated>
+          </pricingService>
+          <pricingService>
+            <pricingServiceName>LSEG Data &amp; Analytics</pricingServiceName>
+            <pricingServiceLei>213800QAUUUP6I445N30</pricingServiceLei>
+            <pricingServiceCountry>GB</pricingServiceCountry>
+            <isPricingServiceAffiliated>N</isPricingServiceAffiliated>
+          </pricingService>
+        </pricingServices>
+        <isPricingServiceHiredOrTerminated>N</isPricingServiceHiredOrTerminated>
+        <custodians>
+          <custodian>
+            <custodianName>The Bank of New York Mellon</custodianName>
+            <custodianLei>HPFHU0OQ28E4N0NFVK49</custodianLei>
+            <custodianStateCountry custodianState="US-NY" custodianCountry="US"/>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>N</isSubCustodian>
+            <custodyType>Bank - section 17(f)(1) (15 U.S.C. 80a-17(f)(1))</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>The Bank of New York Mellon (United Kingdom)</custodianName>
+            <custodianLei>HPFHU0OQ28E4N0NFVK49</custodianLei>
+            <custodianCountry>GB</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>The Hongkong and Shanghai Banking Corporation (Hong Kong)</custodianName>
+            <custodianLei>2HI3YI5320L3RW6NJ957</custodianLei>
+            <custodianCountry>HK</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>The Bank of New York Mellon, SA/NV (Netherlands)</custodianName>
+            <custodianLei>MMYX0N4ZEZ13Z4XCG897</custodianLei>
+            <custodianCountry>NL</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>The Standard Bank of South Africa Limited</custodianName>
+            <custodianLei>QFC8ZCW3Q5PRXU1XTM60</custodianLei>
+            <custodianCountry>ZA</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Skandinaviska Enskilda Banken AB, Oslo Branch</custodianName>
+            <custodianLei>F3JS33DEI6XQ4ZBPTN86</custodianLei>
+            <custodianCountry>NO</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>HSBC Bank Australia Limited</custodianName>
+            <custodianLei>DY9DBNI4W8J63Z298033</custodianLei>
+            <custodianCountry>AU</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>HSBC NOMINEES (NEW ZEALAND) LIMITED</custodianName>
+            <custodianLei>213800NHDWIZKO5KIH05</custodianLei>
+            <custodianCountry>NZ</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>CIBC Mellon Trust Company (Canada)</custodianName>
+            <custodianLei>549300IYUUH221WBZ505</custodianLei>
+            <custodianCountry>CA</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>The Bank of New York Mellon SA/NV (Germany)</custodianName>
+            <custodianLei>MMYX0N4ZEZ13Z4XCG897</custodianLei>
+            <custodianCountry>DE</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>MUFG Bank, Ltd.</custodianName>
+            <custodianLei>C3GTMMZIHMY46P4OIX74</custodianLei>
+            <custodianCountry>JP</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Euroclear Bank</custodianName>
+            <custodianLei>549300OZ46BRLZ8Y6F65</custodianLei>
+            <custodianCountry>BE</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign securities depository - rule 17f-7 (17 CFR 270.17f-7)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>The Bank of New York Mellon (Belgium)</custodianName>
+            <custodianLei>HPFHU0OQ28E4N0NFVK49</custodianLei>
+            <custodianCountry>BE</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+        </custodians>
+        <isCustodianHiredOrTerminated>Y</isCustodianHiredOrTerminated>
+        <shareholderServicingAgents>
+          <shareholderServicingAgent>
+            <shareholderServiceAgentName>The Bank of New York Mellon</shareholderServiceAgentName>
+            <shareholderServiceAgentLei>HPFHU0OQ28E4N0NFVK49</shareholderServiceAgentLei>
+            <shareholderServiceAgentStateCountry shareholderServiceAgentState="US-NY" shareholderServiceAgentCountry="US"/>
+            <isShareholderServiceAgentAffiliated>N</isShareholderServiceAgentAffiliated>
+            <isShareholderServiceAgentSubshare>N</isShareholderServiceAgentSubshare>
+          </shareholderServicingAgent>
+        </shareholderServicingAgents>
+        <isShareholderServiceHiredTerminated>N</isShareholderServiceHiredTerminated>
+        <admins>
+          <admin>
+            <adminName>The Bank of New York Mellon</adminName>
+            <adminLei>HPFHU0OQ28E4N0NFVK49</adminLei>
+            <adminStateCountry adminState="US-NY" adminCountry="US"/>
+            <isAdminAffiliated>N</isAdminAffiliated>
+            <isAdminSubAdmin>N</isAdminSubAdmin>
+          </admin>
+        </admins>
+        <isAdminHiredOrTerminated>N</isAdminHiredOrTerminated>
+        <brokers>
+          <broker>
+            <brokerName>Discord Inc.</brokerName>
+            <brokerFileNo>N/A</brokerFileNo>
+            <brokerCrdNo>N/A</brokerCrdNo>
+            <brokerLei>N/A</brokerLei>
+            <brokerStateCountry brokerState="US-CA" brokerCountry="US"/>
+            <grossCommission>14999.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>INSTINET, LLC</brokerName>
+            <brokerFileNo>008-23669</brokerFileNo>
+            <brokerCrdNo>000007897</brokerCrdNo>
+            <brokerLei>549300MGMN3RKMU8FT57</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>1572.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>PERSHING LLC</brokerName>
+            <brokerFileNo>008-17574</brokerFileNo>
+            <brokerCrdNo>000007560</brokerCrdNo>
+            <brokerLei>ZI8Q1A8EI8LQFJNM0D94</brokerLei>
+            <brokerStateCountry brokerState="US-DE" brokerCountry="US"/>
+            <grossCommission>704.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>Epic Games, Inc.</brokerName>
+            <brokerFileNo>N/A</brokerFileNo>
+            <brokerCrdNo>N/A</brokerCrdNo>
+            <brokerLei>549300I2RHITL4UP9K78</brokerLei>
+            <brokerStateCountry brokerState="US-MD" brokerCountry="US"/>
+            <grossCommission>23607.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>BOFA SECURITIES, INC.</brokerName>
+            <brokerFileNo>008-69787</brokerFileNo>
+            <brokerCrdNo>000283942</brokerCrdNo>
+            <brokerLei>549300HN4UKV1E2R3U73</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>6278.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>Tenstorrent Holdings Inc.</brokerName>
+            <brokerFileNo>N/A</brokerFileNo>
+            <brokerCrdNo>N/A</brokerCrdNo>
+            <brokerLei>N/A</brokerLei>
+            <brokerStateCountry brokerState="US-DE" brokerCountry="US"/>
+            <grossCommission>50000.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>Lambda, Inc.</brokerName>
+            <brokerFileNo>N/A</brokerFileNo>
+            <brokerCrdNo>N/A</brokerCrdNo>
+            <brokerLei>N/A</brokerLei>
+            <brokerStateCountry brokerState="US-CA" brokerCountry="US"/>
+            <grossCommission>125000.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>RBC CAPITAL MARKETS, LLC</brokerName>
+            <brokerFileNo>008-45411</brokerFileNo>
+            <brokerCrdNo>000031194</brokerCrdNo>
+            <brokerLei>549300LCO2FLSSVFFR64</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>614.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>GOLDMAN SACHS &amp; CO. LLC</brokerName>
+            <brokerFileNo>008-00129</brokerFileNo>
+            <brokerCrdNo>000000361</brokerCrdNo>
+            <brokerLei>FOR8UP27PHTHYVLBNG30</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>3748.00000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>J.P. Morgan Securities LLC</brokerName>
+            <brokerFileNo>008-35008</brokerFileNo>
+            <brokerCrdNo>000000079</brokerCrdNo>
+            <brokerLei>ZBUT11V806EZRVTWT807</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>2566.00000000</grossCommission>
+          </broker>
+        </brokers>
+        <aggregateCommission>230000.00000000</aggregateCommission>
+        <principalTransactions>
+          <principalTransaction>
+            <principalName>Apptronik, Inc.</principalName>
+            <principalFileNo>N/A</principalFileNo>
+            <principalCrdNo>N/A</principalCrdNo>
+            <principalLei>N/A</principalLei>
+            <principalStateCountry principalState="US-TX" principalCountry="US"/>
+            <principalTotalPurchaseSale>2999987.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>Lambda, Inc.</principalName>
+            <principalFileNo>N/A</principalFileNo>
+            <principalCrdNo>N/A</principalCrdNo>
+            <principalLei>N/A</principalLei>
+            <principalStateCountry principalState="US-CA" principalCountry="US"/>
+            <principalTotalPurchaseSale>5000000.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>Radiant Industries, Incorporated</principalName>
+            <principalFileNo>N/A</principalFileNo>
+            <principalCrdNo>N/A</principalCrdNo>
+            <principalLei>N/A</principalLei>
+            <principalStateCountry principalState="US-CA" principalCountry="US"/>
+            <principalTotalPurchaseSale>3499982.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>Neuralink Corp.</principalName>
+            <principalFileNo>N/A</principalFileNo>
+            <principalCrdNo>N/A</principalCrdNo>
+            <principalLei>N/A</principalLei>
+            <principalStateCountry principalState="US-CA" principalCountry="US"/>
+            <principalTotalPurchaseSale>12000012.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>Hammerspace, Inc.</principalName>
+            <principalFileNo>N/A</principalFileNo>
+            <principalCrdNo>N/A</principalCrdNo>
+            <principalLei>N/A</principalLei>
+            <principalStateCountry principalState="US-CA" principalCountry="US"/>
+            <principalTotalPurchaseSale>3500000.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>Groq, Inc.</principalName>
+            <principalFileNo>N/A</principalFileNo>
+            <principalCrdNo>N/A</principalCrdNo>
+            <principalLei>N/A</principalLei>
+            <principalStateCountry principalState="US-CA" principalCountry="US"/>
+            <principalTotalPurchaseSale>2999998.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>X.AI CORP.</principalName>
+            <principalFileNo>N/A</principalFileNo>
+            <principalCrdNo>N/A</principalCrdNo>
+            <principalLei>N/A</principalLei>
+            <principalStateCountry principalState="US-CA" principalCountry="US"/>
+            <principalTotalPurchaseSale>6000093.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>OpenAI Global, LLC</principalName>
+            <principalFileNo>N/A</principalFileNo>
+            <principalCrdNo>N/A</principalCrdNo>
+            <principalLei>N/A</principalLei>
+            <principalStateCountry principalState="US-DE" principalCountry="US"/>
+            <principalTotalPurchaseSale>7000000.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>Space Exploration Technologies Corp.</principalName>
+            <principalFileNo>N/A</principalFileNo>
+            <principalCrdNo>N/A</principalCrdNo>
+            <principalLei>549300B9WLO96RQCXP87</principalLei>
+            <principalStateCountry principalState="US-DE" principalCountry="US"/>
+            <principalTotalPurchaseSale>6998550.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>Replit, Inc.</principalName>
+            <principalFileNo>N/A</principalFileNo>
+            <principalCrdNo>N/A</principalCrdNo>
+            <principalLei>N/A</principalLei>
+            <principalStateCountry principalState="US-CA" principalCountry="US"/>
+            <principalTotalPurchaseSale>5000000.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+        </principalTransactions>
+        <principalAggregatePurchase>77531910.00000000</principalAggregatePurchase>
+        <isBrokerageResearchPayment>N</isBrokerageResearchPayment>
+        <mnthlyAvgNetAssets>117690326.00000000</mnthlyAvgNetAssets>
+      </managementInvestmentQuestion>
+    </managementInvestmentQuestionSeriesInfo>
+    <closedEndManagementInvestment>
+      <securityRelatedItems>
+        <securityRelatedItem>
+          <description>Other</description>
+          <securityClassTitle>ARK Venture Fund</securityClassTitle>
+          <commonStocks>
+            <commonStock commonStockExchange="N/A" commonStockTickerSymbol="ARKVX"/>
+          </commonStocks>
+          <otherSecurityDescription>Shares of beneficial interest</otherSecurityDescription>
+        </securityRelatedItem>
+      </securityRelatedItems>
+      <isRightsOffering>N</isRightsOffering>
+      <isSecondaryOffering>N</isSecondaryOffering>
+      <repurchaseSecurities isRepurchaseSecurity="Y">
+        <repurchaseSecurityType>Common stock</repurchaseSecurityType>
+      </repurchaseSecurities>
+      <isDefaultLongTermDebt>N</isDefaultLongTermDebt>
+      <isDividendsInArrears>N</isDividendsInArrears>
+      <isSecuritiesModified>N</isSecuritiesModified>
+      <managementFee>2.75000000</managementFee>
+      <netOperatingExpenses>2.90000000</netOperatingExpenses>
+      <marketPricePerShare>N/A</marketPricePerShare>
+      <netAssetValuePerShare>33.62000000</netAssetValuePerShare>
+    </closedEndManagementInvestment>
+    <attachmentsTab>
+      <isLegalProceedings>false</isLegalProceedings>
+      <isProvisionFinancialSupport>false</isProvisionFinancialSupport>
+      <isIPAReportInternalControl>true</isIPAReportInternalControl>
+      <isChangeAccPrinciples>false</isChangeAccPrinciples>
+      <isInfoRequiredEO>false</isInfoRequiredEO>
+      <isOtherInfoRequired>false</isOtherInfoRequired>
+      <isMaterialAmendments>false</isMaterialAmendments>
+      <isInstDefiningRights>false</isInstDefiningRights>
+      <isNewOrAmendedInvAdvContracts>false</isNewOrAmendedInvAdvContracts>
+      <isInfoItem405>false</isInfoItem405>
+      <isCodeOfEthics>false</isCodeOfEthics>
+    </attachmentsTab>
+    <signature registrantSignedName="ARK Venture Fund" signedDate="2025-10-09" signature="William C. Cox" title="Treasurer and Chief Financial Officer"/>
+  </formData>
+</edgarSubmission>

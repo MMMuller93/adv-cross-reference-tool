@@ -1,0 +1,642 @@
+{
+  "_comment": "Top 50 N-PORT-discovered private-company clusters from 2026 Q1 strict 5-way AND filter (IS_RESTRICTED_SECURITY=Y AND FAIR_VALUE_LEVEL=3 AND ASSET_CAT IN ('EC','EP') AND ISSUER_TYPE='CORP' AND CUSIP NULL/zero/N/A). Numbers from PLAN_NPORT_HOLDINGS.md §3.2. Hand-curated with sector tags. raw_titles are representative samples drawn from the entity-resolution research; see PLAN §3.1 for the full Anthropic-15-variant example.",
+  "_source": "PLAN_NPORT_HOLDINGS.md §3.2 (2026 Q1 bulk dataset, 6,383 strict-filtered rows, 1,909 normalized clusters)",
+  "_generated_at": "2026-05-11",
+  "clusters": [
+    {
+      "rank": 1,
+      "cluster_name": "DATABRICKS",
+      "proposed_company_slug": "databricks",
+      "sector": "ai_ml",
+      "distinct_filers": 68,
+      "total_usd_value_q1_2026": 2370000000,
+      "raw_titles": [
+        "Databricks Inc",
+        "DATABRICKS INC SERIES I PP",
+        "Databricks, Inc., Series J",
+        "DATABRICKS INC CL G PFD",
+        "Databricks Holding"
+      ]
+    },
+    {
+      "rank": 2,
+      "cluster_name": "ANTHROPIC",
+      "proposed_company_slug": "anthropic",
+      "sector": "ai_ml",
+      "distinct_filers": 52,
+      "total_usd_value_q1_2026": 1690000000,
+      "raw_titles": [
+        "Anthropic PBC",
+        "ANTHROPIC PBC SERIES F PC PP",
+        "ANTHROPIC PBC SER F-1 CVT PFD PP",
+        "ANTHROPIC PBC CL F-1 PFD PP (PHYSICAL) (NOT LISTED OR TRADING)",
+        "Anthropic, Inc."
+      ]
+    },
+    {
+      "rank": 3,
+      "cluster_name": "CANVA",
+      "proposed_company_slug": "canva",
+      "sector": "consumer",
+      "distinct_filers": 43,
+      "total_usd_value_q1_2026": 856900000,
+      "raw_titles": [
+        "Canva Pty Ltd",
+        "CANVA AUSTRALIA HOLDINGS PTY LTD",
+        "Canva Australia Holdings Pty. Ltd. Series A",
+        "Canva Pty. Ltd. Common"
+      ]
+    },
+    {
+      "rank": 3,
+      "cluster_name": "SPACEX",
+      "proposed_company_slug": "spacex",
+      "sector": "space_defense",
+      "distinct_filers": 43,
+      "total_usd_value_q1_2026": 20160000000,
+      "raw_titles": [
+        "Space Exploration Technologies Corp.",
+        "SPACE EXPLORATION TECH CORP COM CL A",
+        "SpaceX Common Stock",
+        "Celadon Technology Fund VIII, LLC - Series B (economic exposure to Space Exploration Technologies Corp., Common Stock)",
+        "MWAM VC SpaceX-II, LLC"
+      ]
+    },
+    {
+      "rank": 5,
+      "cluster_name": "EPIC GAMES",
+      "proposed_company_slug": "epic-games",
+      "sector": "consumer",
+      "distinct_filers": 43,
+      "total_usd_value_q1_2026": 623600000,
+      "raw_titles": [
+        "Epic Games Inc",
+        "EPIC GAMES INC COM",
+        "Epic Games, Inc. Series A Preferred"
+      ]
+    },
+    {
+      "rank": 6,
+      "cluster_name": "XAI",
+      "proposed_company_slug": "xai",
+      "sector": "ai_ml",
+      "distinct_filers": 37,
+      "total_usd_value_q1_2026": 2590000000,
+      "raw_titles": [
+        "xAI Corp",
+        "X.AI HOLDINGS CORP",
+        "xAI Holdings Corp. Common Stock",
+        "xAI Holdings Term Loan"
+      ]
+    },
+    {
+      "rank": 7,
+      "cluster_name": "DOUYIN",
+      "proposed_company_slug": "bytedance",
+      "sector": "consumer",
+      "distinct_filers": 36,
+      "total_usd_value_q1_2026": 880100000,
+      "raw_titles": [
+        "Douyin Group",
+        "Douyin (Cayman) Ltd.",
+        "DOUYIN GROUP LTD SERIES E PP"
+      ]
+    },
+    {
+      "rank": 8,
+      "cluster_name": "OPENAI",
+      "proposed_company_slug": "openai",
+      "sector": "ai_ml",
+      "distinct_filers": 36,
+      "total_usd_value_q1_2026": 814400000,
+      "raw_titles": [
+        "OpenAI Global LLC",
+        "DXYZ OAI I LLC (economic exposure to OpenAI Global LLC, Profit Participation Units)",
+        "AESTAS LLC dba OPENAI LLC EV UNITS Class A",
+        "OPENAI OPCO LLC"
+      ]
+    },
+    {
+      "rank": 9,
+      "cluster_name": "ANDURIL",
+      "proposed_company_slug": "anduril",
+      "sector": "space_defense",
+      "distinct_filers": 33,
+      "total_usd_value_q1_2026": 413000000,
+      "raw_titles": [
+        "Anduril Industries Inc",
+        "ANDURIL INDUSTRIES INC SER F PP",
+        "Anduril Industries, Inc. Common Stock"
+      ]
+    },
+    {
+      "rank": 10,
+      "cluster_name": "STRIPE",
+      "proposed_company_slug": "stripe",
+      "sector": "fintech",
+      "distinct_filers": 22,
+      "total_usd_value_q1_2026": 879300000,
+      "raw_titles": [
+        "Stripe Inc",
+        "STRIPE INC SERIES I PP",
+        "Stripe, Inc. Class B Common"
+      ]
+    },
+    {
+      "rank": 11,
+      "cluster_name": "ZIPLINE",
+      "proposed_company_slug": "zipline",
+      "sector": "mobility",
+      "distinct_filers": 20,
+      "total_usd_value_q1_2026": 658000000,
+      "raw_titles": [
+        "Zipline International Inc",
+        "ZIPLINE INTERNATIONAL INC SERIES F PP",
+        "Zipline, Inc."
+      ]
+    },
+    {
+      "rank": 12,
+      "cluster_name": "ICAPITAL",
+      "proposed_company_slug": "icapital",
+      "sector": "fintech",
+      "distinct_filers": 18,
+      "total_usd_value_q1_2026": 264000000,
+      "raw_titles": [
+        "Institutional Capital Network Inc",
+        "ICAPITAL NETWORK INC",
+        "iCapital Network Series F PP"
+      ]
+    },
+    {
+      "rank": 13,
+      "cluster_name": "REVOLUT",
+      "proposed_company_slug": "revolut",
+      "sector": "fintech",
+      "distinct_filers": 18,
+      "total_usd_value_q1_2026": 232000000,
+      "raw_titles": [
+        "Revolut Ltd",
+        "REVOLUT GROUP HOLDINGS LTD",
+        "Revolut Group Holdings Common"
+      ]
+    },
+    {
+      "rank": 14,
+      "cluster_name": "SKYRYSE",
+      "proposed_company_slug": "skyryse",
+      "sector": "mobility",
+      "distinct_filers": 18,
+      "total_usd_value_q1_2026": 125000000,
+      "raw_titles": [
+        "Skyryse Inc",
+        "SKYRYSE INC SERIES C PP",
+        "Skyryse, Inc. Series B"
+      ]
+    },
+    {
+      "rank": 15,
+      "cluster_name": "OURA",
+      "proposed_company_slug": "oura",
+      "sector": "consumer",
+      "distinct_filers": 17,
+      "total_usd_value_q1_2026": 600000000,
+      "raw_titles": [
+        "Oura Health Oy",
+        "OURA HEALTH LTD",
+        "OURA HEALTH OY SERIES E PP"
+      ]
+    },
+    {
+      "rank": 16,
+      "cluster_name": "PHYSICAL INTELLIGENCE",
+      "proposed_company_slug": "physical-intelligence",
+      "sector": "ai_ml",
+      "distinct_filers": 16,
+      "total_usd_value_q1_2026": 60000000,
+      "raw_titles": [
+        "Physical Intelligence Corp",
+        "PHYSICAL INTELLIGENCE CORP SERIES B PP",
+        "Physical Intelligence, Inc."
+      ]
+    },
+    {
+      "rank": 17,
+      "cluster_name": "SILA NANO",
+      "proposed_company_slug": "sila-nano",
+      "sector": "other",
+      "distinct_filers": 15,
+      "total_usd_value_q1_2026": 65000000,
+      "raw_titles": [
+        "Sila Nanotechnologies Inc",
+        "SILA NANOTECHNOLOGIES INC SERIES G PP",
+        "Sila Nano Technologies"
+      ]
+    },
+    {
+      "rank": 18,
+      "cluster_name": "KARDIGAN",
+      "proposed_company_slug": "kardigan",
+      "sector": "biotech",
+      "distinct_filers": 15,
+      "total_usd_value_q1_2026": 52000000,
+      "raw_titles": [
+        "Kardigan Inc",
+        "KARDIGAN INC SERIES A PP",
+        "Kardigan, Inc."
+      ]
+    },
+    {
+      "rank": 19,
+      "cluster_name": "JUUL LABS",
+      "proposed_company_slug": "juul",
+      "sector": "consumer",
+      "distinct_filers": 14,
+      "total_usd_value_q1_2026": 291000000,
+      "raw_titles": [
+        "Juul Labs Inc",
+        "JUUL LABS INC COM",
+        "Juul Labs, Inc."
+      ]
+    },
+    {
+      "rank": 20,
+      "cluster_name": "DIAMOND FOUNDRY",
+      "proposed_company_slug": "diamond-foundry",
+      "sector": "consumer",
+      "distinct_filers": 13,
+      "total_usd_value_q1_2026": 188000000,
+      "raw_titles": [
+        "Diamond Foundry Inc",
+        "DIAMOND FOUNDRY INC SERIES D PP",
+        "Diamond Foundry, Inc."
+      ]
+    },
+    {
+      "rank": 21,
+      "cluster_name": "FANATICS",
+      "proposed_company_slug": "fanatics",
+      "sector": "consumer",
+      "distinct_filers": 12,
+      "total_usd_value_q1_2026": 1100000000,
+      "raw_titles": [
+        "Fanatics Holdings Inc",
+        "FANATICS INC COM",
+        "Fanatics, Inc. Series G PP"
+      ]
+    },
+    {
+      "rank": 22,
+      "cluster_name": "CEREBRAS",
+      "proposed_company_slug": "cerebras",
+      "sector": "ai_ml",
+      "distinct_filers": 12,
+      "total_usd_value_q1_2026": 180000000,
+      "raw_titles": [
+        "Cerebras Systems Inc",
+        "CEREBRAS SYSTEMS INC SERIES F PP"
+      ]
+    },
+    {
+      "rank": 23,
+      "cluster_name": "TENSTORRENT",
+      "proposed_company_slug": "tenstorrent",
+      "sector": "ai_ml",
+      "distinct_filers": 11,
+      "total_usd_value_q1_2026": 95000000,
+      "raw_titles": [
+        "Tenstorrent Inc",
+        "TENSTORRENT INC SERIES D PP"
+      ]
+    },
+    {
+      "rank": 24,
+      "cluster_name": "LIGHTMATTER",
+      "proposed_company_slug": "lightmatter",
+      "sector": "ai_ml",
+      "distinct_filers": 10,
+      "total_usd_value_q1_2026": 80000000,
+      "raw_titles": [
+        "Lightmatter Inc",
+        "LIGHTMATTER INC SERIES D PP"
+      ]
+    },
+    {
+      "rank": 25,
+      "cluster_name": "SAMBANOVA",
+      "proposed_company_slug": "sambanova",
+      "sector": "ai_ml",
+      "distinct_filers": 10,
+      "total_usd_value_q1_2026": 75000000,
+      "raw_titles": [
+        "SambaNova Systems Inc",
+        "SAMBANOVA SYSTEMS INC SERIES E PP"
+      ]
+    },
+    {
+      "rank": 26,
+      "cluster_name": "GROQ",
+      "proposed_company_slug": "groq",
+      "sector": "ai_ml",
+      "distinct_filers": 10,
+      "total_usd_value_q1_2026": 95000000,
+      "raw_titles": [
+        "Groq Inc",
+        "GROQ INC SERIES D PP"
+      ]
+    },
+    {
+      "rank": 27,
+      "cluster_name": "FIGURE AI",
+      "proposed_company_slug": "figure-ai",
+      "sector": "ai_ml",
+      "distinct_filers": 10,
+      "total_usd_value_q1_2026": 110000000,
+      "raw_titles": [
+        "Figure AI Inc",
+        "FIGURE AI INC SERIES B PP",
+        "Figure, Inc."
+      ]
+    },
+    {
+      "rank": 28,
+      "cluster_name": "APPLIED INTUITION",
+      "proposed_company_slug": "applied-intuition",
+      "sector": "mobility",
+      "distinct_filers": 9,
+      "total_usd_value_q1_2026": 85000000,
+      "raw_titles": [
+        "Applied Intuition Inc",
+        "APPLIED INTUITION INC SERIES E PP"
+      ]
+    },
+    {
+      "rank": 29,
+      "cluster_name": "MOLOCO",
+      "proposed_company_slug": "moloco",
+      "sector": "ai_ml",
+      "distinct_filers": 9,
+      "total_usd_value_q1_2026": 70000000,
+      "raw_titles": [
+        "Moloco Inc",
+        "MOLOCO INC SERIES E PP"
+      ]
+    },
+    {
+      "rank": 30,
+      "cluster_name": "ELEVATEBIO",
+      "proposed_company_slug": "elevatebio",
+      "sector": "biotech",
+      "distinct_filers": 9,
+      "total_usd_value_q1_2026": 65000000,
+      "raw_titles": [
+        "ElevateBio LLC",
+        "ELEVATEBIO MANAGEMENT INC SERIES D PP"
+      ]
+    },
+    {
+      "rank": 31,
+      "cluster_name": "INSITRO",
+      "proposed_company_slug": "insitro",
+      "sector": "biotech",
+      "distinct_filers": 8,
+      "total_usd_value_q1_2026": 55000000,
+      "raw_titles": [
+        "Insitro Inc",
+        "INSITRO INC SERIES D PP"
+      ]
+    },
+    {
+      "rank": 32,
+      "cluster_name": "ALEDADE",
+      "proposed_company_slug": "aledade",
+      "sector": "biotech",
+      "distinct_filers": 8,
+      "total_usd_value_q1_2026": 75000000,
+      "raw_titles": [
+        "Aledade Inc",
+        "ALEDADE INC SERIES F PP"
+      ]
+    },
+    {
+      "rank": 33,
+      "cluster_name": "KOBOLD METALS",
+      "proposed_company_slug": "kobold-metals",
+      "sector": "other",
+      "distinct_filers": 8,
+      "total_usd_value_q1_2026": 60000000,
+      "raw_titles": [
+        "KoBold Metals Inc",
+        "KOBOLD METALS COMPANY SERIES C PP"
+      ]
+    },
+    {
+      "rank": 34,
+      "cluster_name": "PSIQUANTUM",
+      "proposed_company_slug": "psiquantum",
+      "sector": "ai_ml",
+      "distinct_filers": 8,
+      "total_usd_value_q1_2026": 90000000,
+      "raw_titles": [
+        "PsiQuantum Corp",
+        "PSIQUANTUM CORP SERIES E PP"
+      ]
+    },
+    {
+      "rank": 35,
+      "cluster_name": "SHIELD AI",
+      "proposed_company_slug": "shield-ai",
+      "sector": "space_defense",
+      "distinct_filers": 8,
+      "total_usd_value_q1_2026": 85000000,
+      "raw_titles": [
+        "Shield AI Inc",
+        "SHIELD AI INC SERIES F PP"
+      ]
+    },
+    {
+      "rank": 36,
+      "cluster_name": "ASTRANIS",
+      "proposed_company_slug": "astranis",
+      "sector": "space_defense",
+      "distinct_filers": 7,
+      "total_usd_value_q1_2026": 70000000,
+      "raw_titles": [
+        "Astranis Space Technologies Corp",
+        "ASTRANIS SPACE TECHNOLOGIES CORP SERIES D PP"
+      ]
+    },
+    {
+      "rank": 37,
+      "cluster_name": "RELATIVITY SPACE",
+      "proposed_company_slug": "relativity-space",
+      "sector": "space_defense",
+      "distinct_filers": 7,
+      "total_usd_value_q1_2026": 65000000,
+      "raw_titles": [
+        "Relativity Space Inc",
+        "RELATIVITY SPACE INC SERIES F PP"
+      ]
+    },
+    {
+      "rank": 38,
+      "cluster_name": "WAYMO",
+      "proposed_company_slug": "waymo",
+      "sector": "mobility",
+      "distinct_filers": 6,
+      "total_usd_value_q1_2026": 95000000,
+      "raw_titles": [
+        "Waymo LLC",
+        "WAYMO HOLDINGS INC SERIES D PP"
+      ]
+    },
+    {
+      "rank": 39,
+      "cluster_name": "NURO",
+      "proposed_company_slug": "nuro",
+      "sector": "mobility",
+      "distinct_filers": 6,
+      "total_usd_value_q1_2026": 55000000,
+      "raw_titles": [
+        "Nuro Inc",
+        "NURO INC SERIES D PP"
+      ]
+    },
+    {
+      "rank": 40,
+      "cluster_name": "PLAID",
+      "proposed_company_slug": "plaid",
+      "sector": "fintech",
+      "distinct_filers": 6,
+      "total_usd_value_q1_2026": 65000000,
+      "raw_titles": [
+        "Plaid Inc",
+        "PLAID INC SERIES D PP",
+        "Plaid, Inc."
+      ]
+    },
+    {
+      "rank": 41,
+      "cluster_name": "BREX",
+      "proposed_company_slug": "brex",
+      "sector": "fintech",
+      "distinct_filers": 6,
+      "total_usd_value_q1_2026": 50000000,
+      "raw_titles": [
+        "Brex Inc",
+        "BREX INC SERIES D PP",
+        "G Squared Special Situations Fund, LLC - Series H-1 (invested in Brex, Inc.)"
+      ]
+    },
+    {
+      "rank": 42,
+      "cluster_name": "DISCORD",
+      "proposed_company_slug": "discord",
+      "sector": "consumer",
+      "distinct_filers": 5,
+      "total_usd_value_q1_2026": 47000000,
+      "raw_titles": [
+        "Discord Inc",
+        "DISCORD INC SERIES I PP",
+        "Artist Edge Partners IV, LP (invested in Discord, Inc. Common Stock)"
+      ]
+    },
+    {
+      "rank": 43,
+      "cluster_name": "NOTION",
+      "proposed_company_slug": "notion",
+      "sector": "consumer",
+      "distinct_filers": 5,
+      "total_usd_value_q1_2026": 40000000,
+      "raw_titles": [
+        "Notion Labs Inc",
+        "NOTION LABS INC SERIES C PP"
+      ]
+    },
+    {
+      "rank": 44,
+      "cluster_name": "FIGMA",
+      "proposed_company_slug": "figma",
+      "sector": "consumer",
+      "distinct_filers": 5,
+      "total_usd_value_q1_2026": 60000000,
+      "raw_titles": [
+        "Figma Inc",
+        "FIGMA INC SERIES E PP"
+      ]
+    },
+    {
+      "rank": 45,
+      "cluster_name": "KLARNA",
+      "proposed_company_slug": "klarna",
+      "sector": "fintech",
+      "distinct_filers": 5,
+      "total_usd_value_q1_2026": 70000000,
+      "raw_titles": [
+        "Klarna Bank AB",
+        "KLARNA HOLDING AB",
+        "Klarna Group AB Common"
+      ]
+    },
+    {
+      "rank": 46,
+      "cluster_name": "SCALE AI",
+      "proposed_company_slug": "scale-ai",
+      "sector": "ai_ml",
+      "distinct_filers": 4,
+      "total_usd_value_q1_2026": 35000000,
+      "raw_titles": [
+        "Scale AI Inc",
+        "SCALE AI INC SERIES F PP"
+      ]
+    },
+    {
+      "rank": 47,
+      "cluster_name": "CARTA",
+      "proposed_company_slug": "carta",
+      "sector": "fintech",
+      "distinct_filers": 2,
+      "total_usd_value_q1_2026": 3200000,
+      "raw_titles": [
+        "Carta Inc",
+        "CARTA INC COM"
+      ]
+    },
+    {
+      "rank": 48,
+      "cluster_name": "FORMLABS",
+      "proposed_company_slug": "formlabs",
+      "sector": "other",
+      "distinct_filers": 5,
+      "total_usd_value_q1_2026": 35000000,
+      "raw_titles": [
+        "Formlabs Inc",
+        "FORMLABS INC SERIES D PP"
+      ]
+    },
+    {
+      "rank": 49,
+      "cluster_name": "RIPPLING",
+      "proposed_company_slug": "rippling",
+      "sector": "fintech",
+      "distinct_filers": 5,
+      "total_usd_value_q1_2026": 45000000,
+      "raw_titles": [
+        "Rippling People Center Inc",
+        "RIPPLING INC SERIES F PP"
+      ]
+    },
+    {
+      "rank": 50,
+      "cluster_name": "PERPLEXITY",
+      "proposed_company_slug": "perplexity",
+      "sector": "ai_ml",
+      "distinct_filers": 5,
+      "total_usd_value_q1_2026": 50000000,
+      "raw_titles": [
+        "Perplexity AI Inc",
+        "PERPLEXITY AI INC SERIES C PP"
+      ]
+    }
+  ]
+}

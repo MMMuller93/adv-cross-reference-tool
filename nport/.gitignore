@@ -1,0 +1,18 @@
+# N-PORT subsystem ignores.
+# Scoped to nport/ — does NOT modify the top-level PFR .gitignore.
+
+# Node deps (npm install regenerates these)
+api/node_modules/
+api/package-lock.json
+api/e2e_test.log
+
+# Python build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Local dev cruft
+*.log
+.DS_Store

@@ -1,0 +1,1559 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<edgarSubmission xmlns="http://www.sec.gov/edgar/ncen" xmlns:com="http://www.sec.gov/edgar/common">
+  <schemaVersion>X0505</schemaVersion>
+  <headerData>
+    <submissionType>N-CEN</submissionType>
+    <filerInfo>
+      <liveTestFlag>LIVE</liveTestFlag>
+      <filer>
+        <issuerCredentials>
+          <cik>0001836057</cik>
+          <ccc>XXXXXXXX</ccc>
+        </issuerCredentials>
+        <fileNumber>811-23625</fileNumber>
+      </filer>
+      <flags>
+        <overrideInternetFlag>false</overrideInternetFlag>
+        <confirmingCopyFlag>false</confirmingCopyFlag>
+      </flags>
+      <investmentCompanyType>N-2</investmentCompanyType>
+    </filerInfo>
+  </headerData>
+  <formData>
+    <generalInfo reportEndingPeriod="2025-12-31" isReportPeriodLt12="N"/>
+    <registrantInfo>
+      <registrantFullName>BlackRock Technology &amp; Private Equity Term Trust</registrantFullName>
+      <investmentCompFileNo>811-23625</investmentCompFileNo>
+      <registrantCik>0001836057</registrantCik>
+      <registrantLei>549300G3XFQ7175KM723</registrantLei>
+      <registrantstreet1>100 BELLEVUE PARKWAY</registrantstreet1>
+      <registrantcity>WILMINGTON</registrantcity>
+      <registrantzipCode>19809</registrantzipCode>
+      <registrantstate>US-DE</registrantstate>
+      <registrantcountry>US</registrantcountry>
+      <registrantphoneNumber>800-441-7762</registrantphoneNumber>
+      <websites>
+        <website webpage="www.blackrock.com"/>
+      </websites>
+      <locationBooksRecords>
+        <locationBooksRecord>
+          <officeName>BlackRock Advisors, LLC</officeName>
+          <officeAddress1>100 Bellevue Parkway</officeAddress1>
+          <officeCity>Wilmington</officeCity>
+          <officeStateCountry officeCountry="US" officeState="US-DE"/>
+          <officeRecordsZipCode>19809</officeRecordsZipCode>
+          <officePhone>302-797-2000</officePhone>
+          <booksRecordsDesc>Records related to its functions as advisor and administrator</booksRecordsDesc>
+        </locationBooksRecord>
+        <locationBooksRecord>
+          <officeName>BlackRock Investments, LLC</officeName>
+          <officeAddress1>50 Hudson Yards</officeAddress1>
+          <officeCity>New York</officeCity>
+          <officeStateCountry officeCountry="US" officeState="US-NY"/>
+          <officeRecordsZipCode>10001</officeRecordsZipCode>
+          <officePhone>609-282-3046</officePhone>
+          <booksRecordsDesc>Records related to its functions as distributor</booksRecordsDesc>
+        </locationBooksRecord>
+        <locationBooksRecord>
+          <officeName>Computershare Trust Company, National Association</officeName>
+          <officeAddress1>250 Royall Street</officeAddress1>
+          <officeCity>Canton</officeCity>
+          <officeStateCountry officeCountry="US" officeState="US-MA"/>
+          <officeRecordsZipCode>02021</officeRecordsZipCode>
+          <officePhone>781-575-2000</officePhone>
+          <booksRecordsDesc>Records related to its functions as transfer agent</booksRecordsDesc>
+        </locationBooksRecord>
+        <locationBooksRecord>
+          <officeName>State Street Bank and Trust Company</officeName>
+          <officeAddress1>One Congress Street</officeAddress1>
+          <officeAddress2> Suite 1</officeAddress2>
+          <officeCity>Boston</officeCity>
+          <officeStateCountry officeCountry="US" officeState="US-MA"/>
+          <officeRecordsZipCode>02114</officeRecordsZipCode>
+          <officePhone>617-786-3000</officePhone>
+          <booksRecordsDesc>Records related to its functions as custodian, sub-administrator and accounting agent</booksRecordsDesc>
+        </locationBooksRecord>
+      </locationBooksRecords>
+      <isRegistrantFirstFiling>N</isRegistrantFirstFiling>
+      <isRegistrantLastFiling>N</isRegistrantLastFiling>
+      <registrantFamilyInvComp isRegistrantFamilyInvComp="Y" familyInvCompFullName="BlackRock-advised Funds"/>
+      <registrantClassificationType>N-2</registrantClassificationType>
+      <isSecuritiesActRegistration>Y</isSecuritiesActRegistration>
+      <directors>
+        <director>
+          <directorName>Arthur P. Steinmetz</directorName>
+          <crdNumber>N/A</crdNumber>
+          <isDirectorInterestedPerson>N</isDirectorInterestedPerson>
+          <fileNumbers>
+            <fileNumberInfo fileNumber="811-02688"/>
+            <fileNumberInfo fileNumber="811-02857"/>
+            <fileNumberInfo fileNumber="811-04264"/>
+            <fileNumberInfo fileNumber="811-04375"/>
+            <fileNumberInfo fileNumber="811-04802"/>
+            <fileNumberInfo fileNumber="811-05542"/>
+            <fileNumberInfo fileNumber="811-05603"/>
+            <fileNumberInfo fileNumber="811-05611"/>
+            <fileNumberInfo fileNumber="811-06414"/>
+            <fileNumberInfo fileNumber="811-06500"/>
+            <fileNumberInfo fileNumber="811-06540"/>
+            <fileNumberInfo fileNumber="811-06660"/>
+            <fileNumberInfo fileNumber="811-06728"/>
+            <fileNumberInfo fileNumber="811-07080"/>
+            <fileNumberInfo fileNumber="811-07136"/>
+            <fileNumberInfo fileNumber="811-07354"/>
+            <fileNumberInfo fileNumber="811-07478"/>
+            <fileNumberInfo fileNumber="811-07642"/>
+            <fileNumberInfo fileNumber="811-08081"/>
+            <fileNumberInfo fileNumber="811-08217"/>
+            <fileNumberInfo fileNumber="811-08573"/>
+            <fileNumberInfo fileNumber="811-08603"/>
+            <fileNumberInfo fileNumber="811-08621"/>
+            <fileNumberInfo fileNumber="811-09191"/>
+            <fileNumberInfo fileNumber="811-10331"/>
+            <fileNumberInfo fileNumber="811-10337"/>
+            <fileNumberInfo fileNumber="811-10339"/>
+            <fileNumberInfo fileNumber="811-10543"/>
+            <fileNumberInfo fileNumber="811-21053"/>
+            <fileNumberInfo fileNumber="811-21126"/>
+            <fileNumberInfo fileNumber="811-21178"/>
+            <fileNumberInfo fileNumber="811-21318"/>
+            <fileNumberInfo fileNumber="811-21348"/>
+            <fileNumberInfo fileNumber="811-21349"/>
+            <fileNumberInfo fileNumber="811-21413"/>
+            <fileNumberInfo fileNumber="811-21457"/>
+            <fileNumberInfo fileNumber="811-21506"/>
+            <fileNumberInfo fileNumber="811-21566"/>
+            <fileNumberInfo fileNumber="811-21656"/>
+            <fileNumberInfo fileNumber="811-21702"/>
+            <fileNumberInfo fileNumber="811-21729"/>
+            <fileNumberInfo fileNumber="811-21784"/>
+            <fileNumberInfo fileNumber="811-21835"/>
+            <fileNumberInfo fileNumber="811-21972"/>
+            <fileNumberInfo fileNumber="811-22032"/>
+            <fileNumberInfo fileNumber="811-22426"/>
+            <fileNumberInfo fileNumber="811-22501"/>
+            <fileNumberInfo fileNumber="811-22603"/>
+            <fileNumberInfo fileNumber="811-22606"/>
+            <fileNumberInfo fileNumber="811-22774"/>
+            <fileNumberInfo fileNumber="811-22991"/>
+            <fileNumberInfo fileNumber="811-23339"/>
+            <fileNumberInfo fileNumber="811-23340"/>
+            <fileNumberInfo fileNumber="811-23341"/>
+            <fileNumberInfo fileNumber="811-23343"/>
+            <fileNumberInfo fileNumber="811-23344"/>
+            <fileNumberInfo fileNumber="811-23345"/>
+            <fileNumberInfo fileNumber="811-23346"/>
+            <fileNumberInfo fileNumber="811-23380"/>
+            <fileNumberInfo fileNumber="811-23428"/>
+            <fileNumberInfo fileNumber="811-23466"/>
+            <fileNumberInfo fileNumber="811-23511"/>
+            <fileNumberInfo fileNumber="811-23564"/>
+            <fileNumberInfo fileNumber="811-23584"/>
+            <fileNumberInfo fileNumber="811-23621"/>
+            <fileNumberInfo fileNumber="811-23626"/>
+            <fileNumberInfo fileNumber="811-23701"/>
+          </fileNumbers>
+        </director>
+        <director>
+          <directorName>Catherine A. Lynch</directorName>
+          <crdNumber>N/A</crdNumber>
+          <isDirectorInterestedPerson>N</isDirectorInterestedPerson>
+          <fileNumbers>
+            <fileNumberInfo fileNumber="811-02688"/>
+            <fileNumberInfo fileNumber="811-02857"/>
+            <fileNumberInfo fileNumber="811-04264"/>
+            <fileNumberInfo fileNumber="811-04375"/>
+            <fileNumberInfo fileNumber="811-04802"/>
+            <fileNumberInfo fileNumber="811-05542"/>
+            <fileNumberInfo fileNumber="811-05603"/>
+            <fileNumberInfo fileNumber="811-05611"/>
+            <fileNumberInfo fileNumber="811-06414"/>
+            <fileNumberInfo fileNumber="811-06500"/>
+            <fileNumberInfo fileNumber="811-06540"/>
+            <fileNumberInfo fileNumber="811-06660"/>
+            <fileNumberInfo fileNumber="811-06728"/>
+            <fileNumberInfo fileNumber="811-07080"/>
+            <fileNumberInfo fileNumber="811-07136"/>
+            <fileNumberInfo fileNumber="811-07354"/>
+            <fileNumberInfo fileNumber="811-07478"/>
+            <fileNumberInfo fileNumber="811-07642"/>
+            <fileNumberInfo fileNumber="811-08081"/>
+            <fileNumberInfo fileNumber="811-08217"/>
+            <fileNumberInfo fileNumber="811-08573"/>
+            <fileNumberInfo fileNumber="811-08603"/>
+            <fileNumberInfo fileNumber="811-08621"/>
+            <fileNumberInfo fileNumber="811-09191"/>
+            <fileNumberInfo fileNumber="811-10331"/>
+            <fileNumberInfo fileNumber="811-10337"/>
+            <fileNumberInfo fileNumber="811-10339"/>
+            <fileNumberInfo fileNumber="811-10543"/>
+            <fileNumberInfo fileNumber="811-21053"/>
+            <fileNumberInfo fileNumber="811-21126"/>
+            <fileNumberInfo fileNumber="811-21178"/>
+            <fileNumberInfo fileNumber="811-21318"/>
+            <fileNumberInfo fileNumber="811-21348"/>
+            <fileNumberInfo fileNumber="811-21349"/>
+            <fileNumberInfo fileNumber="811-21413"/>
+            <fileNumberInfo fileNumber="811-21457"/>
+            <fileNumberInfo fileNumber="811-21506"/>
+            <fileNumberInfo fileNumber="811-21566"/>
+            <fileNumberInfo fileNumber="811-21656"/>
+            <fileNumberInfo fileNumber="811-21702"/>
+            <fileNumberInfo fileNumber="811-21729"/>
+            <fileNumberInfo fileNumber="811-21784"/>
+            <fileNumberInfo fileNumber="811-21835"/>
+            <fileNumberInfo fileNumber="811-21972"/>
+            <fileNumberInfo fileNumber="811-22032"/>
+            <fileNumberInfo fileNumber="811-22426"/>
+            <fileNumberInfo fileNumber="811-22501"/>
+            <fileNumberInfo fileNumber="811-22603"/>
+            <fileNumberInfo fileNumber="811-22606"/>
+            <fileNumberInfo fileNumber="811-22774"/>
+            <fileNumberInfo fileNumber="811-22991"/>
+            <fileNumberInfo fileNumber="811-23339"/>
+            <fileNumberInfo fileNumber="811-23340"/>
+            <fileNumberInfo fileNumber="811-23341"/>
+            <fileNumberInfo fileNumber="811-23343"/>
+            <fileNumberInfo fileNumber="811-23344"/>
+            <fileNumberInfo fileNumber="811-23345"/>
+            <fileNumberInfo fileNumber="811-23346"/>
+            <fileNumberInfo fileNumber="811-23380"/>
+            <fileNumberInfo fileNumber="811-23428"/>
+            <fileNumberInfo fileNumber="811-23466"/>
+            <fileNumberInfo fileNumber="811-23511"/>
+            <fileNumberInfo fileNumber="811-23564"/>
+            <fileNumberInfo fileNumber="811-23584"/>
+            <fileNumberInfo fileNumber="811-23621"/>
+            <fileNumberInfo fileNumber="811-23626"/>
+            <fileNumberInfo fileNumber="811-23701"/>
+          </fileNumbers>
+        </director>
+        <director>
+          <directorName>Cynthia L. Egan</directorName>
+          <crdNumber>N/A</crdNumber>
+          <isDirectorInterestedPerson>N</isDirectorInterestedPerson>
+          <fileNumbers>
+            <fileNumberInfo fileNumber="811-02688"/>
+            <fileNumberInfo fileNumber="811-02857"/>
+            <fileNumberInfo fileNumber="811-04264"/>
+            <fileNumberInfo fileNumber="811-04375"/>
+            <fileNumberInfo fileNumber="811-04802"/>
+            <fileNumberInfo fileNumber="811-05542"/>
+            <fileNumberInfo fileNumber="811-05603"/>
+            <fileNumberInfo fileNumber="811-05611"/>
+            <fileNumberInfo fileNumber="811-06414"/>
+            <fileNumberInfo fileNumber="811-06500"/>
+            <fileNumberInfo fileNumber="811-06540"/>
+            <fileNumberInfo fileNumber="811-06660"/>
+            <fileNumberInfo fileNumber="811-06728"/>
+            <fileNumberInfo fileNumber="811-07080"/>
+            <fileNumberInfo fileNumber="811-07136"/>
+            <fileNumberInfo fileNumber="811-07354"/>
+            <fileNumberInfo fileNumber="811-07478"/>
+            <fileNumberInfo fileNumber="811-07642"/>
+            <fileNumberInfo fileNumber="811-08081"/>
+            <fileNumberInfo fileNumber="811-08217"/>
+            <fileNumberInfo fileNumber="811-08573"/>
+            <fileNumberInfo fileNumber="811-08603"/>
+            <fileNumberInfo fileNumber="811-08621"/>
+            <fileNumberInfo fileNumber="811-09191"/>
+            <fileNumberInfo fileNumber="811-10331"/>
+            <fileNumberInfo fileNumber="811-10337"/>
+            <fileNumberInfo fileNumber="811-10339"/>
+            <fileNumberInfo fileNumber="811-10543"/>
+            <fileNumberInfo fileNumber="811-21053"/>
+            <fileNumberInfo fileNumber="811-21126"/>
+            <fileNumberInfo fileNumber="811-21178"/>
+            <fileNumberInfo fileNumber="811-21318"/>
+            <fileNumberInfo fileNumber="811-21348"/>
+            <fileNumberInfo fileNumber="811-21349"/>
+            <fileNumberInfo fileNumber="811-21413"/>
+            <fileNumberInfo fileNumber="811-21457"/>
+            <fileNumberInfo fileNumber="811-21506"/>
+            <fileNumberInfo fileNumber="811-21566"/>
+            <fileNumberInfo fileNumber="811-21656"/>
+            <fileNumberInfo fileNumber="811-21702"/>
+            <fileNumberInfo fileNumber="811-21729"/>
+            <fileNumberInfo fileNumber="811-21784"/>
+            <fileNumberInfo fileNumber="811-21835"/>
+            <fileNumberInfo fileNumber="811-21972"/>
+            <fileNumberInfo fileNumber="811-22032"/>
+            <fileNumberInfo fileNumber="811-22426"/>
+            <fileNumberInfo fileNumber="811-22501"/>
+            <fileNumberInfo fileNumber="811-22603"/>
+            <fileNumberInfo fileNumber="811-22606"/>
+            <fileNumberInfo fileNumber="811-22774"/>
+            <fileNumberInfo fileNumber="811-22991"/>
+            <fileNumberInfo fileNumber="811-23339"/>
+            <fileNumberInfo fileNumber="811-23340"/>
+            <fileNumberInfo fileNumber="811-23341"/>
+            <fileNumberInfo fileNumber="811-23343"/>
+            <fileNumberInfo fileNumber="811-23344"/>
+            <fileNumberInfo fileNumber="811-23345"/>
+            <fileNumberInfo fileNumber="811-23346"/>
+            <fileNumberInfo fileNumber="811-23380"/>
+            <fileNumberInfo fileNumber="811-23428"/>
+            <fileNumberInfo fileNumber="811-23466"/>
+            <fileNumberInfo fileNumber="811-23511"/>
+            <fileNumberInfo fileNumber="811-23564"/>
+            <fileNumberInfo fileNumber="811-23584"/>
+            <fileNumberInfo fileNumber="811-23621"/>
+            <fileNumberInfo fileNumber="811-23626"/>
+            <fileNumberInfo fileNumber="811-23701"/>
+          </fileNumbers>
+        </director>
+        <director>
+          <directorName>J. Phillip Holloman</directorName>
+          <crdNumber>N/A</crdNumber>
+          <isDirectorInterestedPerson>N</isDirectorInterestedPerson>
+          <fileNumbers>
+            <fileNumberInfo fileNumber="811-02688"/>
+            <fileNumberInfo fileNumber="811-02857"/>
+            <fileNumberInfo fileNumber="811-04264"/>
+            <fileNumberInfo fileNumber="811-04375"/>
+            <fileNumberInfo fileNumber="811-04802"/>
+            <fileNumberInfo fileNumber="811-05542"/>
+            <fileNumberInfo fileNumber="811-05603"/>
+            <fileNumberInfo fileNumber="811-05611"/>
+            <fileNumberInfo fileNumber="811-06414"/>
+            <fileNumberInfo fileNumber="811-06500"/>
+            <fileNumberInfo fileNumber="811-06540"/>
+            <fileNumberInfo fileNumber="811-06660"/>
+            <fileNumberInfo fileNumber="811-06728"/>
+            <fileNumberInfo fileNumber="811-07080"/>
+            <fileNumberInfo fileNumber="811-07136"/>
+            <fileNumberInfo fileNumber="811-07354"/>
+            <fileNumberInfo fileNumber="811-07478"/>
+            <fileNumberInfo fileNumber="811-07642"/>
+            <fileNumberInfo fileNumber="811-08081"/>
+            <fileNumberInfo fileNumber="811-08217"/>
+            <fileNumberInfo fileNumber="811-08573"/>
+            <fileNumberInfo fileNumber="811-08603"/>
+            <fileNumberInfo fileNumber="811-08621"/>
+            <fileNumberInfo fileNumber="811-09191"/>
+            <fileNumberInfo fileNumber="811-10331"/>
+            <fileNumberInfo fileNumber="811-10337"/>
+            <fileNumberInfo fileNumber="811-10339"/>
+            <fileNumberInfo fileNumber="811-10543"/>
+            <fileNumberInfo fileNumber="811-21053"/>
+            <fileNumberInfo fileNumber="811-21126"/>
+            <fileNumberInfo fileNumber="811-21178"/>
+            <fileNumberInfo fileNumber="811-21318"/>
+            <fileNumberInfo fileNumber="811-21348"/>
+            <fileNumberInfo fileNumber="811-21349"/>
+            <fileNumberInfo fileNumber="811-21413"/>
+            <fileNumberInfo fileNumber="811-21457"/>
+            <fileNumberInfo fileNumber="811-21506"/>
+            <fileNumberInfo fileNumber="811-21566"/>
+            <fileNumberInfo fileNumber="811-21656"/>
+            <fileNumberInfo fileNumber="811-21702"/>
+            <fileNumberInfo fileNumber="811-21729"/>
+            <fileNumberInfo fileNumber="811-21784"/>
+            <fileNumberInfo fileNumber="811-21835"/>
+            <fileNumberInfo fileNumber="811-21972"/>
+            <fileNumberInfo fileNumber="811-22032"/>
+            <fileNumberInfo fileNumber="811-22426"/>
+            <fileNumberInfo fileNumber="811-22501"/>
+            <fileNumberInfo fileNumber="811-22603"/>
+            <fileNumberInfo fileNumber="811-22606"/>
+            <fileNumberInfo fileNumber="811-22774"/>
+            <fileNumberInfo fileNumber="811-22991"/>
+            <fileNumberInfo fileNumber="811-23339"/>
+            <fileNumberInfo fileNumber="811-23340"/>
+            <fileNumberInfo fileNumber="811-23341"/>
+            <fileNumberInfo fileNumber="811-23343"/>
+            <fileNumberInfo fileNumber="811-23344"/>
+            <fileNumberInfo fileNumber="811-23345"/>
+            <fileNumberInfo fileNumber="811-23346"/>
+            <fileNumberInfo fileNumber="811-23428"/>
+            <fileNumberInfo fileNumber="811-23466"/>
+            <fileNumberInfo fileNumber="811-23511"/>
+            <fileNumberInfo fileNumber="811-23564"/>
+            <fileNumberInfo fileNumber="811-23621"/>
+            <fileNumberInfo fileNumber="811-23626"/>
+            <fileNumberInfo fileNumber="811-23701"/>
+          </fileNumbers>
+        </director>
+        <director>
+          <directorName>John M. Perlowski</directorName>
+          <crdNumber>N/A</crdNumber>
+          <isDirectorInterestedPerson>Y</isDirectorInterestedPerson>
+          <fileNumbers>
+            <fileNumberInfo fileNumber="811-02354"/>
+            <fileNumberInfo fileNumber="811-02405"/>
+            <fileNumberInfo fileNumber="811-02661"/>
+            <fileNumberInfo fileNumber="811-02688"/>
+            <fileNumberInfo fileNumber="811-02739"/>
+            <fileNumberInfo fileNumber="811-02809"/>
+            <fileNumberInfo fileNumber="811-02857"/>
+            <fileNumberInfo fileNumber="811-03091"/>
+            <fileNumberInfo fileNumber="811-03189"/>
+            <fileNumberInfo fileNumber="811-03290"/>
+            <fileNumberInfo fileNumber="811-04264"/>
+            <fileNumberInfo fileNumber="811-04282"/>
+            <fileNumberInfo fileNumber="811-04375"/>
+            <fileNumberInfo fileNumber="811-04612"/>
+            <fileNumberInfo fileNumber="811-04802"/>
+            <fileNumberInfo fileNumber="811-05178"/>
+            <fileNumberInfo fileNumber="811-05542"/>
+            <fileNumberInfo fileNumber="811-05576"/>
+            <fileNumberInfo fileNumber="811-05603"/>
+            <fileNumberInfo fileNumber="811-05611"/>
+            <fileNumberInfo fileNumber="811-05723"/>
+            <fileNumberInfo fileNumber="811-05742"/>
+            <fileNumberInfo fileNumber="811-06414"/>
+            <fileNumberInfo fileNumber="811-06500"/>
+            <fileNumberInfo fileNumber="811-06540"/>
+            <fileNumberInfo fileNumber="811-06660"/>
+            <fileNumberInfo fileNumber="811-06669"/>
+            <fileNumberInfo fileNumber="811-06728"/>
+            <fileNumberInfo fileNumber="811-07080"/>
+            <fileNumberInfo fileNumber="811-07136"/>
+            <fileNumberInfo fileNumber="811-07171"/>
+            <fileNumberInfo fileNumber="811-07177"/>
+            <fileNumberInfo fileNumber="811-07332"/>
+            <fileNumberInfo fileNumber="811-07354"/>
+            <fileNumberInfo fileNumber="811-07478"/>
+            <fileNumberInfo fileNumber="811-07642"/>
+            <fileNumberInfo fileNumber="811-07885"/>
+            <fileNumberInfo fileNumber="811-07899"/>
+            <fileNumberInfo fileNumber="811-08081"/>
+            <fileNumberInfo fileNumber="811-08162"/>
+            <fileNumberInfo fileNumber="811-08217"/>
+            <fileNumberInfo fileNumber="811-08573"/>
+            <fileNumberInfo fileNumber="811-08603"/>
+            <fileNumberInfo fileNumber="811-08621"/>
+            <fileNumberInfo fileNumber="811-08797"/>
+            <fileNumberInfo fileNumber="811-09191"/>
+            <fileNumberInfo fileNumber="811-09637"/>
+            <fileNumberInfo fileNumber="811-09651"/>
+            <fileNumberInfo fileNumber="811-10331"/>
+            <fileNumberInfo fileNumber="811-10337"/>
+            <fileNumberInfo fileNumber="811-10339"/>
+            <fileNumberInfo fileNumber="811-10543"/>
+            <fileNumberInfo fileNumber="811-21053"/>
+            <fileNumberInfo fileNumber="811-21126"/>
+            <fileNumberInfo fileNumber="811-21178"/>
+            <fileNumberInfo fileNumber="811-21318"/>
+            <fileNumberInfo fileNumber="811-21348"/>
+            <fileNumberInfo fileNumber="811-21349"/>
+            <fileNumberInfo fileNumber="811-21413"/>
+            <fileNumberInfo fileNumber="811-21457"/>
+            <fileNumberInfo fileNumber="811-21506"/>
+            <fileNumberInfo fileNumber="811-21566"/>
+            <fileNumberInfo fileNumber="811-21656"/>
+            <fileNumberInfo fileNumber="811-21702"/>
+            <fileNumberInfo fileNumber="811-21729"/>
+            <fileNumberInfo fileNumber="811-21759"/>
+            <fileNumberInfo fileNumber="811-21763"/>
+            <fileNumberInfo fileNumber="811-21784"/>
+            <fileNumberInfo fileNumber="811-21835"/>
+            <fileNumberInfo fileNumber="811-21972"/>
+            <fileNumberInfo fileNumber="811-22032"/>
+            <fileNumberInfo fileNumber="811-22061"/>
+            <fileNumberInfo fileNumber="811-22426"/>
+            <fileNumberInfo fileNumber="811-22501"/>
+            <fileNumberInfo fileNumber="811-22603"/>
+            <fileNumberInfo fileNumber="811-22606"/>
+            <fileNumberInfo fileNumber="811-22774"/>
+            <fileNumberInfo fileNumber="811-22991"/>
+            <fileNumberInfo fileNumber="811-23339"/>
+            <fileNumberInfo fileNumber="811-23340"/>
+            <fileNumberInfo fileNumber="811-23341"/>
+            <fileNumberInfo fileNumber="811-23343"/>
+            <fileNumberInfo fileNumber="811-23344"/>
+            <fileNumberInfo fileNumber="811-23345"/>
+            <fileNumberInfo fileNumber="811-23346"/>
+            <fileNumberInfo fileNumber="811-23380"/>
+            <fileNumberInfo fileNumber="811-23402"/>
+            <fileNumberInfo fileNumber="811-23428"/>
+            <fileNumberInfo fileNumber="811-23466"/>
+            <fileNumberInfo fileNumber="811-23511"/>
+            <fileNumberInfo fileNumber="811-23564"/>
+            <fileNumberInfo fileNumber="811-23584"/>
+            <fileNumberInfo fileNumber="811-23621"/>
+            <fileNumberInfo fileNumber="811-23626"/>
+            <fileNumberInfo fileNumber="811-23701"/>
+          </fileNumbers>
+        </director>
+        <director>
+          <directorName>Lorenzo A. Flores</directorName>
+          <crdNumber>N/A</crdNumber>
+          <isDirectorInterestedPerson>N</isDirectorInterestedPerson>
+          <fileNumbers>
+            <fileNumberInfo fileNumber="811-02688"/>
+            <fileNumberInfo fileNumber="811-02857"/>
+            <fileNumberInfo fileNumber="811-04264"/>
+            <fileNumberInfo fileNumber="811-04375"/>
+            <fileNumberInfo fileNumber="811-04802"/>
+            <fileNumberInfo fileNumber="811-05542"/>
+            <fileNumberInfo fileNumber="811-05603"/>
+            <fileNumberInfo fileNumber="811-05611"/>
+            <fileNumberInfo fileNumber="811-06414"/>
+            <fileNumberInfo fileNumber="811-06500"/>
+            <fileNumberInfo fileNumber="811-06540"/>
+            <fileNumberInfo fileNumber="811-06660"/>
+            <fileNumberInfo fileNumber="811-06728"/>
+            <fileNumberInfo fileNumber="811-07080"/>
+            <fileNumberInfo fileNumber="811-07136"/>
+            <fileNumberInfo fileNumber="811-07354"/>
+            <fileNumberInfo fileNumber="811-07478"/>
+            <fileNumberInfo fileNumber="811-07642"/>
+            <fileNumberInfo fileNumber="811-08081"/>
+            <fileNumberInfo fileNumber="811-08217"/>
+            <fileNumberInfo fileNumber="811-08573"/>
+            <fileNumberInfo fileNumber="811-08603"/>
+            <fileNumberInfo fileNumber="811-08621"/>
+            <fileNumberInfo fileNumber="811-09191"/>
+            <fileNumberInfo fileNumber="811-10331"/>
+            <fileNumberInfo fileNumber="811-10337"/>
+            <fileNumberInfo fileNumber="811-10339"/>
+            <fileNumberInfo fileNumber="811-10543"/>
+            <fileNumberInfo fileNumber="811-21053"/>
+            <fileNumberInfo fileNumber="811-21126"/>
+            <fileNumberInfo fileNumber="811-21178"/>
+            <fileNumberInfo fileNumber="811-21318"/>
+            <fileNumberInfo fileNumber="811-21348"/>
+            <fileNumberInfo fileNumber="811-21349"/>
+            <fileNumberInfo fileNumber="811-21413"/>
+            <fileNumberInfo fileNumber="811-21457"/>
+            <fileNumberInfo fileNumber="811-21506"/>
+            <fileNumberInfo fileNumber="811-21566"/>
+            <fileNumberInfo fileNumber="811-21656"/>
+            <fileNumberInfo fileNumber="811-21702"/>
+            <fileNumberInfo fileNumber="811-21729"/>
+            <fileNumberInfo fileNumber="811-21784"/>
+            <fileNumberInfo fileNumber="811-21835"/>
+            <fileNumberInfo fileNumber="811-21972"/>
+            <fileNumberInfo fileNumber="811-22032"/>
+            <fileNumberInfo fileNumber="811-22426"/>
+            <fileNumberInfo fileNumber="811-22501"/>
+            <fileNumberInfo fileNumber="811-22603"/>
+            <fileNumberInfo fileNumber="811-22606"/>
+            <fileNumberInfo fileNumber="811-22774"/>
+            <fileNumberInfo fileNumber="811-22991"/>
+            <fileNumberInfo fileNumber="811-23339"/>
+            <fileNumberInfo fileNumber="811-23340"/>
+            <fileNumberInfo fileNumber="811-23341"/>
+            <fileNumberInfo fileNumber="811-23343"/>
+            <fileNumberInfo fileNumber="811-23344"/>
+            <fileNumberInfo fileNumber="811-23345"/>
+            <fileNumberInfo fileNumber="811-23346"/>
+            <fileNumberInfo fileNumber="811-23428"/>
+            <fileNumberInfo fileNumber="811-23466"/>
+            <fileNumberInfo fileNumber="811-23511"/>
+            <fileNumberInfo fileNumber="811-23564"/>
+            <fileNumberInfo fileNumber="811-23621"/>
+            <fileNumberInfo fileNumber="811-23626"/>
+            <fileNumberInfo fileNumber="811-23701"/>
+          </fileNumbers>
+        </director>
+        <director>
+          <directorName>R. Glenn Hubbard</directorName>
+          <crdNumber>N/A</crdNumber>
+          <isDirectorInterestedPerson>N</isDirectorInterestedPerson>
+          <fileNumbers>
+            <fileNumberInfo fileNumber="811-02688"/>
+            <fileNumberInfo fileNumber="811-02857"/>
+            <fileNumberInfo fileNumber="811-04264"/>
+            <fileNumberInfo fileNumber="811-04375"/>
+            <fileNumberInfo fileNumber="811-04802"/>
+            <fileNumberInfo fileNumber="811-05542"/>
+            <fileNumberInfo fileNumber="811-05603"/>
+            <fileNumberInfo fileNumber="811-05611"/>
+            <fileNumberInfo fileNumber="811-06414"/>
+            <fileNumberInfo fileNumber="811-06500"/>
+            <fileNumberInfo fileNumber="811-06540"/>
+            <fileNumberInfo fileNumber="811-06660"/>
+            <fileNumberInfo fileNumber="811-06728"/>
+            <fileNumberInfo fileNumber="811-07080"/>
+            <fileNumberInfo fileNumber="811-07136"/>
+            <fileNumberInfo fileNumber="811-07354"/>
+            <fileNumberInfo fileNumber="811-07478"/>
+            <fileNumberInfo fileNumber="811-07642"/>
+            <fileNumberInfo fileNumber="811-08081"/>
+            <fileNumberInfo fileNumber="811-08217"/>
+            <fileNumberInfo fileNumber="811-08573"/>
+            <fileNumberInfo fileNumber="811-08603"/>
+            <fileNumberInfo fileNumber="811-08621"/>
+            <fileNumberInfo fileNumber="811-09191"/>
+            <fileNumberInfo fileNumber="811-10331"/>
+            <fileNumberInfo fileNumber="811-10337"/>
+            <fileNumberInfo fileNumber="811-10339"/>
+            <fileNumberInfo fileNumber="811-10543"/>
+            <fileNumberInfo fileNumber="811-21053"/>
+            <fileNumberInfo fileNumber="811-21126"/>
+            <fileNumberInfo fileNumber="811-21178"/>
+            <fileNumberInfo fileNumber="811-21318"/>
+            <fileNumberInfo fileNumber="811-21348"/>
+            <fileNumberInfo fileNumber="811-21349"/>
+            <fileNumberInfo fileNumber="811-21413"/>
+            <fileNumberInfo fileNumber="811-21457"/>
+            <fileNumberInfo fileNumber="811-21506"/>
+            <fileNumberInfo fileNumber="811-21566"/>
+            <fileNumberInfo fileNumber="811-21656"/>
+            <fileNumberInfo fileNumber="811-21702"/>
+            <fileNumberInfo fileNumber="811-21729"/>
+            <fileNumberInfo fileNumber="811-21784"/>
+            <fileNumberInfo fileNumber="811-21835"/>
+            <fileNumberInfo fileNumber="811-21972"/>
+            <fileNumberInfo fileNumber="811-22032"/>
+            <fileNumberInfo fileNumber="811-22426"/>
+            <fileNumberInfo fileNumber="811-22501"/>
+            <fileNumberInfo fileNumber="811-22603"/>
+            <fileNumberInfo fileNumber="811-22606"/>
+            <fileNumberInfo fileNumber="811-22774"/>
+            <fileNumberInfo fileNumber="811-22991"/>
+            <fileNumberInfo fileNumber="811-23339"/>
+            <fileNumberInfo fileNumber="811-23340"/>
+            <fileNumberInfo fileNumber="811-23341"/>
+            <fileNumberInfo fileNumber="811-23343"/>
+            <fileNumberInfo fileNumber="811-23344"/>
+            <fileNumberInfo fileNumber="811-23345"/>
+            <fileNumberInfo fileNumber="811-23346"/>
+            <fileNumberInfo fileNumber="811-23428"/>
+            <fileNumberInfo fileNumber="811-23466"/>
+            <fileNumberInfo fileNumber="811-23511"/>
+            <fileNumberInfo fileNumber="811-23564"/>
+            <fileNumberInfo fileNumber="811-23621"/>
+            <fileNumberInfo fileNumber="811-23626"/>
+            <fileNumberInfo fileNumber="811-23701"/>
+          </fileNumbers>
+        </director>
+        <director>
+          <directorName>Robert Fairbairn</directorName>
+          <crdNumber>004992372</crdNumber>
+          <isDirectorInterestedPerson>Y</isDirectorInterestedPerson>
+          <fileNumbers>
+            <fileNumberInfo fileNumber="811-02354"/>
+            <fileNumberInfo fileNumber="811-02405"/>
+            <fileNumberInfo fileNumber="811-02661"/>
+            <fileNumberInfo fileNumber="811-02688"/>
+            <fileNumberInfo fileNumber="811-02739"/>
+            <fileNumberInfo fileNumber="811-02809"/>
+            <fileNumberInfo fileNumber="811-02857"/>
+            <fileNumberInfo fileNumber="811-03091"/>
+            <fileNumberInfo fileNumber="811-03189"/>
+            <fileNumberInfo fileNumber="811-03290"/>
+            <fileNumberInfo fileNumber="811-04264"/>
+            <fileNumberInfo fileNumber="811-04282"/>
+            <fileNumberInfo fileNumber="811-04375"/>
+            <fileNumberInfo fileNumber="811-04612"/>
+            <fileNumberInfo fileNumber="811-04802"/>
+            <fileNumberInfo fileNumber="811-05178"/>
+            <fileNumberInfo fileNumber="811-05542"/>
+            <fileNumberInfo fileNumber="811-05576"/>
+            <fileNumberInfo fileNumber="811-05603"/>
+            <fileNumberInfo fileNumber="811-05611"/>
+            <fileNumberInfo fileNumber="811-05723"/>
+            <fileNumberInfo fileNumber="811-05742"/>
+            <fileNumberInfo fileNumber="811-06414"/>
+            <fileNumberInfo fileNumber="811-06500"/>
+            <fileNumberInfo fileNumber="811-06540"/>
+            <fileNumberInfo fileNumber="811-06660"/>
+            <fileNumberInfo fileNumber="811-06669"/>
+            <fileNumberInfo fileNumber="811-06728"/>
+            <fileNumberInfo fileNumber="811-07080"/>
+            <fileNumberInfo fileNumber="811-07136"/>
+            <fileNumberInfo fileNumber="811-07171"/>
+            <fileNumberInfo fileNumber="811-07177"/>
+            <fileNumberInfo fileNumber="811-07332"/>
+            <fileNumberInfo fileNumber="811-07354"/>
+            <fileNumberInfo fileNumber="811-07478"/>
+            <fileNumberInfo fileNumber="811-07642"/>
+            <fileNumberInfo fileNumber="811-07885"/>
+            <fileNumberInfo fileNumber="811-07899"/>
+            <fileNumberInfo fileNumber="811-08081"/>
+            <fileNumberInfo fileNumber="811-08162"/>
+            <fileNumberInfo fileNumber="811-08217"/>
+            <fileNumberInfo fileNumber="811-08573"/>
+            <fileNumberInfo fileNumber="811-08603"/>
+            <fileNumberInfo fileNumber="811-08621"/>
+            <fileNumberInfo fileNumber="811-08797"/>
+            <fileNumberInfo fileNumber="811-09191"/>
+            <fileNumberInfo fileNumber="811-09637"/>
+            <fileNumberInfo fileNumber="811-09651"/>
+            <fileNumberInfo fileNumber="811-10331"/>
+            <fileNumberInfo fileNumber="811-10337"/>
+            <fileNumberInfo fileNumber="811-10339"/>
+            <fileNumberInfo fileNumber="811-10543"/>
+            <fileNumberInfo fileNumber="811-21053"/>
+            <fileNumberInfo fileNumber="811-21126"/>
+            <fileNumberInfo fileNumber="811-21178"/>
+            <fileNumberInfo fileNumber="811-21318"/>
+            <fileNumberInfo fileNumber="811-21348"/>
+            <fileNumberInfo fileNumber="811-21349"/>
+            <fileNumberInfo fileNumber="811-21413"/>
+            <fileNumberInfo fileNumber="811-21457"/>
+            <fileNumberInfo fileNumber="811-21506"/>
+            <fileNumberInfo fileNumber="811-21566"/>
+            <fileNumberInfo fileNumber="811-21656"/>
+            <fileNumberInfo fileNumber="811-21702"/>
+            <fileNumberInfo fileNumber="811-21729"/>
+            <fileNumberInfo fileNumber="811-21759"/>
+            <fileNumberInfo fileNumber="811-21763"/>
+            <fileNumberInfo fileNumber="811-21784"/>
+            <fileNumberInfo fileNumber="811-21835"/>
+            <fileNumberInfo fileNumber="811-21972"/>
+            <fileNumberInfo fileNumber="811-22032"/>
+            <fileNumberInfo fileNumber="811-22061"/>
+            <fileNumberInfo fileNumber="811-22426"/>
+            <fileNumberInfo fileNumber="811-22501"/>
+            <fileNumberInfo fileNumber="811-22603"/>
+            <fileNumberInfo fileNumber="811-22606"/>
+            <fileNumberInfo fileNumber="811-22774"/>
+            <fileNumberInfo fileNumber="811-22991"/>
+            <fileNumberInfo fileNumber="811-23339"/>
+            <fileNumberInfo fileNumber="811-23340"/>
+            <fileNumberInfo fileNumber="811-23341"/>
+            <fileNumberInfo fileNumber="811-23343"/>
+            <fileNumberInfo fileNumber="811-23344"/>
+            <fileNumberInfo fileNumber="811-23345"/>
+            <fileNumberInfo fileNumber="811-23346"/>
+            <fileNumberInfo fileNumber="811-23402"/>
+            <fileNumberInfo fileNumber="811-23428"/>
+            <fileNumberInfo fileNumber="811-23466"/>
+            <fileNumberInfo fileNumber="811-23511"/>
+            <fileNumberInfo fileNumber="811-23564"/>
+            <fileNumberInfo fileNumber="811-23621"/>
+            <fileNumberInfo fileNumber="811-23626"/>
+            <fileNumberInfo fileNumber="811-23701"/>
+          </fileNumbers>
+        </director>
+        <director>
+          <directorName>Stayce D. Harris</directorName>
+          <crdNumber>N/A</crdNumber>
+          <isDirectorInterestedPerson>N</isDirectorInterestedPerson>
+          <fileNumbers>
+            <fileNumberInfo fileNumber="811-02688"/>
+            <fileNumberInfo fileNumber="811-02857"/>
+            <fileNumberInfo fileNumber="811-04264"/>
+            <fileNumberInfo fileNumber="811-04375"/>
+            <fileNumberInfo fileNumber="811-04802"/>
+            <fileNumberInfo fileNumber="811-05542"/>
+            <fileNumberInfo fileNumber="811-05603"/>
+            <fileNumberInfo fileNumber="811-05611"/>
+            <fileNumberInfo fileNumber="811-06414"/>
+            <fileNumberInfo fileNumber="811-06500"/>
+            <fileNumberInfo fileNumber="811-06540"/>
+            <fileNumberInfo fileNumber="811-06660"/>
+            <fileNumberInfo fileNumber="811-06728"/>
+            <fileNumberInfo fileNumber="811-07080"/>
+            <fileNumberInfo fileNumber="811-07136"/>
+            <fileNumberInfo fileNumber="811-07354"/>
+            <fileNumberInfo fileNumber="811-07478"/>
+            <fileNumberInfo fileNumber="811-07642"/>
+            <fileNumberInfo fileNumber="811-08081"/>
+            <fileNumberInfo fileNumber="811-08217"/>
+            <fileNumberInfo fileNumber="811-08573"/>
+            <fileNumberInfo fileNumber="811-08603"/>
+            <fileNumberInfo fileNumber="811-08621"/>
+            <fileNumberInfo fileNumber="811-09191"/>
+            <fileNumberInfo fileNumber="811-10331"/>
+            <fileNumberInfo fileNumber="811-10337"/>
+            <fileNumberInfo fileNumber="811-10339"/>
+            <fileNumberInfo fileNumber="811-10543"/>
+            <fileNumberInfo fileNumber="811-21053"/>
+            <fileNumberInfo fileNumber="811-21126"/>
+            <fileNumberInfo fileNumber="811-21178"/>
+            <fileNumberInfo fileNumber="811-21318"/>
+            <fileNumberInfo fileNumber="811-21348"/>
+            <fileNumberInfo fileNumber="811-21349"/>
+            <fileNumberInfo fileNumber="811-21413"/>
+            <fileNumberInfo fileNumber="811-21457"/>
+            <fileNumberInfo fileNumber="811-21506"/>
+            <fileNumberInfo fileNumber="811-21566"/>
+            <fileNumberInfo fileNumber="811-21656"/>
+            <fileNumberInfo fileNumber="811-21702"/>
+            <fileNumberInfo fileNumber="811-21729"/>
+            <fileNumberInfo fileNumber="811-21784"/>
+            <fileNumberInfo fileNumber="811-21835"/>
+            <fileNumberInfo fileNumber="811-21972"/>
+            <fileNumberInfo fileNumber="811-22032"/>
+            <fileNumberInfo fileNumber="811-22426"/>
+            <fileNumberInfo fileNumber="811-22501"/>
+            <fileNumberInfo fileNumber="811-22603"/>
+            <fileNumberInfo fileNumber="811-22606"/>
+            <fileNumberInfo fileNumber="811-22774"/>
+            <fileNumberInfo fileNumber="811-22991"/>
+            <fileNumberInfo fileNumber="811-23339"/>
+            <fileNumberInfo fileNumber="811-23340"/>
+            <fileNumberInfo fileNumber="811-23341"/>
+            <fileNumberInfo fileNumber="811-23343"/>
+            <fileNumberInfo fileNumber="811-23344"/>
+            <fileNumberInfo fileNumber="811-23345"/>
+            <fileNumberInfo fileNumber="811-23346"/>
+            <fileNumberInfo fileNumber="811-23428"/>
+            <fileNumberInfo fileNumber="811-23466"/>
+            <fileNumberInfo fileNumber="811-23511"/>
+            <fileNumberInfo fileNumber="811-23564"/>
+            <fileNumberInfo fileNumber="811-23621"/>
+            <fileNumberInfo fileNumber="811-23626"/>
+            <fileNumberInfo fileNumber="811-23701"/>
+          </fileNumbers>
+        </director>
+        <director>
+          <directorName>W. Carl Kester</directorName>
+          <crdNumber>N/A</crdNumber>
+          <isDirectorInterestedPerson>N</isDirectorInterestedPerson>
+          <fileNumbers>
+            <fileNumberInfo fileNumber="811-02688"/>
+            <fileNumberInfo fileNumber="811-02857"/>
+            <fileNumberInfo fileNumber="811-04264"/>
+            <fileNumberInfo fileNumber="811-04375"/>
+            <fileNumberInfo fileNumber="811-04802"/>
+            <fileNumberInfo fileNumber="811-05542"/>
+            <fileNumberInfo fileNumber="811-05603"/>
+            <fileNumberInfo fileNumber="811-05611"/>
+            <fileNumberInfo fileNumber="811-06414"/>
+            <fileNumberInfo fileNumber="811-06500"/>
+            <fileNumberInfo fileNumber="811-06540"/>
+            <fileNumberInfo fileNumber="811-06660"/>
+            <fileNumberInfo fileNumber="811-06728"/>
+            <fileNumberInfo fileNumber="811-07080"/>
+            <fileNumberInfo fileNumber="811-07136"/>
+            <fileNumberInfo fileNumber="811-07354"/>
+            <fileNumberInfo fileNumber="811-07478"/>
+            <fileNumberInfo fileNumber="811-07642"/>
+            <fileNumberInfo fileNumber="811-08081"/>
+            <fileNumberInfo fileNumber="811-08217"/>
+            <fileNumberInfo fileNumber="811-08573"/>
+            <fileNumberInfo fileNumber="811-08603"/>
+            <fileNumberInfo fileNumber="811-08621"/>
+            <fileNumberInfo fileNumber="811-09191"/>
+            <fileNumberInfo fileNumber="811-10331"/>
+            <fileNumberInfo fileNumber="811-10337"/>
+            <fileNumberInfo fileNumber="811-10339"/>
+            <fileNumberInfo fileNumber="811-10543"/>
+            <fileNumberInfo fileNumber="811-21053"/>
+            <fileNumberInfo fileNumber="811-21126"/>
+            <fileNumberInfo fileNumber="811-21178"/>
+            <fileNumberInfo fileNumber="811-21318"/>
+            <fileNumberInfo fileNumber="811-21348"/>
+            <fileNumberInfo fileNumber="811-21349"/>
+            <fileNumberInfo fileNumber="811-21413"/>
+            <fileNumberInfo fileNumber="811-21457"/>
+            <fileNumberInfo fileNumber="811-21506"/>
+            <fileNumberInfo fileNumber="811-21566"/>
+            <fileNumberInfo fileNumber="811-21656"/>
+            <fileNumberInfo fileNumber="811-21702"/>
+            <fileNumberInfo fileNumber="811-21729"/>
+            <fileNumberInfo fileNumber="811-21784"/>
+            <fileNumberInfo fileNumber="811-21835"/>
+            <fileNumberInfo fileNumber="811-21972"/>
+            <fileNumberInfo fileNumber="811-22032"/>
+            <fileNumberInfo fileNumber="811-22426"/>
+            <fileNumberInfo fileNumber="811-22501"/>
+            <fileNumberInfo fileNumber="811-22603"/>
+            <fileNumberInfo fileNumber="811-22606"/>
+            <fileNumberInfo fileNumber="811-22774"/>
+            <fileNumberInfo fileNumber="811-22991"/>
+            <fileNumberInfo fileNumber="811-23339"/>
+            <fileNumberInfo fileNumber="811-23340"/>
+            <fileNumberInfo fileNumber="811-23341"/>
+            <fileNumberInfo fileNumber="811-23343"/>
+            <fileNumberInfo fileNumber="811-23344"/>
+            <fileNumberInfo fileNumber="811-23345"/>
+            <fileNumberInfo fileNumber="811-23346"/>
+            <fileNumberInfo fileNumber="811-23380"/>
+            <fileNumberInfo fileNumber="811-23428"/>
+            <fileNumberInfo fileNumber="811-23466"/>
+            <fileNumberInfo fileNumber="811-23511"/>
+            <fileNumberInfo fileNumber="811-23564"/>
+            <fileNumberInfo fileNumber="811-23584"/>
+            <fileNumberInfo fileNumber="811-23621"/>
+            <fileNumberInfo fileNumber="811-23626"/>
+            <fileNumberInfo fileNumber="811-23701"/>
+          </fileNumbers>
+        </director>
+      </directors>
+      <chiefComplianceOfficers>
+        <chiefComplianceOfficer>
+          <ccoName>Aaron Wasserman</ccoName>
+          <crdNumber>N/A</crdNumber>
+          <ccoStreet1>50 Hudson Yards</ccoStreet1>
+          <ccoCity>New York</ccoCity>
+          <ccoStateCountry ccoCountry="US" ccoState="US-NY"/>
+          <ccoZipCode>10001</ccoZipCode>
+          <ccoPhone>XXXXXX</ccoPhone>
+          <isCcoChangedSinceLastFiling>N</isCcoChangedSinceLastFiling>
+          <ccoEmployers>
+            <ccoEmployer ccoEmployerName="N/A" ccoEmployerId="N/A"/>
+          </ccoEmployers>
+        </chiefComplianceOfficer>
+      </chiefComplianceOfficers>
+      <securityMatterSeriesInfo isRegistrantSubmittedMatter="Y">
+        <seriesInfo seriesName="N/A" seriesId="N/A"/>
+      </securityMatterSeriesInfo>
+      <isPreviousLegalProceeding>N</isPreviousLegalProceeding>
+      <isPreviousProceedingTerminated>N</isPreviousProceedingTerminated>
+      <isClaimFiled>N</isClaimFiled>
+      <coveredByInsurancePolicy isCoveredByInsurancePolicy="Y" isClaimFiledDuringPeriod="N"/>
+      <isFinancialSupportDuringPeriod>N</isFinancialSupportDuringPeriod>
+      <releaseNumbers isExemptionFromAct="Y">
+        <releaseNumberInfo releaseNumber="IC-25100"/>
+        <releaseNumberInfo releaseNumber="IC-28719"/>
+      </releaseNumbers>
+      <principalUnderwriters>
+        <principalUnderwriter>
+          <principalUnderwriterName>BlackRock Investments, LLC</principalUnderwriterName>
+          <principalUnderwriterFileNumber>8-48436</principalUnderwriterFileNumber>
+          <principalUnderwriterCrdNumber>000038642</principalUnderwriterCrdNumber>
+          <principalUnderwriterLei>54930061FBHCKXL2G714</principalUnderwriterLei>
+          <principalUnderWriterStateCountry principalUnderWriterCountry="US" principalUnderWriterState="US-NY"/>
+          <isPrincipalUnderwriterAffiliatedWithRegistrant>Y</isPrincipalUnderwriterAffiliatedWithRegistrant>
+        </principalUnderwriter>
+      </principalUnderwriters>
+      <isUnderwriterHiredOrTerminated>N</isUnderwriterHiredOrTerminated>
+      <publicAccountants>
+        <publicAccountant>
+          <publicAccountantName>Deloitte &amp; Touche LLP</publicAccountantName>
+          <pcaobNumber>34</pcaobNumber>
+          <publicAccountantLei>254900WYZPGQGKV3RF07</publicAccountantLei>
+          <publicAccountantStateCountry publicAccountantCountry="US" publicAccountantState="US-MA"/>
+        </publicAccountant>
+      </publicAccountants>
+      <isPublicAccountantChanged>N</isPublicAccountantChanged>
+      <isMaterialWeakness>N</isMaterialWeakness>
+      <isOpinionOffered>N</isOpinionOffered>
+      <isMaterialChange>N</isMaterialChange>
+      <isAccountingPrincipleChange>N</isAccountingPrincipleChange>
+      <paymentDividendSeries isPaymentDividend="Y">
+        <seriesInfo seriesName="N/A" seriesId="N/A"/>
+      </paymentDividendSeries>
+    </registrantInfo>
+    <managementInvestmentQuestionSeriesInfo>
+      <managementInvestmentQuestion>
+        <mgmtInvFundName>BlackRock Technology &amp; Private Equity Term Trust</mgmtInvFundName>
+        <mgmtInvLei>549300G3XFQ7175KM723</mgmtInvLei>
+        <isFirstFilingByFund>N</isFirstFilingByFund>
+        <numAuthorizedClass>0</numAuthorizedClass>
+        <numAddedClass>0</numAddedClass>
+        <numTerminatedClass>0</numTerminatedClass>
+        <fundType>N/A</fundType>
+        <isNonDiversifiedCompany>Y</isNonDiversifiedCompany>
+        <isForeignSubsidiary>N</isForeignSubsidiary>
+        <isFundSecuritiesLending>Y</isFundSecuritiesLending>
+        <fundLendSecurities didFundLendSecurities="Y">
+          <isFundLiquidated>N</isFundLiquidated>
+          <isFundAdverselyImpacted>N</isFundAdverselyImpacted>
+        </fundLendSecurities>
+        <securityLendings>
+          <securityLending>
+            <securitiesAgentName>BlackRock Investment Management, LLC</securitiesAgentName>
+            <securitiesAgentLei>5493006MRTEZZ4S4CQ20</securitiesAgentLei>
+            <isSecuritiesAgentAffiliated>Y</isSecuritiesAgentAffiliated>
+            <securityAgentIdemnity isSecurityAgentIdemnity="Y">
+              <idemnityProviders>
+                <idemnityProvider idemnityProviderName="N/A"/>
+              </idemnityProviders>
+              <didIndemnificationRights>N</didIndemnificationRights>
+            </securityAgentIdemnity>
+          </securityLending>
+        </securityLendings>
+        <collateralManagers>
+          <collateralManager collateralManagerName="BlackRock Fund Advisors" collateralManagerLei="549300YOOGP0Y1M95C20" isCollateralManagerAffliliated="Y" isCollateralManagerAffliliatedWithFund="Y"/>
+        </collateralManagers>
+        <paymentToAgentManagers>
+          <paymentToAgentManagerType>Cash collateral reinvestment fee</paymentToAgentManagerType>
+          <paymentToAgentManagerType>Other</paymentToAgentManagerType>
+          <paymentToAgentManagerType>Revenue sharing split</paymentToAgentManagerType>
+          <otherFeeDesc>Rebates paid to borrowers</otherFeeDesc>
+        </paymentToAgentManagers>
+        <avgPortfolioSecuritiesValue>10353865.55000000</avgPortfolioSecuritiesValue>
+        <netIncomeSecuritiesLending>107265.00000000</netIncomeSecuritiesLending>
+        <relyOnRuleTypes>
+          <relyOnRuleType>Rule 12d1-1 (17 CFR 270.12d1-1)</relyOnRuleType>
+          <relyOnRuleType>Rule 12d1-4 (17 CFR 270.12d1-4)</relyOnRuleType>
+          <relyOnRuleType>Rule 17a-7 (17 CFR 270.17a-7)</relyOnRuleType>
+          <relyOnRuleType>Rule 18f-4 (17 CFR 270.18f-4)</relyOnRuleType>
+          <relyOnRuleType>Rule 18f-4(f)(17 CFR 270.18f-4(f))</relyOnRuleType>
+          <relyOnRuleType>Rule 32a-4 (17 CFR 270.32a-4)</relyOnRuleType>
+        </relyOnRuleTypes>
+        <isExpenseLimitationInPlace>Y</isExpenseLimitationInPlace>
+        <isExpenseReducedOrWaived>Y</isExpenseReducedOrWaived>
+        <isFeesWaivedRecoupable>N</isFeesWaivedRecoupable>
+        <isExpenseWaivedRecoupable>N</isExpenseWaivedRecoupable>
+        <investmentAdvisers>
+          <investmentAdviser>
+            <investmentAdviserName>BlackRock Advisors, LLC</investmentAdviserName>
+            <investmentAdviserFileNo>801-47710</investmentAdviserFileNo>
+            <investmentAdviserCrdNo>000106614</investmentAdviserCrdNo>
+            <investmentAdviserLei>5493001LN9MRM6A35J74</investmentAdviserLei>
+            <investmentAdviserStateCountry investmentAdviserState="US-DE" investmentAdviserCountry="US"/>
+            <isInvestmentAdviserHired>N</isInvestmentAdviserHired>
+          </investmentAdviser>
+        </investmentAdvisers>
+        <transferAgents>
+          <transferAgent>
+            <transferAgentName>Computershare Trust Company, National Association</transferAgentName>
+            <transferAgentFileNo>85-11340</transferAgentFileNo>
+            <transferAgentLei>2549001YYB62BVMSAO13</transferAgentLei>
+            <transferAgentStateCountry transferAgentState="US-MA" transferAgentCountry="US"/>
+            <isTransferAgentAffiliated>N</isTransferAgentAffiliated>
+            <isTransferAgentSubAgent>N</isTransferAgentSubAgent>
+          </transferAgent>
+        </transferAgents>
+        <isTransferAgentHiredOrTerminated>N</isTransferAgentHiredOrTerminated>
+        <pricingServices>
+          <pricingService>
+            <pricingServiceName>Bloomberg L.P.</pricingServiceName>
+            <pricingServiceLei>549300B56MD0ZC402L06</pricingServiceLei>
+            <pricingServiceStateCountry pricingServiceState="US-NY" pricingServiceCountry="US"/>
+            <isPricingServiceAffiliated>N</isPricingServiceAffiliated>
+          </pricingService>
+          <pricingService>
+            <pricingServiceName>ICE Data Services, Inc.</pricingServiceName>
+            <pricingServiceOther>13-3668779</pricingServiceOther>
+            <pricingServiceIdNumberDesc>Tax ID</pricingServiceIdNumberDesc>
+            <pricingServiceStateCountry pricingServiceState="US-GA" pricingServiceCountry="US"/>
+            <isPricingServiceAffiliated>N</isPricingServiceAffiliated>
+          </pricingService>
+          <pricingService>
+            <pricingServiceName>London Stock Exchange Group PLC</pricingServiceName>
+            <pricingServiceLei>213800QAUUUP6I445N30</pricingServiceLei>
+            <pricingServiceCountry>GB</pricingServiceCountry>
+            <isPricingServiceAffiliated>N</isPricingServiceAffiliated>
+          </pricingService>
+          <pricingService>
+            <pricingServiceName>S&amp;P Global Inc.</pricingServiceName>
+            <pricingServiceLei>Y6X4K52KMJMZE7I7MY94</pricingServiceLei>
+            <pricingServiceStateCountry pricingServiceState="US-NY" pricingServiceCountry="US"/>
+            <isPricingServiceAffiliated>N</isPricingServiceAffiliated>
+          </pricingService>
+        </pricingServices>
+        <isPricingServiceHiredOrTerminated>N</isPricingServiceHiredOrTerminated>
+        <custodians>
+          <custodian>
+            <custodianName>BANCO CITI MEXICO S.A. INSTITUCION DE BANCA MULTIPLE, GRUPO FINANCIERO CITI MEXICO</custodianName>
+            <custodianLei>529900H31AYI6WA1J534</custodianLei>
+            <custodianCountry>MX</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>BNP Paribas (Athens, Attica, GR, Branch)</custodianName>
+            <custodianLei>R0MUWSFPU8MPRO8K5P83</custodianLei>
+            <custodianCountry>GR</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Bank Handlowy w Warszawie Spolka Akcyjna</custodianName>
+            <custodianLei>XLEZHWWOI4HFQDGL4793</custodianLei>
+            <custodianCountry>PL</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Bank Hapoalim B.M.</custodianName>
+            <custodianLei>B6ARUI4946ST4S7WOU88</custodianLei>
+            <custodianCountry>IL</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Citibank Europe Public Limited Company</custodianName>
+            <custodianLei>N1FBEDJ5J41VKZLO2475</custodianLei>
+            <custodianCountry>IE</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Citibank, National Association (Ciudad Autonoma de Buenos Aires, Ciudad Autonoma de Buenos Aires, AR, Branch)</custodianName>
+            <custodianLei>579100KKDGKCFFKKF005</custodianLei>
+            <custodianCountry>AR</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Citibank, National Association (Mumbai, Maharashtra, IN, Branch)</custodianName>
+            <custodianLei>E57ODZWZ7FF32TWEFA76</custodianLei>
+            <custodianCountry>IN</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Citibank, National Association (Sao Paulo, Sao Paulo, BR, Branch)</custodianName>
+            <custodianLei>E57ODZWZ7FF32TWEFA76</custodianLei>
+            <custodianCountry>BR</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Citibank, National Association (Singapore, SG, Branch)</custodianName>
+            <custodianLei>E57ODZWZ7FF32TWEFA76</custodianLei>
+            <custodianCountry>SG</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Deutsche Bank (Malaysia) Berhad</custodianName>
+            <custodianLei>529900DLWFR8HK7DR278</custodianLei>
+            <custodianCountry>MY</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Deutsche Bank Aktiengesellschaft (Amsterdam, Noord Holland, NL, Branch)</custodianName>
+            <custodianLei>7LTWFZYICNSX8D621K86</custodianLei>
+            <custodianCountry>NL</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Deutsche Bank Aktiengesellschaft (Jakarta, Jakarta, ID, Branch)</custodianName>
+            <custodianLei>7LTWFZYICNSX8D621K86</custodianLei>
+            <custodianCountry>ID</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Deutsche Bank Aktiengesellschaft (Makati City, Metro Manila, PH, Branch)</custodianName>
+            <custodianLei>7LTWFZYICNSX8D621K86</custodianLei>
+            <custodianCountry>PH</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Deutsche Bank Aktiengesellschaft (Taipei City, TW, Branch)</custodianName>
+            <custodianLei>25490016G0WR60ANOK04</custodianLei>
+            <custodianCountry>TW</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Euroclear Bank</custodianName>
+            <custodianLei>549300OZ46BRLZ8Y6F65</custodianLei>
+            <custodianCountry>BE</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign securities depository - rule 17f-7 (17 CFR 270.17f-7)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>FirstRand Bank Limited</custodianName>
+            <custodianLei>ZAYQDKTCATIXF9OQY690</custodianLei>
+            <custodianCountry>ZA</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>HSBC Bank (China) Company Limited</custodianName>
+            <custodianLei>2CZOJRADNJXBLT55G526</custodianLei>
+            <custodianCountry>CN</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Intesa Sanpaolo S.p.A.</custodianName>
+            <custodianLei>2W8N8UU78PMDQKZENC08</custodianLei>
+            <custodianCountry>IT</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Mizuho Bank, Ltd. (Minato ku, Tokyo, JP, Branch)</custodianName>
+            <custodianLei>RB0PEZSDGCO3JS6CEU02</custodianLei>
+            <custodianCountry>JP</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Royal Bank of Canada</custodianName>
+            <custodianLei>ES7IP3U3RHIGC71XBU11</custodianLei>
+            <custodianCountry>CA</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>SG Americas Securities, LLC</custodianName>
+            <custodianLei>549300F35UE0BOM1WJ55</custodianLei>
+            <custodianStateCountry custodianState="US-NY" custodianCountry="US"/>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Futures commission merchants and commodity clearing organizations - rule 17f-6 (17 CFR 270.17f-6)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Skandinaviska Enskilda Banken AB</custodianName>
+            <custodianLei>F3JS33DEI6XQ4ZBPTN86</custodianLei>
+            <custodianCountry>SE</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Skandinaviska Enskilda Banken AB (Copenhagen, Hovedstaden, DK, Branch)</custodianName>
+            <custodianLei>F3JS33DEI6XQ4ZBPTN86</custodianLei>
+            <custodianCountry>DK</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Skandinaviska Enskilda Banken AB (Helsinki, Uusimaa, FI, Branch)</custodianName>
+            <custodianLei>F3JS33DEI6XQ4ZBPTN86</custodianLei>
+            <custodianCountry>FI</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Skandinaviska Enskilda Banken AB (Oslo, Oslo, NO, Branch)</custodianName>
+            <custodianLei>F3JS33DEI6XQ4ZBPTN86</custodianLei>
+            <custodianCountry>NO</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Standard Chartered Bank (Hong Kong) Limited</custodianName>
+            <custodianLei>X5AV1MBDXGRPX5UGMX13</custodianLei>
+            <custodianCountry>HK</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>Standard Chartered Bank (Thai) Public Company Limited</custodianName>
+            <custodianLei>549300O1LQYCQ7G1IM57</custodianLei>
+            <custodianCountry>TH</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>State Street Bank International GmbH</custodianName>
+            <custodianLei>ZMHGNT7ZPKZ3UFZ8EO46</custodianLei>
+            <custodianCountry>DE</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>State Street Bank and Trust Company</custodianName>
+            <custodianLei>571474TGEMMWANRLN572</custodianLei>
+            <custodianStateCountry custodianState="US-MA" custodianCountry="US"/>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>N</isSubCustodian>
+            <custodyType>Bank - section 17(f)(1) (15 U.S.C. 80a-17(f)(1))</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>State Street Bank and Trust Company (Edinburgh, GB, Branch)</custodianName>
+            <custodianLei>571474TGEMMWANRLN572</custodianLei>
+            <custodianCountry>GB</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>State Street Trust Company Canada</custodianName>
+            <custodianLei>549300L71XG2CTQ2V827</custodianLei>
+            <custodianCountry>CA</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>The Hongkong and Shanghai Banking Corporation Limited</custodianName>
+            <custodianLei>2HI3YI5320L3RW6NJ957</custodianLei>
+            <custodianCountry>HK</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>The Hongkong and Shanghai Banking Corporation Limited (Auckland, Auckland, NZ, Branch)</custodianName>
+            <custodianLei>2HI3YI5320L3RW6NJ957</custodianLei>
+            <custodianCountry>NZ</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>The Hongkong and Shanghai Banking Corporation Limited (Jung-gu, Seoul, KR, Branch)</custodianName>
+            <custodianLei>2HI3YI5320L3RW6NJ957</custodianLei>
+            <custodianCountry>KR</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>The Hongkong and Shanghai Banking Corporation Limited (Sydney, NSW, AU, Branch)</custodianName>
+            <custodianLei>2HI3YI5320L3RW6NJ957</custodianLei>
+            <custodianCountry>AU</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>UBS Switzerland AG</custodianName>
+            <custodianLei>549300WOIFUSNYH0FL22</custodianLei>
+            <custodianCountry>CH</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>UniCredit Bank Austria AG</custodianName>
+            <custodianLei>D1HEB8VEU6D9M8ZUXG17</custodianLei>
+            <custodianCountry>AT</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+          <custodian>
+            <custodianName>UniCredit Bank Hungary Zrt.</custodianName>
+            <custodianLei>Y28RT6GGYJ696PMW8T44</custodianLei>
+            <custodianCountry>HU</custodianCountry>
+            <isCustodianAffiliated>N</isCustodianAffiliated>
+            <isSubCustodian>Y</isSubCustodian>
+            <custodyType>Foreign custodian - rule 17f-5 (17 CFR 270.17f-5)</custodyType>
+          </custodian>
+        </custodians>
+        <isCustodianHiredOrTerminated>Y</isCustodianHiredOrTerminated>
+        <isShareholderServiceHiredTerminated>N</isShareholderServiceHiredTerminated>
+        <admins>
+          <admin>
+            <adminName>BlackRock Advisors, LLC</adminName>
+            <adminLei>5493001LN9MRM6A35J74</adminLei>
+            <adminStateCountry adminState="US-DE" adminCountry="US"/>
+            <isAdminAffiliated>Y</isAdminAffiliated>
+            <isAdminSubAdmin>N</isAdminSubAdmin>
+          </admin>
+          <admin>
+            <adminName>State Street Bank and Trust Company</adminName>
+            <adminLei>571474TGEMMWANRLN572</adminLei>
+            <adminStateCountry adminState="US-MA" adminCountry="US"/>
+            <isAdminAffiliated>N</isAdminAffiliated>
+            <isAdminSubAdmin>Y</isAdminSubAdmin>
+          </admin>
+        </admins>
+        <isAdminHiredOrTerminated>N</isAdminHiredOrTerminated>
+        <brokerDealers>
+          <brokerDealer>
+            <brokerDealerName>BlackRock Investments, LLC</brokerDealerName>
+            <brokerDealerFileNo>8-48436</brokerDealerFileNo>
+            <brokerDealerCrdNo>000038642</brokerDealerCrdNo>
+            <brokerDealerLei>54930061FBHCKXL2G714</brokerDealerLei>
+            <brokerDealerStateCountry brokerDealerState="US-NY" brokerDealerCountry="US"/>
+            <brokerDealerCommission>0.00000000</brokerDealerCommission>
+          </brokerDealer>
+          <brokerDealer>
+            <brokerDealerName>BlackRock Execution Services</brokerDealerName>
+            <brokerDealerFileNo>8-48719</brokerDealerFileNo>
+            <brokerDealerCrdNo>000039438</brokerDealerCrdNo>
+            <brokerDealerLei>549300HFCRQ0NT5KY652</brokerDealerLei>
+            <brokerDealerStateCountry brokerDealerState="US-NY" brokerDealerCountry="US"/>
+            <brokerDealerCommission>0.00000000</brokerDealerCommission>
+          </brokerDealer>
+          <brokerDealer>
+            <brokerDealerName>HPS Securities, LLC</brokerDealerName>
+            <brokerDealerFileNo>8-70910</brokerDealerFileNo>
+            <brokerDealerCrdNo>000319197</brokerDealerCrdNo>
+            <brokerDealerLei>N/A</brokerDealerLei>
+            <brokerDealerStateCountry brokerDealerState="US-NY" brokerDealerCountry="US"/>
+            <brokerDealerCommission>0.00000000</brokerDealerCommission>
+          </brokerDealer>
+        </brokerDealers>
+        <brokers>
+          <broker>
+            <brokerName>J.P. Morgan Securities LLC</brokerName>
+            <brokerFileNo>8-35008</brokerFileNo>
+            <brokerCrdNo>000000079</brokerCrdNo>
+            <brokerLei>ZBUT11V806EZRVTWT807</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>293062.82000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>Goldman Sachs &amp; Co. LLC</brokerName>
+            <brokerFileNo>8-129</brokerFileNo>
+            <brokerCrdNo>000000361</brokerCrdNo>
+            <brokerLei>FOR8UP27PHTHYVLBNG30</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>181765.67000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>Jefferies LLC</brokerName>
+            <brokerFileNo>8-15074</brokerFileNo>
+            <brokerCrdNo>000002347</brokerCrdNo>
+            <brokerLei>58PU97L1C0WSRCWADL48</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>37219.82000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>Citigroup Global Markets Inc.</brokerName>
+            <brokerFileNo>8-8177</brokerFileNo>
+            <brokerCrdNo>000007059</brokerCrdNo>
+            <brokerLei>MBNUM2BPBDO7JBLYG310</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>97624.89000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>UBS Securities LLC</brokerName>
+            <brokerFileNo>8-22651</brokerFileNo>
+            <brokerCrdNo>000007654</brokerCrdNo>
+            <brokerLei>T6FIZBDPKLYJKFCRVK44</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>113646.94000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>Morgan Stanley &amp; Co. LLC</brokerName>
+            <brokerFileNo>8-15869</brokerFileNo>
+            <brokerCrdNo>000008209</brokerCrdNo>
+            <brokerLei>9R7GPTSO7KV3UQJZQ078</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>169980.86000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>TD Securities (USA) LLC</brokerName>
+            <brokerFileNo>8-36747</brokerFileNo>
+            <brokerCrdNo>000018476</brokerCrdNo>
+            <brokerLei>SUVUFHICNZMP2WKHG940</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>40508.83000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>Barclays Capital Inc.</brokerName>
+            <brokerFileNo>8-41342</brokerFileNo>
+            <brokerCrdNo>000019714</brokerCrdNo>
+            <brokerLei>AC28XWWI3WIBK2824319</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>63030.70000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>CLSA Americas, LLC</brokerName>
+            <brokerFileNo>8-69166</brokerFileNo>
+            <brokerCrdNo>000165533</brokerCrdNo>
+            <brokerLei>213800M2DXATWY7JMS07</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>50976.74000000</grossCommission>
+          </broker>
+          <broker>
+            <brokerName>BofA Securities, Inc.</brokerName>
+            <brokerFileNo>8-69787</brokerFileNo>
+            <brokerCrdNo>000283942</brokerCrdNo>
+            <brokerLei>549300HN4UKV1E2R3U73</brokerLei>
+            <brokerStateCountry brokerState="US-NY" brokerCountry="US"/>
+            <grossCommission>347558.98000000</grossCommission>
+          </broker>
+        </brokers>
+        <aggregateCommission>1517702.69000000</aggregateCommission>
+        <principalTransactions>
+          <principalTransaction>
+            <principalName>Goldman Sachs &amp; Co. LLC</principalName>
+            <principalFileNo>8-129</principalFileNo>
+            <principalCrdNo>000000361</principalCrdNo>
+            <principalLei>FOR8UP27PHTHYVLBNG30</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>8527764.95000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>Jefferies LLC</principalName>
+            <principalFileNo>8-15074</principalFileNo>
+            <principalCrdNo>000002347</principalCrdNo>
+            <principalLei>58PU97L1C0WSRCWADL48</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>1658562.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>Citigroup Global Markets Inc.</principalName>
+            <principalFileNo>8-8177</principalFileNo>
+            <principalCrdNo>000007059</principalCrdNo>
+            <principalLei>MBNUM2BPBDO7JBLYG310</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>924586.03000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>UBS Securities LLC</principalName>
+            <principalFileNo>8-22651</principalFileNo>
+            <principalCrdNo>000007654</principalCrdNo>
+            <principalLei>T6FIZBDPKLYJKFCRVK44</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>233054.77000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>Morgan Stanley &amp; Co. LLC</principalName>
+            <principalFileNo>8-15869</principalFileNo>
+            <principalCrdNo>000008209</principalCrdNo>
+            <principalLei>9R7GPTSO7KV3UQJZQ078</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>9602266.00000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>Barclays Capital Inc.</principalName>
+            <principalFileNo>8-41342</principalFileNo>
+            <principalCrdNo>000019714</principalCrdNo>
+            <principalLei>AC28XWWI3WIBK2824319</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>711111.11000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>BofA Securities, Inc.</principalName>
+            <principalFileNo>8-69787</principalFileNo>
+            <principalCrdNo>000283942</principalCrdNo>
+            <principalLei>549300HN4UKV1E2R3U73</principalLei>
+            <principalStateCountry principalState="US-NY" principalCountry="US"/>
+            <principalTotalPurchaseSale>921280.98000000</principalTotalPurchaseSale>
+          </principalTransaction>
+          <principalTransaction>
+            <principalName>BlackRock Liquidity Funds - T-Fund</principalName>
+            <principalFileNo>N/A</principalFileNo>
+            <principalCrdNo>N/A</principalCrdNo>
+            <principalLei>5493002L9DNZ83RX7V61</principalLei>
+            <principalStateCountry principalState="US-DE" principalCountry="US"/>
+            <principalTotalPurchaseSale>2610915011.75000000</principalTotalPurchaseSale>
+          </principalTransaction>
+        </principalTransactions>
+        <principalAggregatePurchase>2633493637.59000000</principalAggregatePurchase>
+        <isBrokerageResearchPayment>Y</isBrokerageResearchPayment>
+        <mnthlyAvgNetAssets>1281641433.80461538</mnthlyAvgNetAssets>
+      </managementInvestmentQuestion>
+    </managementInvestmentQuestionSeriesInfo>
+    <closedEndManagementInvestment>
+      <securityRelatedItems>
+        <securityRelatedItem>
+          <description>Common stock</description>
+          <securityClassTitle>BlackRock Technology and Private Equity Term Trust</securityClassTitle>
+          <commonStocks>
+            <commonStock commonStockExchange="XNYS" commonStockTickerSymbol="BTX"/>
+          </commonStocks>
+        </securityRelatedItem>
+      </securityRelatedItems>
+      <isRightsOffering>N</isRightsOffering>
+      <isSecondaryOffering>N</isSecondaryOffering>
+      <repurchaseSecurities isRepurchaseSecurity="Y">
+        <repurchaseSecurityType>Common stock</repurchaseSecurityType>
+      </repurchaseSecurities>
+      <isDefaultLongTermDebt>N</isDefaultLongTermDebt>
+      <isDividendsInArrears>N</isDividendsInArrears>
+      <isSecuritiesModified>N</isSecuritiesModified>
+      <managementFee>1.25000000</managementFee>
+      <netOperatingExpenses>1.46000000</netOperatingExpenses>
+      <marketPricePerShare>6.59000000</marketPricePerShare>
+      <netAssetValuePerShare>7.80000000</netAssetValuePerShare>
+    </closedEndManagementInvestment>
+    <attachmentsTab>
+      <isIPAReportInternalControl>true</isIPAReportInternalControl>
+    </attachmentsTab>
+    <signature registrantSignedName="BlackRock Technology &amp; Private Equity Term Trust" signedDate="2026-03-13" signature="Chuck Pulsfort" title="Assistant Treasurer"/>
+  </formData>
+</edgarSubmission>

@@ -1,0 +1,138 @@
+{
+  "_comment": "Lifecycle flags for companies that should be flagged in private_companies (acquired / public / defunct). These rows still get loaded into private_companies (so historical N-PORT exposure is queryable) but are filtered out of the current-period rollup via the materialized view's WHERE clause (NOT is_sanctioned AND NOT is_acquired AND NOT is_public). See PLAN_NPORT_HOLDINGS.md §3.2 (Recursion, Ginkgo callouts) and §4.1 (lifecycle_status field).",
+  "_source": "PLAN_NPORT_HOLDINGS.md §3.2 + public market events",
+  "_generated_at": "2026-05-11",
+  "_field_meanings": {
+    "lifecycle_status": "private | public | acquired | defunct",
+    "is_acquired": "true → exit was an M&A event",
+    "acquired_by": "acquirer display name (only when is_acquired=true)",
+    "acquired_date": "ISO date when N-PORT rows began disappearing",
+    "is_public": "true → exit was an IPO; we exclude from the private rollup",
+    "ipo_date": "ISO date of first trade (only when is_public=true)"
+  },
+  "entries": [
+    {
+      "slug": "wiz",
+      "display_name": "Wiz",
+      "sector": "ai_ml",
+      "primary_domain": "wiz.io",
+      "founded_year": 2020,
+      "hq_country": "IL",
+      "legal_entities": [
+        {"name": "Wiz, Inc.", "jurisdiction": "Delaware", "role": "operating"},
+        {"name": "Wiz Israel Ltd.", "jurisdiction": "Israel", "role": "operating"}
+      ],
+      "lifecycle_status": "acquired",
+      "is_acquired": true,
+      "acquired_by": "Google (Alphabet Inc.)",
+      "acquired_date": "2025-03-18",
+      "is_public": false,
+      "ipo_date": null,
+      "note": "Acquired by Google for $32B; close completed Q1 2025. Plan §6.7 explicitly calls this out — has 0 N-PORT rows now."
+    },
+    {
+      "slug": "confluent",
+      "display_name": "Confluent",
+      "sector": "ai_ml",
+      "primary_domain": "confluent.io",
+      "founded_year": 2014,
+      "hq_country": "US",
+      "lifecycle_status": "public",
+      "is_acquired": false,
+      "is_public": true,
+      "ipo_date": "2021-06-24",
+      "note": "Trades on NASDAQ as CFLT. Exclude from private rollup."
+    },
+    {
+      "slug": "rivian",
+      "display_name": "Rivian Automotive",
+      "sector": "mobility",
+      "primary_domain": "rivian.com",
+      "founded_year": 2009,
+      "hq_country": "US",
+      "lifecycle_status": "public",
+      "is_acquired": false,
+      "is_public": true,
+      "ipo_date": "2021-11-10",
+      "note": "Trades on NASDAQ as RIVN. Exclude from private rollup."
+    },
+    {
+      "slug": "recursion-pharmaceuticals",
+      "display_name": "Recursion Pharmaceuticals",
+      "sector": "biotech",
+      "primary_domain": "recursion.com",
+      "founded_year": 2013,
+      "hq_country": "US",
+      "lifecycle_status": "public",
+      "is_acquired": false,
+      "is_public": true,
+      "ipo_date": "2021-04-16",
+      "note": "Trades on NASDAQ as RXRX. Mentioned by name in PLAN §3.1 as a false-positive substring match against the private 'Recursion' SPV namespace."
+    },
+    {
+      "slug": "ginkgo-bioworks",
+      "display_name": "Ginkgo Bioworks",
+      "sector": "biotech",
+      "primary_domain": "ginkgobioworks.com",
+      "founded_year": 2008,
+      "hq_country": "US",
+      "lifecycle_status": "public",
+      "is_acquired": false,
+      "is_public": true,
+      "ipo_date": "2021-09-17",
+      "note": "Trades on NYSE as DNA via SPAC merger. Exclude from private rollup."
+    },
+    {
+      "slug": "klarna",
+      "display_name": "Klarna",
+      "sector": "fintech",
+      "primary_domain": "klarna.com",
+      "founded_year": 2005,
+      "hq_country": "SE",
+      "lifecycle_status": "private",
+      "is_acquired": false,
+      "is_public": false,
+      "ipo_date": null,
+      "note": "IPO pending — keep in private rollup until first trade. Flagged here for visibility because filings indicate imminent listing."
+    },
+    {
+      "slug": "uber",
+      "display_name": "Uber Technologies",
+      "sector": "mobility",
+      "primary_domain": "uber.com",
+      "founded_year": 2009,
+      "hq_country": "US",
+      "lifecycle_status": "public",
+      "is_acquired": false,
+      "is_public": true,
+      "ipo_date": "2019-05-10",
+      "note": "Appears in Wikipedia 'exited unicorns' table — flag so any N-PORT residual rows are excluded from private rollup."
+    },
+    {
+      "slug": "airbnb",
+      "display_name": "Airbnb",
+      "sector": "consumer",
+      "primary_domain": "airbnb.com",
+      "founded_year": 2008,
+      "hq_country": "US",
+      "lifecycle_status": "public",
+      "is_acquired": false,
+      "is_public": true,
+      "ipo_date": "2020-12-10",
+      "note": "Trades on NASDAQ as ABNB."
+    },
+    {
+      "slug": "stripe",
+      "display_name": "Stripe",
+      "sector": "fintech",
+      "primary_domain": "stripe.com",
+      "founded_year": 2010,
+      "hq_country": "US",
+      "lifecycle_status": "private",
+      "is_acquired": false,
+      "is_public": false,
+      "ipo_date": null,
+      "note": "Still private as of 2026 Q1. Listed here only to confirm explicit private status (no override)."
+    }
+  ]
+}
