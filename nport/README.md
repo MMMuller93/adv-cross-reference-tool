@@ -59,15 +59,29 @@ nport/
 # Module-level Python tests (resolver, scraper, delta_detection, enrichment)
 python3 -m pytest nport/
 
-# Module-level Node tests (API routes with mocked supabase client)
+# Module-level Node tests (API routes + integration mount, mocked supabase)
 cd nport/api && npm test
 
-# End-to-end integration test (requires a local Postgres)
+# End-to-end integration test (requires a local Postgres + psycopg)
 # This boots Postgres, applies migrations, runs scraper -> resolver ->
 # db_client -> API against the same DB.
 NPORT_E2E_PG_CONN=postgresql://localhost/nport_e2e \
   python3 -m pytest nport/tests/integration/
 ```
+
+### Environment notes
+
+**macOS + Homebrew Python 3.14:** the system Python ships with a broken
+`pyexpat` that prevents `pip install` of some packages (`Symbol not found:
+_XML_SetAllocTrackerActivationThreshold`). Use a `uv` venv to isolate:
+
+```bash
+uv venv .venv && source .venv/bin/activate
+uv pip install 'psycopg[binary]>=3.1' pytest pytest-mock requests lxml
+python -m pytest nport/tests/integration/
+```
+
+System Python 3.12 or 3.13 (also via Homebrew) does not have this issue.
 
 ## CLI entry points
 
@@ -86,13 +100,28 @@ way is to run from the repo root.
 
 ## Wiring N-PORT to the main PFR app (future)
 
-When ready to integrate, the main `server.js` can mount the routes by
-adding **one** require + mount:
+When ready to integrate, the main `server.js` can mount everything
+(API routes + frontend static bundle) by adding **one** line:
 
 ```js
-const nportRoutes = require('./nport/api/routes/nport');
-app.use('/api/nport', nportRoutes);
+require('./nport/api/mount')(app);
 ```
 
-That single line is the entire integration surface. Until then the two
-systems are independent processes.
+This is the entire integration surface. The mount module is self-contained
+inside `nport/` — removing the one line cleanly disables the subsystem.
+
+Options:
+
+```js
+require('./nport/api/mount')(app, {
+  apiPrefix:      '/api/nport',  // default
+  mountFrontend:  true,           // serve nport/frontend/* at /nport
+  mountSpaRoutes: false,          // opt-in: attach /company/:slug etc.
+});
+```
+
+See `nport/integration/README.md` for the full integration guide, including
+an alternative wire-up that renders N-PORT pages inside the main React app
+(at the cost of giving up strict-isolation).
+
+Until you add that line, the two systems are independent processes.
