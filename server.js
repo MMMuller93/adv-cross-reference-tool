@@ -1304,84 +1304,76 @@ app.get('/api/funds/new-managers', async (req, res) => {
     });
     console.log(`  Loaded ${advisersData.length} advisers for matching (${activeCount} with AUM, ${inactiveCount} without — both kept; AUM is a confidence signal, not a filter)`);
 
-    // Helper to parse fund name.
-    // Production bug 2026-05-11: the first regex `\s+[A-Z]{2}[,\s]+(LLC|LP)$` was
-    // designed to strip US state 2-letter codes (e.g., "Acme NC LLC" → "Acme")
-    // but accidentally also stripped " VC LLC" — turning "Moreno VC LLC" into
-    // "Moreno", which then matched the unrelated "MORENO CAPITAL". Restrict to
-    // an allowlist of actual US state codes so VC / GP / SE / etc. aren't
-    // incorrectly stripped.
-    const US_STATE_CODES = new Set([
-      'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
-      'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
-      'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC','PR','VI','GU','AS','MP'
-    ]);
-    const parseFundName = (name) => {
-      let out = name;
-      const stateMatch = out.match(/\s+([A-Z]{2})[,\s]+(LLC|LP|L\.P\.|L\.L\.C\.)$/);
-      if (stateMatch && US_STATE_CODES.has(stateMatch[1])) {
-        out = out.slice(0, stateMatch.index);
-      }
-      out = out
-        .replace(/,?\s+(LLC|LP|L\.P\.|L\.L\.C\.|Ltd|Limited|Inc|Incorporated|GP)$/i, '')
-        .replace(/[,\s]+$/, '')
-        .trim();
-      return out;
-    };
+    // Use shared base-name extractor from the detector lib. Production bug
+    // 2026-05-11: the inline parseFundName regex was incorrectly stripping
+    // " VC LLC" as a state-2-letter pattern (turning "Moreno VC LLC" into
+    // "Moreno"). Using lib/adv_lookup.js's extractBaseName ensures the two
+    // matching paths (this endpoint + the detector) use the same name shape.
+    const { extractBaseName: parseFundName } = require('./lib/adv_lookup');
 
-    // Helper to find adviser match.
+    // Token-subset matcher. Production bug 2026-05-11 (multiple): the previous
+    // bidirectional `startsWith` matched on very short adviser_entity_legal_name
+    // values ("MATERIAL", "FRONT", "MVP") AND naive substring ilike matched
+    // embedded substrings (KIG → IKIGAI). Token-subset on RAW tokens (no
+    // stopword filter, min-length 2) + min-size guard solves both.
     //
-    // Production bug 2026-05-11: the bidirectional startsWith was matching on
-    // very short adviser_entity_legal_name values (e.g., MATERIAL → matches
-    // "material ventures..."; FRONT → matches "front porch venture partners";
-    // MVP → matches "mvp ii co-invest"). Added length-asymmetry guard:
-    // when the manager parsedName extends beyond the matched name by ADDITIONAL
-    // distinctive tokens, reject as too-loose.
-    const STOPWORDS = new Set(['the','of','and','a','an','co','llc','lp','llp','ltd','inc','corp','fund','funds','capital','ventures','venture','partners','partner','holdings','group','management','mgmt','advisors','advisers','gp','master','feeder','series','vc','spv','spvs','holdings']);
-    const distinctiveTokens = (s) => {
-      const toks = (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
-      return new Set(toks.filter(t => t.length >= 3 && !STOPWORDS.has(t)));
+    // Key tuning insight: keep short tokens (≥2 chars) so distinguishing
+    // tokens like "in" (FIRST IN VENTURES) / "nc" (BACKBONE NC) / "u s"
+    // (U.S. VENTURE PARTNERS) stay in the set and BLOCK loose subset matches.
+    //   - "First Bight Ventures" {first,bight,venture} vs "FIRST IN VENTURES"
+    //     {first,in,venture}: "in" ∈ adv but not mgr → no subset → no match ✓
+    //   - "Front Porch Venture Partners SPV" vs "U.S. VENTURE PARTNERS"
+    //     {us,venture,partner} (or similar): "us" not in mgr → no match ✓
+    //   - "Capital Factory SPVs" {capital,factory,spv} vs "CAPITAL FACTORY"
+    //     {capital,factory}: adv ⊆ mgr → match ✓
+    // Tokens stemmed (trailing 's' stripped if word ends in 's' and len≥4) so
+    // "ventures" and "venture" compare equal.
+    // Both sides require ≥2 tokens: rejects ambiguous single-token firms
+    // (KIG → KIG INVESTMENT MGMT; Capital Factory bare → CAPITAL FACTORY).
+    // Acceptable tradeoff — detector lib catches single-token cases.
+    // Stopwords used ONLY for the "distinctive intersection ≥1" gate at the end.
+    // They aren't removed from the raw token sets (which keep "venture", "partner",
+    // etc. to enforce containment); they just don't count toward the distinctive-
+    // overlap requirement. Without this gate, "Front Porch Venture Partners SPV"
+    // would match "U.S. VENTURE PARTNERS" because {venture,partner} ⊆ mgr —
+    // requiring at least one shared NON-stopword token prevents that.
+    // "first" included because legal_name "VENTURE FIRST" → tokens {venture,first}
+    // were getting subsumed by "First Bight Ventures" via the same pattern.
+    const MATCH_STOPWORDS = new Set(['the','of','and','co','llc','lp','llp','ltd','inc','corp','fund','funds','capital','ventures','venture','partners','partner','holdings','group','management','mgmt','advisors','advisers','gp','master','feeder','series','spv','spvs','holding','first','new','global','international']);
+    const stem = (t) => (t.length >= 4 && t.endsWith('s') ? t.slice(0, -1) : t);
+    const rawTokens = (s) => {
+      const toks = (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(/\s+/).filter(Boolean);
+      return new Set(toks.filter(t => t.length >= 2).map(stem));
+    };
+    const sharedDistinctive = (a, b) => {
+      let n = 0;
+      for (const t of a) if (b.has(t) && !MATCH_STOPWORDS.has(t)) n++;
+      return n;
     };
     const findAdviserMatch = (parsedName) => {
       const lowerName = parsedName.toLowerCase();
-
-      // Try exact match first
       if (advisersByNameExact[lowerName]) {
         return advisersByNameExact[lowerName];
       }
+      const mgrTokens = rawTokens(lowerName);
+      if (mgrTokens.size < 2) return null;
 
-      // Bidirectional substring/prefix match with asymmetry guard
       for (const { names, adv } of advisersByNamePrefix) {
         for (const name of names) {
           if (!name) continue;
-          const advTokens = distinctiveTokens(name);
-          const mgrTokens = distinctiveTokens(lowerName);
-
-          // Direction A: adviser name CONTAINED IN manager parsed name.
-          // E.g., manager="capital factory spvs" contains adviser="capital factory".
-          // Require: all distinctive tokens of adviser appear in manager.
-          if (advTokens.size > 0 && [...advTokens].every(t => mgrTokens.has(t))) {
+          const advTokens = rawTokens(name);
+          if (advTokens.size < 2) continue;
+          // Require at least 1 NON-stopword token shared between the names.
+          // Otherwise {venture, partner} alone would match "Front Porch Venture
+          // Partners" to "U.S. Venture Partners" — both have only stopword overlap.
+          if (sharedDistinctive(mgrTokens, advTokens) < 1) continue;
+          // Direction A: adv tokens ⊆ mgr tokens (adviser name fully inside manager)
+          if (advTokens.size <= mgrTokens.size && [...advTokens].every(t => mgrTokens.has(t))) {
             return adv;
           }
-          // Direction B: manager parsed name CONTAINED IN adviser name.
-          // E.g., manager="kig" contained in adviser="kig investment management".
-          // Require: all distinctive tokens of manager appear in adviser.
-          if (mgrTokens.size > 0 && [...mgrTokens].every(t => advTokens.has(t))) {
+          // Direction B: mgr tokens ⊆ adv tokens (manager name fully inside adviser)
+          if (mgrTokens.size <= advTokens.size && [...mgrTokens].every(t => advTokens.has(t))) {
             return adv;
-          }
-          // Neither direction: only fall back to the legacy literal startsWith
-          // IF both names share at least 6 characters AND neither side has a
-          // distinctive token the other lacks. This is conservative.
-          if ((name.startsWith(lowerName) || lowerName.startsWith(name)) && name.length >= 6 && lowerName.length >= 6) {
-            // Length-asymmetry guard: if one side is much shorter, require token agreement.
-            // E.g., reject manager="moreno vc llc"→"moreno" matching adviser="moreno capital"
-            // because manager has no distinctive token beyond "moreno" and "moreno" alone is ambiguous.
-            if (advTokens.size >= 1 && mgrTokens.size >= 1) {
-              const intersection = [...advTokens].filter(t => mgrTokens.has(t));
-              if (intersection.length >= Math.min(advTokens.size, mgrTokens.size)) {
-                return adv;
-              }
-            }
           }
         }
       }
