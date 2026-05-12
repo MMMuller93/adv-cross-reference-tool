@@ -4,13 +4,13 @@
     "description": "Compliance detection system for Form D/ADV cross-reference analysis",
     "port": 3009,
     "created_at": "2025-11",
-    "last_updated": "2026-05-11"
+    "last_updated": "2026-05-12"
   },
   "session_state": {
     "current_session": 11,
     "last_working_commit": "05456fa",
     "environment_verified": true,
-    "notes": "N-PORT isolated live ingestion loaded through 2026Q1 bulk plus Q2-to-date daily. MV refresh remains pending because SQL editor/browser access was blocked."
+    "notes": "N-PORT isolated live ingestion loaded through 2026Q1 bulk plus Q2-to-date daily. API fallback smoke checks pass before MV refresh. MV refresh remains pending because SQL editor/browser access was blocked."
   },
   "features": [
     {
@@ -22,13 +22,14 @@
         "Daily Q2-to-date NPORT-P ingestion",
         "Entity resolution uses live private company aliases",
         "Daily replay has complete fair_value_level coverage",
+        "API company position routes work before MV refresh via base-table fallback",
         "Materialized company positions view refreshed"
       ],
       "priority": 1,
       "status": "blocked",
       "passes": false,
-      "tested_at": "2026-05-11",
-      "notes": "Bulk and daily ingestion loaded in pfr-nport. Tests pass and daily coverage checks pass. Blocked only on running REFRESH MATERIALIZED VIEW nport_company_positions_mv in Supabase SQL editor."
+      "tested_at": "2026-05-12",
+      "notes": "Bulk and daily ingestion loaded in pfr-nport. Tests pass, daily coverage checks pass, and Anthropic API fallback smoke passes. Blocked only on running REFRESH MATERIALIZED VIEW nport_company_positions_mv in Supabase SQL editor."
     },
     {
       "id": "feat-001",

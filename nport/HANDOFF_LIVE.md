@@ -110,6 +110,37 @@ At handoff time, browser-based refresh was blocked because Chrome automation
 returned a user-denied permission response. The SQL above still needs to be run
 manually in Supabase SQL Editor or through an authenticated SQL-capable tool.
 
+The API now has a defensive base-table fallback for company/fund position
+routes, so smoke checks and product review can proceed before the MV refresh.
+The fallback reconstructs MV-shaped rows from `nport_holdings`,
+`nport_filings`, `nport_registrants`, and `private_companies`.
+
+Date note: SEC bulk `SUBMISSION.REPORT_ENDING_PERIOD` is the fund fiscal
+year-end, not the portfolio snapshot date. User-facing latest-holder and
+timeseries API responses group/sort on `report_period_date` first and preserve
+the fiscal year-end separately as `report_period_end`.
+
+Live API smoke check after the fallback/date patch:
+
+```text
+GET /api/nport/companies/anthropic/positions?page=1&pageSize=5
+  total: 320
+  source: base_tables
+  first period_date: 2026-02-28
+  first fiscal_year_end: 2026-08-31
+  first registrant: Growth Fund of America
+  first value: 1315268824.79
+
+GET /api/nport/companies/anthropic/holders
+  period_date: 2026-02-28
+  holders: 37
+
+GET /api/nport/companies/anthropic/timeseries
+  points: 32
+  last period_date: 2026-02-28
+  last total_value_usd: 3019989372.67
+```
+
 ## Current Ingestion Process
 
 Q2-to-date daily ingestion was started with:
@@ -187,6 +218,13 @@ cd /private/tmp/nport-buildout-claude
 ./.venv/bin/python -m pytest nport/scraper/tests nport/tests/integration/test_e2e_pipeline.py -q
 ```
 
+N-PORT API tests:
+
+```bash
+cd /private/tmp/nport-buildout-claude/nport/api
+npm test
+```
+
 ## Implementation Corrections Already Applied
 
 - Live row mapping now uses exact schema-aware table columns.
@@ -211,11 +249,15 @@ cd /private/tmp/nport-buildout-claude
   valid and upserted, preventing orphan facts that would disappear from the MV.
 - Live Supabase initialization now fails loud if env vars are present but the
   client cannot be created, instead of silently falling back to JSONL stubs.
+- Company and fund position APIs fall back to base-table joins when the
+  materialized view is empty, and current-period rollups use the actual
+  portfolio snapshot date instead of fiscal year-end.
 
 ## Still Pending
 
 - Refresh `nport_company_positions_mv`.
-- Run post-refresh company-page smoke checks against `anthropic`.
+- Run post-refresh company-page smoke checks against `anthropic`; API fallback
+  smoke checks already pass before refresh.
 - Start N-CEN, N-1A, and N-CSR enrichment jobs if those enrichments are needed
   before product integration.
 - Decide whether to keep this as the isolated N-PORT branch or merge a one-line

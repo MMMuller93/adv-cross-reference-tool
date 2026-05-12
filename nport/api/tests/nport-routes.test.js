@@ -156,7 +156,8 @@ function defaultNportRouter(table) {
             series_id: 'S000004007',
             series_name: 'Contrafund',
             fund_type: 'open_end',
-            report_period_end: '2025-12-31',
+            report_period_end: '2026-08-31',
+            report_period_date: '2025-12-31',
             balance: 1000,
             currency_value_usd: 187000000,
             raw_issuer_name: 'ANTHROPIC PBC',
@@ -187,7 +188,8 @@ function defaultNportRouter(table) {
             series_id: 'S000004007',
             series_name: 'Contrafund',
             fund_type: 'open_end',
-            report_period_end: '2025-12-31',
+            report_period_end: '2026-08-31',
+            report_period_date: '2025-12-31',
             accession_number: '0001234567-25-000001',
             filing_date: '2026-01-15',
             net_assets_usd: 150000000000,
@@ -392,6 +394,52 @@ test('GET /companies/:slug/positions — 200 happy path', async () => {
   assert.equal(res.body.positions[0].registrant_cik, '24238');
 });
 
+test('GET /companies/:slug/positions — falls back to base tables when MV empty', async () => {
+  installMocks({
+    nportRouter: (table) => {
+      if (table === 'nport_company_positions_mv') {
+        return { data: [], error: null, count: 0 };
+      }
+      if (table === 'nport_holdings') {
+        return {
+          data: [
+            {
+              id: 7,
+              accession_number: '0001234567-25-000001',
+              issuer_name: 'ANTHROPIC PBC',
+              issuer_title: 'ANTHROPIC PBC SER F PC PP',
+              balance: 1000,
+              currency_value_usd: 187000000,
+              pct_of_nav: 1.2,
+              asset_cat: 'EC',
+              exposure_type: 'direct',
+              share_class_normalized: 'Series F',
+              resolved_company_id: COMPANY_ROW.id,
+            },
+          ],
+          error: null,
+          count: 1,
+        };
+      }
+      return defaultNportRouter(table);
+    },
+  });
+
+  const res = await request(
+    baseUrl,
+    'GET',
+    '/api/nport/companies/anthropic/positions'
+  );
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.source, 'base_tables');
+  assert.equal(res.body.total, 1);
+  assert.equal(res.body.positions[0].holding_id_internal, 7);
+  assert.equal(res.body.positions[0].report_period_date, '2025-12-31');
+  assert.equal(res.body.positions[0].report_period_end, '2026-08-31');
+  assert.equal(res.body.positions[0].registrant_name, 'Fidelity Investments');
+});
+
 test('GET /companies/:slug/positions — 404 when company missing', async () => {
   installMocks({
     nportRouter: (t) =>
@@ -411,6 +459,7 @@ test('GET /companies/:slug/holders — 200 happy path', async () => {
   const res = await request(baseUrl, 'GET', '/api/nport/companies/anthropic/holders');
   assert.equal(res.status, 200);
   assert.equal(res.body.company_slug, 'anthropic');
+  assert.equal(res.body.period_date, '2025-12-31');
   assert.equal(res.body.holders[0].registrant_name, 'Fidelity Investments');
 });
 
@@ -424,6 +473,7 @@ test('GET /companies/:slug/timeseries — 200 happy path', async () => {
   assert.equal(res.status, 200);
   assert.equal(res.body.company_slug, 'anthropic');
   assert.ok(Array.isArray(res.body.series));
+  assert.equal(res.body.series[0].report_period_date, '2025-12-31');
 });
 
 test('GET /companies/:slug/markups — 200 happy path', async () => {

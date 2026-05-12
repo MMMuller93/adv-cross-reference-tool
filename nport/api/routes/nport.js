@@ -103,6 +103,208 @@ function cikVariants(cik) {
   return Array.from(new Set([s, padded, trimmed]));
 }
 
+function toNumber(value) {
+  if (typeof value === 'number') return value;
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function positionPeriod(row) {
+  return row && (row.report_period_date || row.report_period_end || null);
+}
+
+function sortPositions(rows) {
+  return [...(rows || [])].sort((a, b) => {
+    const ap = positionPeriod(a) || '';
+    const bp = positionPeriod(b) || '';
+    if (ap !== bp) return ap < bp ? 1 : -1;
+    const av = toNumber(a.currency_value_usd) || 0;
+    const bv = toNumber(b.currency_value_usd) || 0;
+    return bv - av;
+  });
+}
+
+async function fetchRowsByIn(client, table, columns, key, values, chunkSize = 100) {
+  const unique = Array.from(new Set((values || []).filter(Boolean).map(String)));
+  const out = [];
+  for (let i = 0; i < unique.length; i += chunkSize) {
+    const chunk = unique.slice(i, i + chunkSize);
+    const { data, error } = await client.from(table).select(columns).in(key, chunk);
+    if (error) throw error;
+    out.push(...(data || []));
+  }
+  return out;
+}
+
+function composePositionRows({ company, holdings, filings, registrants }) {
+  const filingsByAccession = new Map(
+    (filings || []).map((row) => [row.accession_number, row])
+  );
+  const registrantsByCik = new Map(
+    (registrants || []).map((row) => [String(row.cik), row])
+  );
+
+  return sortPositions(
+    (holdings || [])
+      .map((holding) => {
+        const filing = filingsByAccession.get(holding.accession_number);
+        if (!filing) return null;
+        const registrant = registrantsByCik.get(String(filing.cik)) || {};
+        return {
+          company_id: company.id,
+          company_slug: company.slug,
+          company_name: company.display_name,
+          sector: company.sector,
+          exposure_type: holding.exposure_type,
+          share_class_normalized: holding.share_class_normalized,
+          asset_cat: holding.asset_cat,
+          report_period_end: filing.report_period_end,
+          report_period_date: filing.report_period_date,
+          registrant_id: registrant.id || null,
+          registrant_cik: filing.cik,
+          registrant_name: registrant.name || filing.registrant_name,
+          series_id: filing.series_id,
+          series_name: filing.series_name,
+          fund_type: filing.fund_type,
+          is_interval_fund: filing.is_interval_fund,
+          is_variable_insurance: filing.is_variable_insurance,
+          parent_registrant_id: filing.parent_registrant_id,
+          balance: holding.balance,
+          currency_value_usd: holding.currency_value_usd,
+          pct_of_nav: holding.pct_of_nav,
+          raw_issuer_name: holding.issuer_name,
+          raw_issuer_title: holding.issuer_title,
+          accession_number: holding.accession_number,
+          holding_id_internal: holding.id,
+        };
+      })
+      .filter(Boolean)
+  );
+}
+
+async function fetchCompanyPositionsFromBase(deps, company, { maxRows = 5000 } = {}) {
+  const { data: holdings, error: holdingsErr } = await deps.nportClient
+    .from('nport_holdings')
+    .select(
+      'id, accession_number, issuer_name, issuer_title, balance, currency_value_usd, pct_of_nav, asset_cat, exposure_type, share_class_normalized, resolved_company_id'
+    )
+    .eq('resolved_company_id', company.id)
+    .order('id', { ascending: true })
+    .limit(maxRows);
+  if (holdingsErr) throw holdingsErr;
+  if (!holdings || holdings.length === 0) return [];
+
+  const accessions = holdings.map((row) => row.accession_number);
+  const filings = await fetchRowsByIn(
+    deps.nportClient,
+    'nport_filings',
+    'accession_number, cik, registrant_name, series_id, series_name, report_period_end, report_period_date, fund_type, is_interval_fund, is_variable_insurance, parent_registrant_id',
+    'accession_number',
+    accessions
+  );
+  const registrants = await fetchRowsByIn(
+    deps.nportClient,
+    'nport_registrants',
+    'id, cik, name',
+    'cik',
+    filings.map((row) => row.cik)
+  );
+  return composePositionRows({ company, holdings, filings, registrants });
+}
+
+async function fetchCompanyPositions(deps, slug, { page, pageSize, offset, maxRows } = {}) {
+  const { data: company, error: companyErr } = await deps.nportClient
+    .from('private_companies')
+    .select('id, slug, display_name, sector')
+    .eq('slug', slug)
+    .maybeSingle();
+  if (companyErr) throw companyErr;
+  if (!company) return { company: null, positions: [], total: 0, source: null };
+
+  let mvQuery = deps.nportClient
+    .from('nport_company_positions_mv')
+    .select('*', { count: 'exact' })
+    .eq('company_slug', slug)
+    .order('report_period_date', { ascending: false });
+  if (pageSize !== undefined && offset !== undefined) {
+    mvQuery = mvQuery.range(offset, offset + pageSize - 1);
+  }
+  const { data: mvRows, error: mvErr, count } = await mvQuery;
+  if (mvErr) throw mvErr;
+  if ((mvRows || []).length > 0 || (count || 0) > 0) {
+    return {
+      company,
+      positions: mvRows || [],
+      total: count || (mvRows || []).length,
+      source: 'materialized_view',
+    };
+  }
+
+  const baseRows = await fetchCompanyPositionsFromBase(deps, company, { maxRows });
+  const sliced =
+    pageSize !== undefined && offset !== undefined
+      ? baseRows.slice(offset, offset + pageSize)
+      : baseRows;
+  return {
+    company,
+    positions: sliced,
+    total: baseRows.length,
+    source: 'base_tables',
+  };
+}
+
+async function fetchFundPositionsFromBase(deps, variants, seriesId, { maxRows = 5000 } = {}) {
+  const { data: filings, error: filingErr } = await deps.nportClient
+    .from('nport_filings')
+    .select(
+      'accession_number, cik, registrant_name, series_id, series_name, report_period_end, report_period_date, fund_type, is_interval_fund, is_variable_insurance, parent_registrant_id'
+    )
+    .in('cik', variants)
+    .eq('series_id', seriesId)
+    .order('report_period_date', { ascending: false })
+    .limit(maxRows);
+  if (filingErr) throw filingErr;
+  if (!filings || filings.length === 0) return [];
+
+  const holdings = await fetchRowsByIn(
+    deps.nportClient,
+    'nport_holdings',
+    'id, accession_number, issuer_name, issuer_title, balance, currency_value_usd, pct_of_nav, asset_cat, exposure_type, share_class_normalized, resolved_company_id',
+    'accession_number',
+    filings.map((row) => row.accession_number)
+  );
+  const resolvedHoldings = (holdings || []).filter((row) => row.resolved_company_id);
+  const companies = await fetchRowsByIn(
+    deps.nportClient,
+    'private_companies',
+    'id, slug, display_name, sector',
+    'id',
+    resolvedHoldings.map((row) => row.resolved_company_id)
+  );
+  const companiesById = new Map((companies || []).map((row) => [row.id, row]));
+  const registrants = await fetchRowsByIn(
+    deps.nportClient,
+    'nport_registrants',
+    'id, cik, name',
+    'cik',
+    filings.map((row) => row.cik)
+  );
+
+  return sortPositions(
+    resolvedHoldings.flatMap((holding) => {
+      const company = companiesById.get(holding.resolved_company_id);
+      if (!company) return [];
+      return composePositionRows({
+        company,
+        holdings: [holding],
+        filings,
+        registrants,
+      });
+    })
+  );
+}
+
 // ============================================================================
 // 7.1 Company endpoints
 // ============================================================================
@@ -235,28 +437,19 @@ router.get('/companies/:slug/positions', async (req, res) => {
     const { slug } = req.params;
     const { page, pageSize, offset } = parsePagination(req);
 
-    const { data: company, error: companyErr } = await deps.nportClient
-      .from('private_companies')
-      .select('slug')
-      .eq('slug', slug)
-      .maybeSingle();
-    if (companyErr) throw companyErr;
-    if (!company) return notFound(res, `Company not found: ${slug}`, 'COMPANY_NOT_FOUND');
-
-    const { data, error, count } = await deps.nportClient
-      .from('nport_company_positions_mv')
-      .select('*', { count: 'exact' })
-      .eq('company_slug', slug)
-      .order('report_period_end', { ascending: false })
-      .range(offset, offset + pageSize - 1);
-
-    if (error) throw error;
-
-    return res.json({
-      total: count || 0,
+    const { company, positions, total, source } = await fetchCompanyPositions(deps, slug, {
       page,
       pageSize,
-      positions: data || [],
+      offset,
+    });
+    if (!company) return notFound(res, `Company not found: ${slug}`, 'COMPANY_NOT_FOUND');
+
+    return res.json({
+      total,
+      page,
+      pageSize,
+      source,
+      positions,
     });
   } catch (err) {
     return serverError(res, err);
@@ -265,7 +458,7 @@ router.get('/companies/:slug/positions', async (req, res) => {
 
 /**
  * GET /api/nport/companies/:slug/holders
- * Current-period holder rollup. We compute the latest report_period_end
+ * Current-period holder rollup. We compute the latest holdings snapshot date
  * for this company on the fly (no nport_company_holders_current_mv exists).
  */
 router.get('/companies/:slug/holders', async (req, res) => {
@@ -273,47 +466,27 @@ router.get('/companies/:slug/holders', async (req, res) => {
   try {
     const { slug } = req.params;
 
-    const { data: company, error: companyErr } = await deps.nportClient
-      .from('private_companies')
-      .select('slug')
-      .eq('slug', slug)
-      .maybeSingle();
-    if (companyErr) throw companyErr;
+    const { company, positions } = await fetchCompanyPositions(deps, slug, {
+      maxRows: 5000,
+    });
     if (!company) return notFound(res, `Company not found: ${slug}`, 'COMPANY_NOT_FOUND');
 
-    // Find latest period for this slug.
-    const { data: latest, error: latestErr } = await deps.nportClient
-      .from('nport_company_positions_mv')
-      .select('report_period_end')
-      .eq('company_slug', slug)
-      .order('report_period_end', { ascending: false })
-      .limit(1);
-    if (latestErr) throw latestErr;
-    const periodEnd =
-      latest && latest.length > 0 && latest[0]
-        ? latest[0].report_period_end
-        : null;
+    const periodDate = positions && positions.length > 0 ? positionPeriod(positions[0]) : null;
 
-    if (!periodEnd) {
+    if (!periodDate) {
       return res.json({
         company_slug: slug,
+        period_date: null,
         period_end: null,
         holders: [],
       });
     }
 
-    const { data: positions, error: posErr } = await deps.nportClient
-      .from('nport_company_positions_mv')
-      .select('*')
-      .eq('company_slug', slug)
-      .eq('report_period_end', periodEnd)
-      .order('currency_value_usd', { ascending: false, nullsFirst: false });
-    if (posErr) throw posErr;
-
     return res.json({
       company_slug: slug,
-      period_end: periodEnd,
-      holders: positions || [],
+      period_date: periodDate,
+      period_end: periodDate,
+      holders: (positions || []).filter((row) => positionPeriod(row) === periodDate),
     });
   } catch (err) {
     return serverError(res, err);
@@ -325,7 +498,7 @@ router.get('/companies/:slug/holders', async (req, res) => {
  * Quarterly position values rolled up across all holders.
  *
  * Computed on the fly from nport_company_positions_mv by grouping on
- * report_period_end. (No nport_company_timeseries_mv view exists in the
+ * the holdings snapshot date. (No nport_company_timeseries_mv view exists in the
  * schema.)
  */
 router.get('/companies/:slug/timeseries', async (req, res) => {
@@ -333,28 +506,20 @@ router.get('/companies/:slug/timeseries', async (req, res) => {
   try {
     const { slug } = req.params;
 
-    const { data: company, error: companyErr } = await deps.nportClient
-      .from('private_companies')
-      .select('slug')
-      .eq('slug', slug)
-      .maybeSingle();
-    if (companyErr) throw companyErr;
+    const { company, positions } = await fetchCompanyPositions(deps, slug, {
+      maxRows: 5000,
+    });
     if (!company) return notFound(res, `Company not found: ${slug}`, 'COMPANY_NOT_FOUND');
 
-    const { data: positions, error: posErr } = await deps.nportClient
-      .from('nport_company_positions_mv')
-      .select('report_period_end,currency_value_usd,balance,registrant_cik')
-      .eq('company_slug', slug)
-      .order('report_period_end', { ascending: true });
-    if (posErr) throw posErr;
-
-    // Group by period_end: total value, total balance, distinct holder count.
+    // Group by holdings snapshot date. In SEC bulk data, REPORT_ENDING_PERIOD
+    // is the fund fiscal year-end; REPORT_DATE is the portfolio date.
     const byPeriod = new Map();
     for (const row of positions || []) {
-      const k = row.report_period_end;
+      const k = positionPeriod(row);
       if (!k) continue;
       const bucket = byPeriod.get(k) || {
         report_period_end: k,
+        report_period_date: k,
         total_value_usd: 0,
         total_balance: 0,
         holder_count: new Set(),
@@ -375,12 +540,13 @@ router.get('/companies/:slug/timeseries', async (req, res) => {
     const series = Array.from(byPeriod.values())
       .map((b) => ({
         report_period_end: b.report_period_end,
+        report_period_date: b.report_period_date,
         total_value_usd: b.total_value_usd,
         total_balance: b.total_balance,
         holder_count: b.holder_count.size,
       }))
       .sort((a, b) =>
-        a.report_period_end < b.report_period_end ? -1 : 1
+        positionPeriod(a) < positionPeriod(b) ? -1 : 1
       );
 
     return res.json({
@@ -485,9 +651,9 @@ router.get('/funds/:cik', async (req, res) => {
     // Pull every filing for this CIK and reduce to distinct series.
     const { data: filings, error: filErr } = await deps.nportClient
       .from('nport_filings')
-      .select('series_id, series_name, fund_type, report_period_end')
+      .select('series_id, series_name, fund_type, report_period_end, report_period_date')
       .in('cik', variants)
-      .order('report_period_end', { ascending: false });
+      .order('report_period_date', { ascending: false });
     if (filErr) throw filErr;
 
     const seriesBySid = new Map();
@@ -498,7 +664,9 @@ router.get('/funds/:cik', async (req, res) => {
           series_id: f.series_id,
           series_name: f.series_name,
           fund_type: f.fund_type,
-          latest_period_end: f.report_period_end,
+          latest_period_end: f.report_period_date || f.report_period_end,
+          latest_report_period_date: f.report_period_date,
+          fiscal_year_end: f.report_period_end,
         });
       }
     }
@@ -527,11 +695,11 @@ router.get('/funds/:cik/:series_id', async (req, res) => {
     const { data, error } = await deps.nportClient
       .from('nport_filings')
       .select(
-        'cik, series_id, series_name, fund_type, is_interval_fund, is_variable_insurance, report_period_end, net_assets_usd, total_assets_usd, accession_number, filing_date'
+        'cik, series_id, series_name, fund_type, is_interval_fund, is_variable_insurance, report_period_end, report_period_date, net_assets_usd, total_assets_usd, accession_number, filing_date'
       )
       .in('cik', variants)
       .eq('series_id', seriesId)
-      .order('report_period_end', { ascending: false })
+      .order('report_period_date', { ascending: false })
       .limit(1);
     if (error) throw error;
     if (!data || data.length === 0) {
@@ -570,17 +738,27 @@ router.get('/funds/:cik/:series_id/positions', async (req, res) => {
       .select('*', { count: 'exact' })
       .in('registrant_cik', variants)
       .eq('series_id', seriesId)
-      .order('report_period_end', { ascending: false })
+      .order('report_period_date', { ascending: false })
       .range(offset, offset + pageSize - 1);
     if (error) throw error;
+    let positions = data || [];
+    let total = count || 0;
+    let source = 'materialized_view';
+    if (positions.length === 0 && total === 0) {
+      const baseRows = await fetchFundPositionsFromBase(deps, variants, seriesId);
+      positions = baseRows.slice(offset, offset + pageSize);
+      total = baseRows.length;
+      source = 'base_tables';
+    }
 
     return res.json({
-      total: count || 0,
+      total,
       page,
       pageSize,
       cik,
       series_id: seriesId,
-      positions: data || [],
+      source,
+      positions,
     });
   } catch (err) {
     return serverError(res, err);

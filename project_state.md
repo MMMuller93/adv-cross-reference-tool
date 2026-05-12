@@ -5,7 +5,7 @@
 - **Port**: 3009
 - **Goal**: Comprehensive intelligence platform for private fund managers
 - **Started**: 2025-11
-- **Last Updated**: 2026-05-11
+- **Last Updated**: 2026-05-12
 - **Version**: 2.7.0
 
 ---
@@ -23,7 +23,17 @@
 ## Active Task
 **Currently Working On**: N-PORT live ingestion in isolated `nport/` subtree
 **Feature ID**: N-PORT private-company holdings database
-**Status**: Bulk + daily live ingestion loaded; MV refresh blocked pending SQL access
+**Status**: Bulk + daily live ingestion loaded; API fallback smoke-tested; MV refresh blocked pending SQL access
+
+### Recent Completion (Session May 12, 2026)
+
+✅ **N-PORT API fallback and date correction**
+- Added base-table fallback for company/fund position endpoints while `nport_company_positions_mv` is empty
+- Verified live Anthropic endpoints through the isolated API on port `3010`
+- Corrected user-facing current-period grouping to use `report_period_date` first; SEC `REPORT_ENDING_PERIOD` is the fund fiscal year-end, not the portfolio snapshot date
+- Live smoke: Anthropic positions total `320`, source `base_tables`; current holders `37` for `2026-02-28`; timeseries points `32`
+- Tests: `npm test` in `nport/api` → 28 passed; `./.venv/bin/python -m pytest nport/scraper/tests nport/tests/integration/test_e2e_pipeline.py -q` → 44 passed
+- Still pending: run `REFRESH MATERIALIZED VIEW nport_company_positions_mv;` in Supabase SQL editor or another SQL-capable authenticated tool
 
 ### Recent Completion (Session May 11, 2026)
 
