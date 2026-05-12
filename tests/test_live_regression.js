@@ -25,14 +25,21 @@ const advDb = createClient(ADV_URL, ADV_KEY);
 // said "Found in IAPD" — not "Found in database." It's genuinely not in
 // advisers_enriched today (verified 2026-05-11). The detector correctly
 // surfaces it as a candidate.
+// Pin to specific CRDs so substring-overlap regressions (e.g., KIG matched to
+// IKIGAI WEALTH because "kig" is embedded in "ikigai") get caught. The old
+// `expected_name_substr` check was too loose and passed when the matcher
+// matched a different firm whose name happened to contain the substring.
 const CASES = [
-  { input: 'KIG GP, LLC',                           expected_name_substr: 'KIG' },
-  { input: 'HighVista GP LLC',                      expected_name_substr: 'HIGHVISTA' },
-  { input: 'Canyon Capital Advisors LLC',           expected_name_substr: 'CANYON' },
-  { input: 'Millstreet Capital Management LLC',     expected_name_substr: 'MILLSTREET' },
-  { input: 'Hohimer Wealth Management',             expected_name_substr: 'HOHIMER' },
-  { input: 'Lighthouse Asset Management',           expected_name_substr: 'LIGHTHOUSE' },
-  { input: 'Patricof Co. Master, LLC',              expected_name_substr: 'PATRICOF' },
+  { input: 'KIG GP, LLC',                           expected_crd: '305498' },  // KIG INVESTMENT MANAGEMENT, LLC
+  { input: 'HighVista GP LLC',                      expected_crd: '155759' },  // HIGHVISTA STRATEGIES LLC
+  { input: 'Millstreet Capital Management LLC',     expected_crd: '161566' },  // MILLSTREET CAPITAL MANAGEMENT LLC
+  { input: 'Hohimer Wealth Management',             expected_crd: '300140' },  // HOHIMER WEALTH MANAGEMENT, LLC
+  { input: 'Lighthouse Asset Management',           expected_crd: '130173' },  // LIGHTHOUSE ASSET MANAGEMENT LLC
+  { input: 'Patricof Co. Master, LLC',              expected_crd: '320902' },  // PATRICOF CO. LLC
+  { input: 'Capital Factory SPVs, LP',              expected_crd: '192514' },  // CAPITAL FACTORY (State-ERA, no AUM)
+  // Canyon Capital removed: in ADV's adviser_name list there are multiple
+  // "Canyon"-suffix variants. The historical match was always semi-loose;
+  // we don't want this in the regression suite without a clean ground truth.
 ];
 
 async function run() {
@@ -45,15 +52,13 @@ async function run() {
       const r = await checkAdvDatabase(advDb, c.input);
       if (!r.found) {
         console.log(`  ✗ ${c.input}`);
-        console.log(`      base=${JSON.stringify(base)} expected match containing "${c.expected_name_substr}", got NOT FOUND`);
+        console.log(`      base=${JSON.stringify(base)} expected CRD ${c.expected_crd}, got NOT FOUND`);
         fail++; failures.push(c);
         continue;
       }
-      const nameUp = (r.adviser_name || '').toUpperCase();
-      const nameOk = nameUp.includes(c.expected_name_substr.toUpperCase());
-      if (!nameOk) {
+      if (String(r.crd) !== String(c.expected_crd)) {
         console.log(`  ✗ ${c.input}`);
-        console.log(`      base=${JSON.stringify(base)} got CRD ${r.crd} → "${r.adviser_name}" (expected substring "${c.expected_name_substr}")`);
+        console.log(`      base=${JSON.stringify(base)} expected CRD ${c.expected_crd}, got CRD ${r.crd} → "${r.adviser_name}"`);
         fail++; failures.push(c);
         continue;
       }
