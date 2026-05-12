@@ -35,6 +35,7 @@
 - Added admin-token protection for `/api/nport/admin/*`, including ID validation/capping on resolution refresh
 - Removed hardcoded ADV/Form D Supabase JWTs from the N-PORT cross-source client; it now reads env vars and degrades gracefully when optional cross-source keys are absent
 - Added `nport/scripts/witness_check.sh` and `nport/OPERATIONAL_GUARDRAILS.md`
+- Ran May 12 two-day daily catch-up: 16 filings parsed, 0 private holdings kept, live row counts unchanged
 - Live smoke: Anthropic positions total `320`, source `base_tables`; current holders `37` for `2026-02-28`; timeseries points `32`
 - Tests: `npm test` in `nport/api` → 30 passed; `./.venv/bin/python -m pytest nport -q` → 163 passed
 - Witness status: PARTIAL because MV refresh is still blocked and `nport_company_positions_mv=0`

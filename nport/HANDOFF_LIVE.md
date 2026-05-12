@@ -64,7 +64,8 @@ step via `require('./nport/api/mount')(app)`.
 ## Loaded Live Data
 
 Bulk backfill was run from `2019Q4` through `2026Q1`.
-Daily Q2-to-date ingestion was run for the 45-day window ending 2026-05-11.
+Daily Q2-to-date ingestion was run for the 45-day window ending 2026-05-11,
+then a 2-day catch-up was run on 2026-05-12.
 
 Latest read-only preflight counts after the daily replay and identifier cleanup:
 
@@ -91,6 +92,15 @@ daily_fvl_not_null: 3676
 daily_identifiers: 63
 daily_identifier_descriptor_rows: 63
 daily_identifier_null_desc: 0
+```
+
+May 12 catch-up:
+
+```text
+filings_seen: 16
+filings_parsed: 16
+holdings_kept: 0
+row counts unchanged
 ```
 
 The daily identifier cleanup backed up the noisy pre-fix rows here before
