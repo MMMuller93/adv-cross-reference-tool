@@ -17,6 +17,7 @@ Spec: `PLAN_NPORT_HOLDINGS.md` §4.
 |---|---|
 | `001_create_schema.sql` | All 11 tables, indices, and the `nport_company_positions_mv` materialized view |
 | `002_seed_sanctioned.sql` | Seed rows for `sanctioned_securities` (30 OFAC-sanctioned Russian patterns) |
+| `003_grant_service_role_access.sql` | Grants backend-only Data API access to `service_role` for ingestion/preflight |
 
 ---
 
@@ -79,6 +80,7 @@ export DATABASE_URL='postgresql://postgres.<ref>:<password>@aws-0-<region>.poole
 
 psql "$DATABASE_URL" -f migrations/nport/001_create_schema.sql
 psql "$DATABASE_URL" -f migrations/nport/002_seed_sanctioned.sql
+psql "$DATABASE_URL" -f migrations/nport/003_grant_service_role_access.sql
 ```
 
 **Option B — Supabase SQL editor:**
@@ -86,12 +88,28 @@ psql "$DATABASE_URL" -f migrations/nport/002_seed_sanctioned.sql
 1. Dashboard → SQL editor → New query
 2. Paste contents of `001_create_schema.sql` → Run
 3. New query → paste `002_seed_sanctioned.sql` → Run
+4. New query → paste `003_grant_service_role_access.sql` → Run
+
+### 4. Load private-company seeds
+
+The company and alias seeds live in `nport/seed_loader/`. Validate first:
+
+```bash
+python3 -m nport.seed_loader.load_seed_supabase
+```
+
+Then, after `SUPABASE_URL_NPORT` and `SUPABASE_SERVICE_KEY_NPORT` are set in
+the local `.env`, load them with 500-row batched upserts:
+
+```bash
+python3 -m nport.seed_loader.load_seed_supabase --execute
+```
 
 ---
 
 ## Verification
 
-After running both files:
+After running all three migration files:
 
 ```sql
 -- Tables created (expect 11 rows)
@@ -116,6 +134,13 @@ SELECT count(*) FROM sanctioned_securities;
 SELECT indexname FROM pg_indexes
 WHERE schemaname = 'public' AND indexname LIKE 'ix_%'
 ORDER BY indexname;
+```
+
+The live Data API path can then be checked from the repo root:
+
+```bash
+python3 -m nport.scraper.preflight_live
+python3 -m nport.scraper.preflight_live --write-smoke
 ```
 
 ---
@@ -156,6 +181,10 @@ projects we run with RLS enabled and explicit anon/service policies (see
 N-PORT should be added in a follow-up migration once the ingestion-write vs
 public-read access shape is decided. Until then, only the service-role key
 should be used.
+
+`003_grant_service_role_access.sql` grants `service_role` table and sequence
+privileges for server-side ingestion and preflight through the Supabase Data
+API. It intentionally does **not** grant access to `anon` or `authenticated`.
 
 ### No data ingestion here
 

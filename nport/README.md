@@ -15,6 +15,7 @@ separate decision.
 createdb nport_dev
 psql -d nport_dev -f nport/migrations/001_create_schema.sql
 psql -d nport_dev -f nport/migrations/002_seed_sanctioned.sql
+psql -d nport_dev -f nport/migrations/003_grant_service_role_access.sql
 
 # 2) Run the Python CLI (from the repo root, NOT from inside nport/)
 python3 -m nport.scraper.backfill_bulk --help
@@ -32,7 +33,7 @@ NPORT_PG_CONN=postgresql://localhost/nport_dev node server.js
 nport/
 ├── PLAN.md                      Full design spec (was PLAN_NPORT_HOLDINGS.md)
 ├── docs/research/               Stress-test findings from the planning phase
-├── migrations/                  Postgres DDL (001_create_schema, 002_seed)
+├── migrations/                  Postgres DDL, sanctions seed, service-role grants
 ├── lib/                         Shared utils (edgar_index, etc.)
 ├── resolver/                    Entity resolution: issuer-row -> private-company
 ├── scraper/                     Bulk + daily + identifiers scrapers
@@ -92,8 +93,10 @@ way is to run from the repo root.
 - `python3 -m nport.scraper.backfill_bulk --quarter 2026q1`
 - `python3 -m nport.scraper.daily_scraper --days 1`
 - `python3 -m nport.scraper.load_identifiers --tsv path/to/IDENTIFIERS.tsv`
+- `python3 -m nport.scraper.preflight_live`
 - `python3 -m nport.delta_detection.compute_deltas --prior 2025-09-30 --current 2025-12-31`
 - `python3 -m nport.seed_loader.merge_and_emit --input-dir ./seed_inputs`
+- `python3 -m nport.seed_loader.load_seed_supabase`
 - `python3 -m nport.enrichment.ncen_ingest.daily_ncen --days 7`
 - `python3 -m nport.enrichment.n1a_extract.dispatcher --html sample.html --cik 24238`
 - `python3 -m nport.enrichment.ncsr_enrich.dispatcher --html sample.html --cik 24238`

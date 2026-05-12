@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from nport.seed_loader import merge_and_emit, wikipedia_loader
+from nport.seed_loader import load_seed_supabase, merge_and_emit, wikipedia_loader
 
 DATA_DIR = Path(__file__).resolve().parent.parent
 OFFLINE = os.environ.get("PFR_OFFLINE") == "1"
@@ -235,6 +235,23 @@ def test_sanctioned_seed_targets_correct_table():
     patterns = [e["pattern"] for e in raw["entries"]]
     assert "SBERBANK" in patterns
     assert "LUKOIL" in patterns
+
+
+def test_supabase_seed_loader_validates_default_payload():
+    """Live loader dry-run should accept the checked-in seed payload."""
+    companies, aliases, dropped_dates = load_seed_supabase.build_seed_payload(DATA_DIR)
+    assert len(companies) == 843
+    assert len(aliases) == 924
+    assert dropped_dates
+    assert all("company_id" in alias for alias in aliases)
+    assert next(c for c in companies if c["slug"] == "anthropic")["display_name"] == "Anthropic"
+
+
+def test_supabase_seed_loader_drops_ambiguous_dates_without_false_precision():
+    """Month-only lifecycle dates should not become fake first-of-month dates."""
+    assert load_seed_supabase.normalize_date("2026-05-11") == "2026-05-11"
+    assert load_seed_supabase.normalize_date("December 2020") is None
+    assert load_seed_supabase.normalize_date(None) is None
 
 
 # ----------------------------------------------------------------------------
