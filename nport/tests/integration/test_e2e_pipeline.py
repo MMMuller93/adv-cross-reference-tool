@@ -651,6 +651,7 @@ def api_base_url(seeded_dsn: str) -> str:
     env = os.environ.copy()
     env["NPORT_PG_CONN"] = seeded_dsn
     env["NPORT_PORT"] = str(port)
+    env["NPORT_ADMIN_TOKEN"] = "test-admin-token"
 
     log = open(API_DIR / "e2e_test.log", "wb")
     proc = subprocess.Popen(
@@ -672,10 +673,10 @@ def api_base_url(seeded_dsn: str) -> str:
         log.close()
 
 
-def _get(url: str) -> Tuple[int, Any]:
+def _get(url: str, headers: dict[str, str] | None = None) -> Tuple[int, Any]:
     import urllib.request
 
-    req = urllib.request.Request(url)
+    req = urllib.request.Request(url, headers=headers or {})
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             return r.status, json.loads(r.read().decode("utf-8"))
@@ -707,7 +708,8 @@ def _get(url: str) -> Tuple[int, Any]:
 )
 def test_e2e_pass3_api_200(api_base_url: str, path: str) -> None:
     """Pass 3: every documented GET endpoint returns 200 against the live DB."""
-    status, body = _get(api_base_url + path)
+    headers = {"x-admin-token": "test-admin-token"} if path.startswith("/api/nport/admin/") else None
+    status, body = _get(api_base_url + path, headers=headers)
     assert status == 200, f"GET {path} -> {status}: {body!r}"
 
 
@@ -722,7 +724,10 @@ def test_e2e_anthropic_holders_nonempty(api_base_url: str) -> None:
 
 def test_e2e_admin_unresolved_returns_rows(api_base_url: str) -> None:
     """Admin/unresolved must surface the rows we couldn't resolve."""
-    status, body = _get(api_base_url + "/api/nport/admin/unresolved?pageSize=100")
+    status, body = _get(
+        api_base_url + "/api/nport/admin/unresolved?pageSize=100",
+        headers={"x-admin-token": "test-admin-token"},
+    )
     assert status == 200
     unresolved = body.get("unresolved") or []
     # We pushed in 7+ unresolved rows (4 public + 3 private-no-alias);

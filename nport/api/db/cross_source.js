@@ -4,10 +4,9 @@
  * Implements the cross-DB join pattern from PLAN_NPORT_HOLDINGS.md §7.2 used by
  * GET /api/nport/companies/:slug/cross.
  *
- * The three Supabase clients are built using the same URLs/anon keys as the
- * existing pattern in server.js. Keeping the credentials inline (not in env)
- * matches the existing convention in this codebase — see server.js lines
- * 188-196. N-PORT credentials come from env vars per the assignment.
+ * The three Supabase clients are built from environment variables. Do not
+ * hardcode JWTs here; even anon keys should be centrally managed and rotated
+ * like other deployment config.
  *
  * All three lookups fire in parallel via Promise.all.
  */
@@ -15,17 +14,16 @@
 const { createClient } = require('@supabase/supabase-js');
 const { nportClient } = require('./nport_client');
 
-// Same ADV + Form D credentials used in server.js (anon read-only keys).
-const ADV_SUPABASE_URL = 'https://ezuqwwffjgfzymqxsctq.supabase.co';
-const ADV_SUPABASE_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6dXF3d2ZmamdmenltcXhzY3RxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMzMjY0NDAsImV4cCI6MjA3ODkwMjQ0MH0.RGMhIb7yMXmOQpysiPgazxJzflGKNCdzRZ8XBgPDCAE';
+const ADV_SUPABASE_URL =
+  process.env.ADV_SUPABASE_URL || 'https://ezuqwwffjgfzymqxsctq.supabase.co';
+const ADV_SUPABASE_KEY = process.env.ADV_SUPABASE_ANON_KEY || '';
 
-const FORMD_SUPABASE_URL = 'https://ltdalxkhbbhmkimmogyq.supabase.co';
-const FORMD_SUPABASE_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0ZGFseGtoYmJobWtpbW1vZ3lxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1OTg3NTMsImV4cCI6MjA3NTE3NDc1M30.TS9uNMRqPKcthHCSMKAcFfhFEP-7Q6XbDHQNujBDOtc';
+const FORMD_SUPABASE_URL =
+  process.env.FORMD_SUPABASE_URL || 'https://ltdalxkhbbhmkimmogyq.supabase.co';
+const FORMD_SUPABASE_KEY = process.env.FORMD_SUPABASE_ANON_KEY || '';
 
-const advClient = createClient(ADV_SUPABASE_URL, ADV_SUPABASE_KEY);
-const formdClient = createClient(FORMD_SUPABASE_URL, FORMD_SUPABASE_KEY);
+const advClient = createClient(ADV_SUPABASE_URL, ADV_SUPABASE_KEY || 'placeholder-key');
+const formdClient = createClient(FORMD_SUPABASE_URL, FORMD_SUPABASE_KEY || 'placeholder-key');
 
 /**
  * Extract unique ADV CRDs referenced from a list of nport position rows.
@@ -40,6 +38,34 @@ function uniqueAdvCrds(positions = []) {
   return [...seen];
 }
 
+function uniqueRegistrantCiks(positions = []) {
+  const seen = new Set();
+  for (const p of positions || []) {
+    if (p && p.registrant_cik != null && p.registrant_cik !== '') {
+      seen.add(String(p.registrant_cik));
+    }
+  }
+  return [...seen];
+}
+
+async function fetchAdvCrdsFromRegistrants(nport, positions = []) {
+  const ciks = uniqueRegistrantCiks(positions);
+  if (ciks.length === 0) return [];
+  const out = new Set();
+  for (let i = 0; i < ciks.length; i += 100) {
+    const chunk = ciks.slice(i, i + 100);
+    const { data, error } = await nport
+      .from('nport_registrants')
+      .select('cik, adv_crd')
+      .in('cik', chunk);
+    if (error) throw error;
+    for (const row of data || []) {
+      if (row.adv_crd != null && row.adv_crd !== '') out.add(String(row.adv_crd));
+    }
+  }
+  return [...out];
+}
+
 /**
  * Build the consolidated company view across N-PORT, Form D, and ADV.
  *
@@ -48,6 +74,8 @@ function uniqueAdvCrds(positions = []) {
  * @returns {Promise<object|null>} consolidated view, or null if company not found
  */
 async function getCrossSourceCompanyView(slug, deps = {}) {
+  const hasInjectedAdv = Boolean(deps.advClient && deps.advClient !== advClient);
+  const hasInjectedFormd = Boolean(deps.formdClient && deps.formdClient !== formdClient);
   const nport = deps.nportClient || nportClient;
   const adv = deps.advClient || advClient;
   const formd = deps.formdClient || formdClient;
@@ -65,11 +93,11 @@ async function getCrossSourceCompanyView(slug, deps = {}) {
     .from('nport_company_positions_mv')
     .select('*')
     .eq('company_slug', slug)
-    .order('report_period_end', { ascending: false });
+    .order('report_period_date', { ascending: false });
 
   // Use ilike for permissive name match against Form D entity columns.
   const safeName = String(company.display_name || '').replace(/[%,]/g, ' ').trim();
-  const formdPromise = safeName
+  const formdPromise = safeName && (hasInjectedFormd || FORMD_SUPABASE_KEY)
     ? formd
         .from('form_d_filings')
         .select('*')
@@ -90,9 +118,12 @@ async function getCrossSourceCompanyView(slug, deps = {}) {
   const formDFilings = formdRes.data || [];
 
   // Second-stage lookup: ADV advisers referenced by the position rows.
-  const crdList = uniqueAdvCrds(nportPositions);
+  let crdList = uniqueAdvCrds(nportPositions);
+  if (crdList.length === 0) {
+    crdList = await fetchAdvCrdsFromRegistrants(nport, nportPositions);
+  }
   let advAdvisers = [];
-  if (crdList.length > 0) {
+  if (crdList.length > 0 && (hasInjectedAdv || ADV_SUPABASE_KEY)) {
     const { data: advData, error: advErr } = await adv
       .from('advisers_enriched')
       .select('*')
@@ -114,5 +145,7 @@ module.exports = {
   formdClient,
   nportClient,
   uniqueAdvCrds,
+  uniqueRegistrantCiks,
+  fetchAdvCrdsFromRegistrants,
   getCrossSourceCompanyView,
 };

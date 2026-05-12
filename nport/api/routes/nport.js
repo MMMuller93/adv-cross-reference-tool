@@ -38,6 +38,7 @@ const deps = {
   advClient: crossSource.advClient,
   formdClient: crossSource.formdClient,
   isConfigured: nportClientModule.isConfigured,
+  getAdminToken: () => process.env.NPORT_ADMIN_TOKEN || '',
   getCrossSourceCompanyView: crossSource.getCrossSourceCompanyView,
 };
 router.deps = deps;
@@ -48,12 +49,33 @@ router.deps = deps;
 
 const READ_PAGE_DEFAULT = 100;
 const READ_PAGE_MAX = 1000;
+const BASE_TABLE_READ_PAGE_SIZE = 1000;
 
 function configGuard(res) {
   if (!deps.isConfigured()) {
     res.status(503).json({
       error: 'N-PORT Supabase project not configured',
       code: 'NPORT_NOT_CONFIGURED',
+    });
+    return false;
+  }
+  return true;
+}
+
+function adminGuard(req, res) {
+  const expected = typeof deps.getAdminToken === 'function' ? deps.getAdminToken() : '';
+  if (!expected) {
+    res.status(403).json({
+      error: 'N-PORT admin token is not configured',
+      code: 'NPORT_ADMIN_NOT_CONFIGURED',
+    });
+    return false;
+  }
+  const provided = req.get('x-admin-token') || '';
+  if (provided !== expected) {
+    res.status(403).json({
+      error: 'N-PORT admin token is missing or invalid',
+      code: 'NPORT_ADMIN_FORBIDDEN',
     });
     return false;
   }
@@ -137,6 +159,31 @@ async function fetchRowsByIn(client, table, columns, key, values, chunkSize = 10
   return out;
 }
 
+async function fetchCompanyHoldingsByKeyset(deps, companyId, { maxRows = 10000 } = {}) {
+  const out = [];
+  let lastId = 0;
+  while (out.length < maxRows) {
+    const pageSize = Math.min(BASE_TABLE_READ_PAGE_SIZE, maxRows - out.length);
+    let query = deps.nportClient
+      .from('nport_holdings')
+      .select(
+        'id, accession_number, issuer_name, issuer_title, balance, currency_value_usd, pct_of_nav, asset_cat, exposure_type, share_class_normalized, resolved_company_id'
+      )
+      .eq('resolved_company_id', companyId)
+      .order('id', { ascending: true })
+      .limit(pageSize);
+    if (lastId > 0) query = query.gt('id', lastId);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    const page = data || [];
+    out.push(...page);
+    if (page.length < pageSize) break;
+    lastId = page[page.length - 1].id;
+  }
+  return out;
+}
+
 function composePositionRows({ company, holdings, filings, registrants }) {
   const filingsByAccession = new Map(
     (filings || []).map((row) => [row.accession_number, row])
@@ -184,15 +231,7 @@ function composePositionRows({ company, holdings, filings, registrants }) {
 }
 
 async function fetchCompanyPositionsFromBase(deps, company, { maxRows = 5000 } = {}) {
-  const { data: holdings, error: holdingsErr } = await deps.nportClient
-    .from('nport_holdings')
-    .select(
-      'id, accession_number, issuer_name, issuer_title, balance, currency_value_usd, pct_of_nav, asset_cat, exposure_type, share_class_normalized, resolved_company_id'
-    )
-    .eq('resolved_company_id', company.id)
-    .order('id', { ascending: true })
-    .limit(maxRows);
-  if (holdingsErr) throw holdingsErr;
+  const holdings = await fetchCompanyHoldingsByKeyset(deps, company.id, { maxRows });
   if (!holdings || holdings.length === 0) return [];
 
   const accessions = holdings.map((row) => row.accession_number);
@@ -263,7 +302,7 @@ async function fetchFundPositionsFromBase(deps, variants, seriesId, { maxRows = 
     .in('cik', variants)
     .eq('series_id', seriesId)
     .order('report_period_date', { ascending: false })
-    .limit(maxRows);
+    .limit(Math.min(BASE_TABLE_READ_PAGE_SIZE, maxRows));
   if (filingErr) throw filingErr;
   if (!filings || filings.length === 0) return [];
 
@@ -887,6 +926,7 @@ router.get('/funds/:cik/:series_id/adviser', async (req, res) => {
  */
 router.get('/admin/unresolved', async (req, res) => {
   if (!configGuard(res)) return;
+  if (!adminGuard(req, res)) return;
   try {
     const { page, pageSize, offset } = parsePagination(req);
 
@@ -923,6 +963,7 @@ router.get('/admin/unresolved', async (req, res) => {
  */
 router.post('/admin/aliases', async (req, res) => {
   if (!configGuard(res)) return;
+  if (!adminGuard(req, res)) return;
   try {
     const { rawName, canonicalSlug, source, notes, patternType } = req.body || {};
     if (!rawName || typeof rawName !== 'string') {
@@ -990,13 +1031,28 @@ router.post('/admin/aliases', async (req, res) => {
  */
 router.post('/admin/refresh_resolution', async (req, res) => {
   if (!configGuard(res)) return;
+  if (!adminGuard(req, res)) return;
   try {
     const { ids, limit } = req.body || {};
     if (ids !== undefined && !Array.isArray(ids)) {
       return badRequest(res, 'ids must be an array of integers', 'INVALID_IDS');
     }
 
-    let targetIds = Array.isArray(ids) && ids.length > 0 ? ids : null;
+    let targetIds = Array.isArray(ids) && ids.length > 0
+      ? Array.from(new Set(ids.map((id) => Number(id))))
+      : null;
+    if (targetIds) {
+      if (
+        targetIds.length > 500 ||
+        targetIds.some((id) => !Number.isInteger(id) || id <= 0)
+      ) {
+        return badRequest(
+          res,
+          'ids must contain 1-500 positive integers',
+          'INVALID_IDS'
+        );
+      }
+    }
     if (!targetIds) {
       const cap = Number.isFinite(parseInt(limit, 10))
         ? Math.min(parseInt(limit, 10), 500)

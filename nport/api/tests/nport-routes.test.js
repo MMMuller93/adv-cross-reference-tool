@@ -29,7 +29,7 @@ function startApp() {
   });
 }
 
-function request(baseUrl, method, path, body) {
+function request(baseUrl, method, path, body, headers = {}) {
   return new Promise((resolve, reject) => {
     const url = new URL(baseUrl + path);
     const opts = {
@@ -37,7 +37,7 @@ function request(baseUrl, method, path, body) {
       hostname: url.hostname,
       port: url.port,
       path: url.pathname + url.search,
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...headers },
     };
     const req = http.request(opts, (res) => {
       let raw = '';
@@ -321,6 +321,7 @@ test.after(() => {
 
 function installMocks({ nportRouter, advRouter, formdRouter } = {}) {
   nportRoutes.deps.isConfigured = () => true;
+  nportRoutes.deps.getAdminToken = () => 'test-admin-token';
   nportRoutes.deps.nportClient = makeClient(nportRouter || defaultNportRouter);
   nportRoutes.deps.advClient = makeClient(advRouter || defaultAdvRouter);
   nportRoutes.deps.formdClient = makeClient(formdRouter || defaultFormdRouter);
@@ -332,6 +333,8 @@ function installMocks({ nportRouter, advRouter, formdRouter } = {}) {
       formdClient: nportRoutes.deps.formdClient,
     });
 }
+
+const ADMIN_HEADERS = { 'x-admin-token': 'test-admin-token' };
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -596,7 +599,9 @@ test('GET /admin/unresolved — 200 list', async () => {
   const res = await request(
     baseUrl,
     'GET',
-    '/api/nport/admin/unresolved?page=1&pageSize=10'
+    '/api/nport/admin/unresolved?page=1&pageSize=10',
+    undefined,
+    ADMIN_HEADERS
   );
   assert.equal(res.status, 200);
   assert.ok(Array.isArray(res.body.unresolved));
@@ -605,29 +610,57 @@ test('GET /admin/unresolved — 200 list', async () => {
 
 test('POST /admin/aliases — 201 on valid body', async () => {
   installMocks();
-  const res = await request(baseUrl, 'POST', '/api/nport/admin/aliases', {
-    rawName: 'Anthropic PBC',
-    canonicalSlug: 'anthropic',
-    source: 'curator',
-  });
+  const res = await request(
+    baseUrl,
+    'POST',
+    '/api/nport/admin/aliases',
+    {
+      rawName: 'Anthropic PBC',
+      canonicalSlug: 'anthropic',
+      source: 'curator',
+    },
+    ADMIN_HEADERS
+  );
   assert.equal(res.status, 201);
   assert.equal(res.body.alias.canonical_slug, 'anthropic');
 });
 
-test('POST /admin/aliases — 400 missing rawName', async () => {
+test('POST /admin/aliases — 403 without admin token', async () => {
   installMocks();
   const res = await request(baseUrl, 'POST', '/api/nport/admin/aliases', {
+    rawName: 'Anthropic PBC',
     canonicalSlug: 'anthropic',
   });
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, 'NPORT_ADMIN_FORBIDDEN');
+});
+
+test('POST /admin/aliases — 400 missing rawName', async () => {
+  installMocks();
+  const res = await request(
+    baseUrl,
+    'POST',
+    '/api/nport/admin/aliases',
+    {
+      canonicalSlug: 'anthropic',
+    },
+    ADMIN_HEADERS
+  );
   assert.equal(res.status, 400);
   assert.equal(res.body.code, 'MISSING_RAW_NAME');
 });
 
 test('POST /admin/aliases — 400 missing canonicalSlug', async () => {
   installMocks();
-  const res = await request(baseUrl, 'POST', '/api/nport/admin/aliases', {
-    rawName: 'Anthropic PBC',
-  });
+  const res = await request(
+    baseUrl,
+    'POST',
+    '/api/nport/admin/aliases',
+    {
+      rawName: 'Anthropic PBC',
+    },
+    ADMIN_HEADERS
+  );
   assert.equal(res.status, 400);
   assert.equal(res.body.code, 'MISSING_CANONICAL_SLUG');
 });
@@ -645,7 +678,8 @@ test('POST /admin/refresh_resolution — 200 with ids', async () => {
     '/api/nport/admin/refresh_resolution',
     {
       ids: [1, 2],
-    }
+    },
+    ADMIN_HEADERS
   );
   assert.equal(res.status, 200);
   assert.equal(res.body.queued, 2);
@@ -657,7 +691,8 @@ test('POST /admin/refresh_resolution — 400 missing target', async () => {
     baseUrl,
     'POST',
     '/api/nport/admin/refresh_resolution',
-    {}
+    {},
+    ADMIN_HEADERS
   );
   assert.equal(res.status, 400);
   assert.equal(res.body.code, 'MISSING_TARGET');
@@ -671,7 +706,23 @@ test('POST /admin/refresh_resolution — 400 ids not array', async () => {
     '/api/nport/admin/refresh_resolution',
     {
       ids: 'not-an-array',
-    }
+    },
+    ADMIN_HEADERS
+  );
+  assert.equal(res.status, 400);
+  assert.equal(res.body.code, 'INVALID_IDS');
+});
+
+test('POST /admin/refresh_resolution — 400 ids must be positive integers and capped', async () => {
+  installMocks();
+  const res = await request(
+    baseUrl,
+    'POST',
+    '/api/nport/admin/refresh_resolution',
+    {
+      ids: [1, -2, 3],
+    },
+    ADMIN_HEADERS
   );
   assert.equal(res.status, 400);
   assert.equal(res.body.code, 'INVALID_IDS');

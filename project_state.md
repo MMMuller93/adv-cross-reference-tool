@@ -31,8 +31,13 @@
 - Added base-table fallback for company/fund position endpoints while `nport_company_positions_mv` is empty
 - Verified live Anthropic endpoints through the isolated API on port `3010`
 - Corrected user-facing current-period grouping to use `report_period_date` first; SEC `REPORT_ENDING_PERIOD` is the fund fiscal year-end, not the portfolio snapshot date
+- Corrected fallback reads to use 1000-row keyset pages instead of an invalid 5000-row Supabase request
+- Added admin-token protection for `/api/nport/admin/*`, including ID validation/capping on resolution refresh
+- Removed hardcoded ADV/Form D Supabase JWTs from the N-PORT cross-source client; it now reads env vars and degrades gracefully when optional cross-source keys are absent
+- Added `nport/scripts/witness_check.sh` and `nport/OPERATIONAL_GUARDRAILS.md`
 - Live smoke: Anthropic positions total `320`, source `base_tables`; current holders `37` for `2026-02-28`; timeseries points `32`
-- Tests: `npm test` in `nport/api` → 28 passed; `./.venv/bin/python -m pytest nport/scraper/tests nport/tests/integration/test_e2e_pipeline.py -q` → 44 passed
+- Tests: `npm test` in `nport/api` → 30 passed; `./.venv/bin/python -m pytest nport -q` → 163 passed
+- Witness status: PARTIAL because MV refresh is still blocked and `nport_company_positions_mv=0`
 - Still pending: run `REFRESH MATERIALIZED VIEW nport_company_positions_mv;` in Supabase SQL editor or another SQL-capable authenticated tool
 
 ### Recent Completion (Session May 11, 2026)

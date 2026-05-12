@@ -22,6 +22,9 @@ Required variables:
 ```bash
 SUPABASE_URL_NPORT=...
 SUPABASE_SERVICE_KEY_NPORT=...
+NPORT_ADMIN_TOKEN=...
+ADV_SUPABASE_ANON_KEY=...
+FORMD_SUPABASE_ANON_KEY=...
 ```
 
 Do not paste or commit the service-role key. Load it locally with:
@@ -113,7 +116,17 @@ manually in Supabase SQL Editor or through an authenticated SQL-capable tool.
 The API now has a defensive base-table fallback for company/fund position
 routes, so smoke checks and product review can proceed before the MV refresh.
 The fallback reconstructs MV-shaped rows from `nport_holdings`,
-`nport_filings`, `nport_registrants`, and `private_companies`.
+`nport_filings`, `nport_registrants`, and `private_companies`. The fallback
+uses 1000-row keyset pages for holdings reads so it does not violate PFR's
+Supabase read ceiling.
+
+Admin routes under `/api/nport/admin/*` require `NPORT_ADMIN_TOKEN` and callers
+must send it as `x-admin-token`. The token is intentionally not documented here.
+
+ADV/Form D cross-source keys were moved out of tracked code. If
+`ADV_SUPABASE_ANON_KEY` / `FORMD_SUPABASE_ANON_KEY` are absent, the isolated
+cross-source route degrades gracefully by returning N-PORT data and empty
+external arrays rather than failing on placeholder credentials.
 
 Date note: SEC bulk `SUBMISSION.REPORT_ENDING_PERIOD` is the fund fiscal
 year-end, not the portfolio snapshot date. User-facing latest-holder and
@@ -225,6 +238,13 @@ cd /private/tmp/nport-buildout-claude/nport/api
 npm test
 ```
 
+Full local witness check:
+
+```bash
+cd /private/tmp/nport-buildout-claude
+nport/scripts/witness_check.sh
+```
+
 ## Implementation Corrections Already Applied
 
 - Live row mapping now uses exact schema-aware table columns.
@@ -252,6 +272,12 @@ npm test
 - Company and fund position APIs fall back to base-table joins when the
   materialized view is empty, and current-period rollups use the actual
   portfolio snapshot date instead of fiscal year-end.
+- Base-table fallback reads were changed from a single 5000-row Supabase
+  request to 1000-row keyset pages, matching the project read-limit rule.
+- N-PORT admin mutation routes now require `NPORT_ADMIN_TOKEN`; refresh IDs are
+  validated as 1-500 positive integers.
+- ADV/Form D Supabase JWTs were removed from `nport/api/db/cross_source.js`;
+  use env vars for cross-source lookups.
 
 ## Still Pending
 

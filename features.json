@@ -29,7 +29,7 @@
       "status": "blocked",
       "passes": false,
       "tested_at": "2026-05-12",
-      "notes": "Bulk and daily ingestion loaded in pfr-nport. Tests pass, daily coverage checks pass, and Anthropic API fallback smoke passes. Blocked only on running REFRESH MATERIALIZED VIEW nport_company_positions_mv in Supabase SQL editor."
+      "notes": "Bulk and daily ingestion loaded in pfr-nport. Tests pass, daily coverage checks pass, Anthropic API fallback smoke passes, fallback reads now use 1000-row keyset pages, admin routes require NPORT_ADMIN_TOKEN, and cross-source JWTs were moved to env vars. Witness status is PARTIAL because nport_company_positions_mv is still 0. Blocked only on running REFRESH MATERIALIZED VIEW nport_company_positions_mv in Supabase SQL editor."
     },
     {
       "id": "feat-001",

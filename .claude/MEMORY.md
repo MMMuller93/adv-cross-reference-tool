@@ -37,6 +37,12 @@
   - Compliance detection → Call Compliance agent
   - Multi-concern orchestration → Call Mayor agent
   - **Don't manually inspect when an agent exists for the domain**
+- **N-PORT Process Violation (2026-05-12)**: Codex did substantial N-PORT ETL/API work and committed checkpoints before explicitly running the project dispatch/witness process. For N-PORT and other complex/data work, run the equivalent of Mayor/Data Architect/Reviewer/Tester/Witness gates before claiming completion or committing major checkpoints.
+- **N-PORT Date Mapping Correction (2026-05-12)**: In SEC N-PORT bulk `SUBMISSION.tsv`, `REPORT_ENDING_PERIOD` is the fund fiscal year-end, while `REPORT_DATE` is the actual holdings snapshot/portfolio date. User-facing latest-holder and timeseries logic must sort/group by `report_period_date` first and preserve fiscal year-end separately.
+- **N-PORT MV Refresh Blocker (2026-05-12)**: The live `pfr-nport` Supabase project ref is `figvonwrlcpveyceengf`; service credentials are only in ignored `.env`. Data loaded, but `nport_company_positions_mv` remains empty until `REFRESH MATERIALIZED VIEW nport_company_positions_mv;` is run through SQL-capable Supabase access. Do not imply the MV-backed production path is complete until this is verified.
+- **N-PORT Supabase Read Limit Correction (2026-05-12)**: The API fallback briefly used `.limit(5000)`, violating the project rule that Supabase reads must be capped at 1000 rows per request. Use 1000-row pages and keyset pagination for any fallback that can exceed one page.
+- **N-PORT Admin Route Correction (2026-05-12)**: `/api/nport/admin/*` routes originally relied only on server config and were effectively unauthenticated. They now require `NPORT_ADMIN_TOKEN` via `x-admin-token`; keep that requirement before any production integration.
+- **N-PORT Credential Correction (2026-05-12)**: ADV/Form D Supabase JWTs were hardcoded in `nport/api/db/cross_source.js`. They have been moved to env vars. Do not add JWT/API-key literals to tracked code, even for anon keys.
 
 ---
 
@@ -109,6 +115,7 @@
 ### Known Bugs
 - Server occasionally crashes/hangs (no PM2 auto-restart configured)
 - Incomplete cross-reference matches (~28% coverage - need better algorithm)
+- Isolated N-PORT API currently has a base-table fallback when `nport_company_positions_mv` is empty. This enables review/smoke checks but is not a substitute for refreshing and verifying the materialized view before production integration.
 
 ---
 
@@ -206,6 +213,21 @@
   - Enriched Managers: 3,379
 - **Production Issue**: privatefundsradar.com not resolving - needs investigation
 
+### Session - 2026-05-12
+- **Work Done**:
+  - Audited Codex N-PORT process against project cockpit rules after user called out possible shortcuts.
+  - Identified process violations: skipped explicit dispatch/witness gates during complex data/API work, and initially treated `REPORT_ENDING_PERIOD` as a user-facing latest period before checking SEC docs/data.
+  - Added/committed isolated N-PORT API fallback in `/private/tmp/nport-buildout-claude` (`ec62955`) so company/fund position endpoints can smoke-test before MV refresh.
+  - Corrected API grouping/sorting to use `report_period_date` for holdings snapshots.
+  - Added `NPORT_ADMIN_TOKEN` guard to admin routes and removed hardcoded ADV/Form D Supabase JWTs from the N-PORT cross-source client.
+- **Verification**:
+  - `npm test` in `nport/api` passed: 30 tests.
+  - `./.venv/bin/python -m pytest nport -q` passed: 163 tests.
+  - Live preflight counts: `nport_filings=57375`, `nport_holdings=315831`, `nport_identifiers=667711`, `nport_company_positions_mv=0`.
+- **Still Pending**:
+  - Run `REFRESH MATERIALIZED VIEW nport_company_positions_mv;` in Supabase SQL editor or another authenticated SQL-capable tool.
+  - Use reviewer/tester/witness gates before the next N-PORT checkpoint and before any claim of completion.
+
 ### Session - 2026-01-06 (Late Evening)
 - Fixed broken compliance detectors (needs_initial_adv_filing, missing_fund_in_adv)
 - Created DATABASE_SCHEMA.md
@@ -250,4 +272,4 @@
 
 ---
 
-*Last Updated: 2026-01-07*
+*Last Updated: 2026-05-12*
