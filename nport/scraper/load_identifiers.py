@@ -22,6 +22,7 @@ from typing import Dict, Iterable, List, Optional
 
 from .config import UPSERT_BATCH_SIZE
 from .db_client import DBClient
+from .row_mapping import identifier_row_for_db
 
 # Whitelist of useful descriptors per §6.3.
 USEFUL_DESCRIPTORS = {
@@ -61,16 +62,19 @@ def _normalize_keys(row: Dict[str, str]) -> Dict[str, Optional[str]]:
 
 
 def is_useful_row(row: Dict[str, Optional[str]]) -> bool:
-    """Keep rows that carry a useful descriptor, an ISIN, or a ticker.
+    """Keep rows that carry a useful cross-resolution descriptor.
 
-    Per §6.3 the filter is `desc in USEFUL_DESCRIPTORS or isin or ticker`.
+    The original plan also kept every ISIN/ticker row. A real 2026Q1 scan
+    showed that captures 4.6M rows for one quarter, almost all public-security
+    noise. For N-PORT private-company resolution, descriptor-coded rows
+    (LoanX, BBGID/FIGI, Bloomberg, BlackRock IDs) are the useful subset.
     """
-    desc = row.get("other_id_desc") or row.get("otheridentifierdesc")
+    desc = (
+        row.get("other_id_desc")
+        or row.get("otheridentifierdesc")
+        or row.get("other_identifier_desc")
+    )
     if desc and desc in USEFUL_DESCRIPTORS:
-        return True
-    if row.get("isin"):
-        return True
-    if row.get("ticker"):
         return True
     return False
 
@@ -89,6 +93,7 @@ def load_identifiers(
     tsv_path: Path,
     db: Optional[DBClient] = None,
     batch_size: int = UPSERT_BATCH_SIZE,
+    source_bulk_quarter: Optional[str] = None,
 ) -> Dict[str, int]:
     """Stream + filter + upsert. Returns counts for visibility."""
     db = db or DBClient()
@@ -99,7 +104,13 @@ def load_identifiers(
         seen += 1
         if not is_useful_row(row):
             continue
-        kept_batch.append(row)
+        mapped = identifier_row_for_db(
+            row,
+            source_bulk_quarter=source_bulk_quarter or "",
+        )
+        if mapped is None:
+            continue
+        kept_batch.append(mapped)
         if len(kept_batch) >= batch_size:
             db.upsert_identifier(kept_batch)
             total_kept += len(kept_batch)

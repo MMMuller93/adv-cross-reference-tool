@@ -5,7 +5,7 @@
 - **Port**: 3009
 - **Goal**: Comprehensive intelligence platform for private fund managers
 - **Started**: 2025-11
-- **Last Updated**: 2026-01-06
+- **Last Updated**: 2026-05-11
 - **Version**: 2.7.0
 
 ---
@@ -21,9 +21,35 @@
 ---
 
 ## Active Task
-**Currently Working On**: Project handoff documentation for Manus AI agent
-**Feature ID**: Complete handoff guide with all context
-**Status**: Complete
+**Currently Working On**: N-PORT live ingestion in isolated `nport/` subtree
+**Feature ID**: N-PORT private-company holdings database
+**Status**: Bulk + daily live ingestion loaded; MV refresh blocked pending SQL access
+
+### Recent Completion (Session May 11, 2026)
+
+✅ **N-PORT isolated live ingestion**
+- Used isolated tree `/private/tmp/nport-buildout-claude` on branch `nport-buildout-claude`
+- Loaded historical bulk N-PORT from `2019Q4` through `2026Q1`
+- Loaded Q2-to-date daily NPORT-P filings for the 45-day window ending 2026-05-11
+- Live Supabase project: `pfr-nport`, ref `figvonwrlcpveyceengf`
+- Final live counts: `nport_filings=57375`, `nport_holdings=315831`, `nport_identifiers=667711`
+- Daily coverage: `daily_holdings=3676`, `daily_fvl_not_null=3676`, `daily_identifiers=63`
+
+✅ **Safety fixes applied after reviewer failure**
+- Fixed schema-aware row mapping and `fair_value_level` parsing
+- Added process sharding for daily ingestion with `--shard-count/--shard-index`
+- Made `SEC_RATE_LIMIT_SEC` env-configurable; use `0.50` for four shards
+- Daily registrants now insert missing only, preventing sparse XML from nulling bulk metadata
+- Daily identifiers now write only useful descriptors for kept holdings
+- Bulk loader now refuses bulk/daily overlap to prevent duplicate facts from synthetic daily holding IDs
+- Bulk loader now filters holdings to valid filing metadata before upserting facts
+- Live Supabase client initialization now fails loud instead of falling back to JSONL stub
+
+✅ **Backups and verification**
+- Backed up and deleted noisy pre-fix daily identifiers: `/private/tmp/nport_daily_identifiers_backup_before_cleanup.jsonl`
+- Backed up pre-repair daily holdings: `/private/tmp/nport_daily_scrape_backup_before_fvl_repair.jsonl`
+- Tests: `./.venv/bin/python -m pytest nport/scraper/tests nport/tests/integration/test_e2e_pipeline.py -q` → 42 passed
+- Pending: `REFRESH MATERIALIZED VIEW nport_company_positions_mv;` in Supabase SQL editor, then post-refresh Anthropic smoke test
 
 ### Recent Completion (Session Jan 4, 2026)
 

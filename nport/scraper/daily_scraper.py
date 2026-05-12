@@ -45,10 +45,25 @@ from .filter_f4 import (
     passes_f4,
     passes_loan_branch,
 )
+from .load_identifiers import is_useful_row
+from .live_resolver import (
+    identifiers_lookup_from_rows,
+    load_alias_cache,
+    load_live_aliases,
+    load_sanctioned_patterns,
+    matches_sanctioned_pattern,
+)
+from .row_mapping import (
+    filing_row_from_daily,
+    holding_row_for_db,
+    identifier_row_for_db,
+    registrant_row_for_db,
+)
 from .sec_client import SECClient
 
 NPORT_NS = {"n": "http://www.sec.gov/edgar/nport"}
 TARGET_FORM_TYPES = {"NPORT-P", "NPORT-P/A"}
+MAX_AGGREGATE_SEC_REQUESTS_PER_SEC = 9.0
 
 
 # -----------------------------------------------------------------------------
@@ -128,6 +143,61 @@ def parse_form_idx(
     return filings
 
 
+def shard_filings(
+    filings: List[Dict[str, str]],
+    *,
+    shard_index: int = 0,
+    shard_count: int = 1,
+) -> List[Dict[str, str]]:
+    """Return this process's deterministic slice of filings.
+
+    Process-level sharding parallelizes ingestion without sharing a Supabase
+    client or SEC HTTP session across threads. Upserts are idempotent on
+    accession/holding keys, so rerunning all shards is safe.
+    """
+    if shard_count < 1:
+        raise ValueError("shard_count must be >= 1")
+    if shard_index < 0 or shard_index >= shard_count:
+        raise ValueError("shard_index must be between 0 and shard_count - 1")
+    if shard_count == 1:
+        return list(filings)
+    return [
+        filing
+        for idx, filing in enumerate(filings)
+        if idx % shard_count == shard_index
+    ]
+
+
+def exclude_bulk_loaded_filings(
+    filings: List[Dict[str, str]],
+    bulk_loaded_accessions: Set[str],
+) -> List[Dict[str, str]]:
+    """Drop accessions already ingested from SEC bulk data."""
+    if not bulk_loaded_accessions:
+        return list(filings)
+    return [
+        filing
+        for filing in filings
+        if filing.get("accession_number") not in bulk_loaded_accessions
+    ]
+
+
+def validate_aggregate_sec_rate(shard_count: int, per_process_interval: float) -> None:
+    """Reject shard settings that would exceed SEC aggregate request limits."""
+    if shard_count < 1:
+        raise ValueError("shard_count must be >= 1")
+    if per_process_interval <= 0:
+        raise ValueError("SEC rate limit interval must be positive")
+    aggregate_rps = shard_count / per_process_interval
+    if aggregate_rps > MAX_AGGREGATE_SEC_REQUESTS_PER_SEC:
+        minimum_interval = shard_count / MAX_AGGREGATE_SEC_REQUESTS_PER_SEC
+        raise ValueError(
+            "unsafe aggregate SEC request rate: "
+            f"{aggregate_rps:.2f} req/s across {shard_count} shard(s). "
+            f"Set SEC_RATE_LIMIT_SEC >= {minimum_interval:.2f}."
+        )
+
+
 # -----------------------------------------------------------------------------
 # Per-filing XML parsing
 # -----------------------------------------------------------------------------
@@ -171,7 +241,7 @@ def parse_nport_xml(
     }
 
     holdings: List[Dict[str, Any]] = []
-    for sec in root.findall(".//n:invstOrSec", namespaces=NPORT_NS):
+    for index, sec in enumerate(root.findall(".//n:invstOrSec", namespaces=NPORT_NS), 1):
         def st(xpath: str) -> Optional[str]:
             return _text(sec.findtext(xpath, namespaces=NPORT_NS))
 
@@ -191,6 +261,7 @@ def parse_nport_xml(
 
         holdings.append(
             {
+                "holding_id": f"XML-{index:06d}",
                 "registrant_cik": reg_cik,
                 "period_end": rep_pd_end,
                 "issuer_name": st("n:name"),
@@ -223,6 +294,28 @@ def _text(v: Optional[str]) -> Optional[str]:
     return s or None
 
 
+def _useful_identifier_rows_for_holding(
+    row: Dict[str, Any],
+    *,
+    source_bulk_quarter: str = "daily-scrape",
+) -> List[Dict[str, Any]]:
+    """Map useful XML identifier rows for a single candidate holding."""
+    out: List[Dict[str, Any]] = []
+    for idx, ident in enumerate(row.get("identifiers") or [], 1):
+        raw = {
+            "holding_id": row.get("holding_id"),
+            "identifiers_id": f"{row.get('holding_id')}-other-{idx}",
+            "other_identifier": ident.get("value"),
+            "other_id_desc": ident.get("other_id_desc"),
+        }
+        if not is_useful_row(raw):
+            continue
+        mapped = identifier_row_for_db(raw, source_bulk_quarter=source_bulk_quarter)
+        if mapped:
+            out.append(mapped)
+    return out
+
+
 # -----------------------------------------------------------------------------
 # Main scraper class
 # -----------------------------------------------------------------------------
@@ -249,8 +342,21 @@ class DailyNPORTScraper:
         # `Resolver()` with no args which fed back a pass-through resolver
         # via the swallowing try/except.
         if resolver is None:
-            from nport.scraper.backfill_bulk import _build_seed_resolver
-            resolver = _build_seed_resolver()
+            if getattr(self.db, "_supabase", None) is not None:
+                aliases = load_live_aliases(self.db._supabase)
+                self._live_aliases = aliases
+                self.aliases_cache = aliases_cache or load_alias_cache(aliases)
+                self._sanctioned_patterns = load_sanctioned_patterns(self.db._supabase)
+                resolver = None
+            else:
+                from nport.scraper.backfill_bulk import _build_seed_resolver
+
+                resolver = _build_seed_resolver()
+                self._live_aliases = None
+                self._sanctioned_patterns = set()
+        else:
+            self._live_aliases = None
+            self._sanctioned_patterns = set()
         self._resolver = resolver
         self._alert_accumulator: Dict[str, List[Dict[str, Any]]] = {
             "new_tracked_positions": [],
@@ -258,7 +364,14 @@ class DailyNPORTScraper:
             "new_fund_families": [],
         }
 
-    def _get_resolver(self):
+    def _get_resolver(self, identifier_rows: Optional[List[Dict[str, Any]]] = None):
+        if self._live_aliases is not None:
+            from nport.resolver import Resolver
+
+            return Resolver(
+                aliases=self._live_aliases,
+                identifiers_lookup=identifiers_lookup_from_rows(identifier_rows or []),
+            )
         return self._resolver
 
     # -- Top-level orchestration --------------------------------------------
@@ -304,29 +417,74 @@ class DailyNPORTScraper:
             print(f"  parse error for {filing['accession_number']}: {exc}")
             return None
 
+        for row in holdings:
+            row["holding_id"] = f"{filing['accession_number']}:{row.get('holding_id')}"
+
         meta["accession_number"] = filing["accession_number"]
         meta["form_type"] = filing["form_type"]
         meta["filing_date"] = filing["date_filed"]
-        self.db.upsert_filing(meta)
 
-        resolver = self._get_resolver()
-        kept_rows: List[Dict[str, Any]] = []
+        source_url = (
+            f"{EDGAR_BASE}/Archives/edgar/data/"
+            f"{filing['cik'].lstrip('0')}/{filing['accession_number'].replace('-', '')}/primary_doc.xml"
+        )
+        registrant = {
+            "cik": meta.get("registrant_cik") or filing.get("cik"),
+            "registrant_name": meta.get("registrant_name") or filing.get("company_name"),
+            "lei": meta.get("registrant_lei"),
+        }
+        self.db.insert_missing_registrants(
+            [registrant_row_for_db(registrant, filing_date=filing.get("date_filed"))]
+        )
+        self.db.upsert_filing(filing_row_from_daily(meta, filing, source_url=source_url))
+
+        candidate_rows: List[Tuple[Dict[str, Any], bool, bool, bool, List[Dict[str, Any]]]] = []
+        candidate_identifier_rows: List[Dict[str, Any]] = []
         for row in holdings:
+            f4_match = passes_f4(row)
+            alias_match = passes_alias_branch(row, self.aliases_cache)
+            loan_candidate = passes_loan_branch(row)
+            if not (f4_match or alias_match or loan_candidate):
+                continue
+            row["accession_number"] = filing["accession_number"]
+            row["confidence"] = confidence_tag(row)
+            row_identifiers = _useful_identifier_rows_for_holding(row)
+            candidate_identifier_rows.extend(row_identifiers)
+            candidate_rows.append(
+                (row, f4_match, alias_match, loan_candidate, row_identifiers)
+            )
+
+        resolver = self._get_resolver(candidate_identifier_rows)
+        kept_rows: List[Dict[str, Any]] = []
+        kept_identifier_rows: List[Dict[str, Any]] = []
+        for row, f4_match, alias_match, loan_candidate, row_identifiers in candidate_rows:
+            resolved = resolver.resolve(row)
             if (
-                passes_f4(row)
-                or passes_loan_branch(row)
-                or passes_alias_branch(row, self.aliases_cache)
+                resolved.get("resolution_source") == "unresolved"
+                and matches_sanctioned_pattern(row, self._sanctioned_patterns)
             ):
-                row["accession_number"] = filing["accession_number"]
-                row["confidence"] = confidence_tag(row)
-                resolved = resolver.resolve(row)
-                # Bug 3 fix: merge resolver output into the raw row so the
-                # holding's raw fields survive alongside resolver-added fields.
-                merged = {**row, **resolved}
-                kept_rows.append(merged)
-                self._maybe_collect_alerts(merged, filing)
+                resolved = {
+                    **resolved,
+                    "resolved_company_id": None,
+                    "resolution_source": "sanctioned",
+                    "resolution_confidence": 0,
+                }
+            if loan_candidate and not (f4_match or alias_match) and not resolved.get("resolved_company_id"):
+                continue
+            # Bug 3 fix: merge resolver output into the raw row so the
+            # holding's raw fields survive alongside resolver-added fields.
+            merged = holding_row_for_db(
+                row,
+                resolved,
+                source_bulk_quarter="daily-scrape",
+            )
+            kept_rows.append(merged)
+            kept_identifier_rows.extend(row_identifiers)
+            self._maybe_collect_alerts(merged, filing)
 
         upserted = self.db.upsert_holding(kept_rows) if kept_rows else 0
+        if kept_identifier_rows:
+            self.db.upsert_identifier(kept_identifier_rows)
         return {
             "holdings_total": len(holdings),
             "holdings_kept": upserted,
@@ -341,9 +499,9 @@ class DailyNPORTScraper:
             self._alert_accumulator["new_tracked_positions"].append(
                 {
                     "issuer": row.get("issuer_name"),
-                    "fund_cik": row.get("registrant_cik"),
+                    "fund_cik": filing.get("cik"),
                     "accession": filing["accession_number"],
-                    "value_usd": row.get("currency_value"),
+                    "value_usd": row.get("currency_value_usd") or row.get("currency_value"),
                 }
             )
         # Markup detection is a stub — real QoQ comparison requires reading
@@ -413,26 +571,55 @@ class DailyNPORTScraper:
             print(f"[daily] email send failed: {exc}")
 
     # -- Main run ------------------------------------------------------------
-    def run(self, days_back: int = 7, now: Optional[datetime] = None) -> Dict[str, int]:
+    def run(
+        self,
+        days_back: int = 7,
+        now: Optional[datetime] = None,
+        *,
+        shard_index: int = 0,
+        shard_count: int = 1,
+    ) -> Dict[str, int]:
         year, q = self.get_current_quarter_info(now=now)
         print("=" * 80)
         print(f"DAILY N-PORT SCRAPER (LAST {days_back} DAYS) -- {year}Q{q}")
         print("=" * 80)
+        validate_aggregate_sec_rate(shard_count, self.sec.rate_limit)
 
         idx = self.download_index_file(year, q)
         if idx is None:
             print("ERROR: could not download form.idx")
             return {"filings_seen": 0}
 
-        filings = parse_form_idx(idx, days_back=days_back, now=now)
-        print(f"Found {len(filings)} NPORT-P / NPORT-P/A filings in window")
+        all_filings = parse_form_idx(idx, days_back=days_back, now=now)
+        filings = shard_filings(
+            all_filings,
+            shard_index=shard_index,
+            shard_count=shard_count,
+        )
+        print(f"Found {len(all_filings)} NPORT-P / NPORT-P/A filings in window")
+        if shard_count > 1:
+            print(
+                f"Shard {shard_index + 1}/{shard_count}: "
+                f"processing {len(filings)} filings"
+            )
 
-        # In a stubbed run we don't have a DB to dedupe against; live mode
-        # would query `nport_filings` by accession before processing. Keep
-        # the call site explicit so the swap is obvious.
-        new_filings = filings
+        bulk_loaded_accessions = self.db.accessions_with_bulk_data(
+            filing.get("accession_number") for filing in filings
+        )
+        new_filings = exclude_bulk_loaded_filings(filings, bulk_loaded_accessions)
+        if bulk_loaded_accessions:
+            print(
+                f"Skipping {len(filings) - len(new_filings)} shard filings "
+                "already loaded from bulk data"
+            )
 
-        totals = {"filings_seen": len(filings), "filings_parsed": 0, "holdings_kept": 0}
+        totals = {
+            "filings_seen": len(all_filings),
+            "filings_in_shard": len(filings),
+            "filings_skipped_bulk_overlap": len(filings) - len(new_filings),
+            "filings_parsed": 0,
+            "holdings_kept": 0,
+        }
         for i, f in enumerate(new_filings, 1):
             res = self.process_filing(f)
             if res:
@@ -453,13 +640,29 @@ class DailyNPORTScraper:
 def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Daily N-PORT scraper + alerts")
     p.add_argument("--days", type=int, default=7, help="Look-back window in days")
+    p.add_argument(
+        "--shard-count",
+        type=int,
+        default=1,
+        help="Total number of parallel process shards",
+    )
+    p.add_argument(
+        "--shard-index",
+        type=int,
+        default=0,
+        help="Zero-based shard index for this process",
+    )
     return p.parse_args(argv)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv)
     scraper = DailyNPORTScraper()
-    scraper.run(days_back=args.days)
+    scraper.run(
+        days_back=args.days,
+        shard_index=args.shard_index,
+        shard_count=args.shard_count,
+    )
     return 0
 
 

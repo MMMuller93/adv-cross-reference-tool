@@ -4,15 +4,32 @@
     "description": "Compliance detection system for Form D/ADV cross-reference analysis",
     "port": 3009,
     "created_at": "2025-11",
-    "last_updated": "2026-01-06"
+    "last_updated": "2026-05-11"
   },
   "session_state": {
-    "current_session": 10,
+    "current_session": 11,
     "last_working_commit": "05456fa",
     "environment_verified": true,
-    "notes": "ADV validation fix complete - added base name extraction and database validation. Project handoff documentation created."
+    "notes": "N-PORT isolated live ingestion loaded through 2026Q1 bulk plus Q2-to-date daily. MV refresh remains pending because SQL editor/browser access was blocked."
   },
   "features": [
+    {
+      "id": "nport-001",
+      "category": "nport",
+      "description": "N-PORT private-company holdings ingestion",
+      "acceptance_criteria": [
+        "Bulk backfill 2019Q4 through 2026Q1",
+        "Daily Q2-to-date NPORT-P ingestion",
+        "Entity resolution uses live private company aliases",
+        "Daily replay has complete fair_value_level coverage",
+        "Materialized company positions view refreshed"
+      ],
+      "priority": 1,
+      "status": "blocked",
+      "passes": false,
+      "tested_at": "2026-05-11",
+      "notes": "Bulk and daily ingestion loaded in pfr-nport. Tests pass and daily coverage checks pass. Blocked only on running REFRESH MATERIALIZED VIEW nport_company_positions_mv in Supabase SQL editor."
+    },
     {
       "id": "feat-001",
       "category": "core",
@@ -203,7 +220,7 @@
     "feat-001", "feat-002", "feat-003", "feat-004",
     "radar-001", "radar-002", "radar-003", "radar-004", "radar-005"
   ],
-  "blocked_features": [],
+  "blocked_features": ["nport-001"],
   "known_issues": [
     {
       "id": "issue-001",
@@ -231,6 +248,8 @@
     }
   ],
   "next_actions": [
+    "Run REFRESH MATERIALIZED VIEW nport_company_positions_mv in pfr-nport Supabase SQL editor",
+    "After MV refresh, smoke-test Anthropic company positions from nport_company_positions_mv",
     "Verify frontend displays in browser (fund types, EDGAR links, adviser loading)",
     "Run updated detect_compliance_issues.js to validate ADV filing detector accuracy",
     "Re-inspect Form D/ADV matching quality (match-001)",

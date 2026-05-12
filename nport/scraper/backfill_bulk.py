@@ -25,7 +25,7 @@ import sys
 import zipfile
 from contextlib import closing
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from .config import (
     BACKFILL_END,
@@ -35,7 +35,29 @@ from .config import (
     UPSERT_BATCH_SIZE,
 )
 from .db_client import DBClient
-from .filter_f4 import confidence_tag, filter_rows
+from .filter_f4 import (
+    confidence_tag,
+    filter_rows,
+    passes_alias_branch,
+    passes_f4,
+    passes_loan_branch,
+)
+from .live_resolver import (
+    identifiers_lookup_from_rows,
+    load_alias_cache,
+    load_live_aliases,
+    load_sanctioned_patterns,
+    matches_sanctioned_pattern,
+)
+from .load_identifiers import is_useful_row
+from .row_mapping import (
+    filing_row_from_bulk,
+    holding_filter_row_from_tsv,
+    holding_row_for_db,
+    identifier_row_for_db,
+    normalize_keys,
+    registrant_row_for_db,
+)
 from .sec_client import SECClient
 
 # CSV's default field size limit can be exceeded by N-PORT's large rows.
@@ -184,10 +206,27 @@ class BulkBackfiller:
         # injected (tests / db-backed), use that; otherwise build one from
         # the bundled seed and fail loud if anything goes wrong.
         if resolver is None:
-            resolver = _build_seed_resolver()
+            if getattr(self.db, "_supabase", None) is not None:
+                aliases = load_live_aliases(self.db._supabase)
+                self._live_aliases = aliases
+                self.aliases_cache = aliases_cache or load_alias_cache(aliases)
+                self._sanctioned_patterns = load_sanctioned_patterns(self.db._supabase)
+                resolver = None
+            else:
+                resolver = _build_seed_resolver()
+                self._live_aliases = None
+                self._sanctioned_patterns = set()
+        else:
+            self._live_aliases = None
+            self._sanctioned_patterns = set()
         self._resolver = resolver
 
-    def _get_resolver(self):
+    def _get_resolver(self, identifier_rows: Optional[List[Dict[str, Any]]] = None):
+        if self._live_aliases is not None:
+            from nport.resolver import Resolver
+
+            lookup = identifiers_lookup_from_rows(identifier_rows or [])
+            return Resolver(aliases=self._live_aliases, identifiers_lookup=lookup)
         return self._resolver
 
     # -- Per-quarter pipeline ------------------------------------------------
@@ -213,19 +252,8 @@ class BulkBackfiller:
             print(f"[{year}Q{q}] downloading -> {zip_path}")
             self.sec.download(url, zip_path)
 
-            print(f"[{year}Q{q}] extracting required TSVs")
-            extract_dir = self.staging_dir / f"{year}q{q}_extracted"
-            self._extract_required(zip_path, extract_dir)
-
-            print(f"[{year}Q{q}] validating headers")
-            self._validate_headers(extract_dir)
-
-            print(f"[{year}Q{q}] loading TSVs into SQLite -> {sqlite_path}")
-            stats = self._load_to_sqlite(extract_dir, sqlite_path)
-
-            print(f"[{year}Q{q}] applying F4 filter + resolving + upserting")
-            stats.update(self._filter_resolve_upsert(sqlite_path, year, q))
-            return stats
+            print(f"[{year}Q{q}] streaming TSVs from ZIP")
+            return self._stream_filter_resolve_upsert(zip_path, year, q, source_url=url)
         finally:
             # Critical: clean up eagerly. Disk budget per §6.1 / §10 risk #1.
             for p in (zip_path, sqlite_path):
@@ -237,6 +265,193 @@ class BulkBackfiller:
             ed = self.staging_dir / f"{year}q{q}_extracted"
             if ed.exists():
                 shutil.rmtree(ed, ignore_errors=True)
+
+    def _stream_filter_resolve_upsert(
+        self,
+        zip_path: Path,
+        year: int,
+        q: int,
+        *,
+        source_url: str | None = None,
+    ) -> Dict[str, int]:
+        """Process one SEC bulk ZIP without extracting full TSVs to disk."""
+        quarter = f"{year}Q{q}"
+        stats: Dict[str, int] = {
+            "identifiers_kept": 0,
+            "holdings_seen": 0,
+            "holdings_kept": 0,
+            "holdings_resolved": 0,
+            "holdings_sanctioned": 0,
+            "filings": 0,
+            "registrants": 0,
+        }
+
+        with zipfile.ZipFile(zip_path) as zf:
+            self._validate_headers_in_zip(zf)
+
+            print(f"[{quarter}] loading metadata maps")
+            registrants = _load_zip_tsv_by_accession(zf, "REGISTRANT.tsv")
+            fund_info = _load_zip_tsv_by_accession(zf, "FUND_REPORTED_INFO.tsv")
+            submissions = _load_zip_tsv_by_accession(zf, "SUBMISSION.tsv")
+            daily_overlap = self.db.accessions_with_daily_holdings(submissions.keys())
+            if daily_overlap:
+                examples = ", ".join(sorted(daily_overlap)[:5])
+                raise RuntimeError(
+                    f"{quarter} bulk ZIP overlaps {len(daily_overlap)} "
+                    "daily-scrape accessions. Refusing to create duplicate "
+                    f"bulk/daily holdings. Examples: {examples}"
+                )
+
+            print(f"[{quarter}] loading useful IDENTIFIERS rows")
+            identifier_rows = self._load_identifiers_from_zip(zf, quarter, stats)
+            resolver = self._get_resolver(identifier_rows)
+
+            print(f"[{quarter}] filtering holdings")
+            holdings_to_upsert: List[Dict[str, Any]] = []
+            used_accessions: Set[str] = set()
+            for raw in _iter_zip_tsv(zf, "FUND_REPORTED_HOLDING.tsv"):
+                stats["holdings_seen"] += 1
+                row = holding_filter_row_from_tsv(raw)
+                f4_match = passes_f4(row)
+                alias_match = passes_alias_branch(row, self.aliases_cache)
+                loan_candidate = passes_loan_branch(row)
+                if not (f4_match or alias_match or loan_candidate):
+                    continue
+                accession = row.get("accession_number")
+                holding_id = row.get("holding_id")
+                if not accession or not holding_id:
+                    continue
+                resolved = resolver.resolve(row)
+                if (
+                    resolved.get("resolution_source") == "unresolved"
+                    and matches_sanctioned_pattern(row, self._sanctioned_patterns)
+                ):
+                    resolved = {
+                        **resolved,
+                        "resolved_company_id": None,
+                        "resolution_source": "sanctioned",
+                        "resolution_confidence": 0,
+                    }
+                # The broad loan predicate captures most level-3 restricted
+                # loans. Keep credit only when a vendor/curated alias resolves
+                # it to a tracked company; otherwise it swamps the private
+                # equity universe by >100x.
+                if loan_candidate and not (f4_match or alias_match) and not resolved.get("resolved_company_id"):
+                    continue
+                if resolved.get("resolved_company_id"):
+                    stats["holdings_resolved"] += 1
+                if resolved.get("resolution_source") == "sanctioned":
+                    stats["holdings_sanctioned"] += 1
+                holdings_to_upsert.append(
+                    holding_row_for_db(
+                        row,
+                        resolved,
+                        source_bulk_quarter=quarter,
+                    )
+                )
+                used_accessions.add(str(accession))
+                stats["holdings_kept"] += 1
+
+            print(f"[{quarter}] upserting {len(used_accessions)} filings/registrants")
+            registrant_by_cik: Dict[str, Dict[str, Any]] = {}
+            filing_rows: List[Dict[str, Any]] = []
+            for accession in sorted(used_accessions):
+                reg = registrants.get(accession)
+                fund = fund_info.get(accession)
+                sub = submissions.get(accession)
+                filing = filing_row_from_bulk(
+                    accession,
+                    registrant=reg,
+                    fund_info=fund,
+                    submission=sub,
+                    source_bulk_quarter=quarter,
+                    source_url=source_url,
+                )
+                if not filing.get("cik") or not filing.get("registrant_name"):
+                    print(f"  [warn] skipping filing metadata missing CIK/name: {accession}")
+                    continue
+                if not filing.get("report_period_end") or not filing.get("report_period_date") or not filing.get("filing_date"):
+                    print(f"  [warn] skipping filing metadata missing dates: {accession}")
+                    continue
+                filing_rows.append(filing)
+                reg_row = registrant_row_for_db(
+                    reg or {},
+                    filing_date=(normalize_keys(sub or {}).get("filing_date")),
+                )
+                if reg_row.get("cik") and reg_row.get("name"):
+                    registrant_by_cik[str(reg_row["cik"])] = reg_row
+
+            registrant_rows = list(registrant_by_cik.values())
+            valid_accessions = {
+                str(row["accession_number"])
+                for row in filing_rows
+                if row.get("accession_number")
+            }
+            before_parent_filter = len(holdings_to_upsert)
+            holdings_to_upsert = [
+                row
+                for row in holdings_to_upsert
+                if str(row.get("accession_number")) in valid_accessions
+            ]
+            skipped_orphan_holdings = before_parent_filter - len(holdings_to_upsert)
+            if skipped_orphan_holdings:
+                print(
+                    f"  [warn] skipped {skipped_orphan_holdings} holdings "
+                    "whose filing metadata was invalid/missing"
+                )
+            stats["holdings_skipped_missing_filings"] = skipped_orphan_holdings
+            stats["holdings_kept"] = len(holdings_to_upsert)
+            self.db.upsert_registrants(registrant_rows)
+            stats["registrants"] = len(registrant_rows)
+            self.db.upsert_filings(filing_rows)
+            stats["filings"] = len(filing_rows)
+
+            print(f"[{quarter}] upserting {len(holdings_to_upsert)} holdings")
+            for i in range(0, len(holdings_to_upsert), UPSERT_BATCH_SIZE):
+                self.db.upsert_holding(holdings_to_upsert[i : i + UPSERT_BATCH_SIZE])
+
+        return stats
+
+    def _validate_headers_in_zip(self, zf: zipfile.ZipFile) -> None:
+        members = {m.filename for m in zf.infolist()}
+        missing = [n for n in REQUIRED_FILES if n not in members]
+        if missing:
+            raise FileNotFoundError(f"ZIP {zf.filename} missing required files: {missing}")
+        with zf.open("FUND_REPORTED_HOLDING.tsv") as raw:
+            text = io.TextIOWrapper(raw, encoding="utf-8", newline="")
+            reader = csv.reader(text, delimiter="\t")
+            header = next(reader)
+        validate_tsv_header(
+            header,
+            EXPECTED_HOLDING_COLUMNS,
+            "FUND_REPORTED_HOLDING.tsv",
+        )
+
+    def _load_identifiers_from_zip(
+        self,
+        zf: zipfile.ZipFile,
+        quarter: str,
+        stats: Dict[str, int],
+    ) -> List[Dict[str, Any]]:
+        identifier_rows: List[Dict[str, Any]] = []
+        batch: List[Dict[str, Any]] = []
+        for raw in _iter_zip_tsv(zf, "IDENTIFIERS.tsv"):
+            normalized = normalize_keys(raw)
+            if not is_useful_row(normalized):
+                continue
+            mapped = identifier_row_for_db(normalized, source_bulk_quarter=quarter)
+            if mapped is None:
+                continue
+            identifier_rows.append(mapped)
+            batch.append(mapped)
+            if len(batch) >= UPSERT_BATCH_SIZE:
+                self.db.upsert_identifier(batch)
+                stats["identifiers_kept"] += len(batch)
+                batch = []
+        if batch:
+            self.db.upsert_identifier(batch)
+            stats["identifiers_kept"] += len(batch)
+        return identifier_rows
 
     # -- Steps ---------------------------------------------------------------
     def _extract_required(self, zip_path: Path, extract_dir: Path) -> None:
@@ -382,6 +597,31 @@ class BulkBackfiller:
 # -----------------------------------------------------------------------------
 # TSV helpers
 # -----------------------------------------------------------------------------
+def _iter_zip_tsv(
+    zf: zipfile.ZipFile,
+    member_name: str,
+) -> Iterable[Dict[str, str]]:
+    """Yield DictReader rows from a TSV member inside a ZIP."""
+    with zf.open(member_name) as raw:
+        text = io.TextIOWrapper(raw, encoding="utf-8", newline="")
+        reader = csv.DictReader(text, delimiter="\t")
+        for row in reader:
+            yield {k: v for k, v in row.items() if k is not None}
+
+
+def _load_zip_tsv_by_accession(
+    zf: zipfile.ZipFile,
+    member_name: str,
+) -> Dict[str, Dict[str, str]]:
+    """Load a small accession-keyed TSV member into memory."""
+    out: Dict[str, Dict[str, str]] = {}
+    for row in _iter_zip_tsv(zf, member_name):
+        accession = row.get("ACCESSION_NUMBER") or row.get("accession_number")
+        if accession:
+            out[accession.strip()] = row
+    return out
+
+
 def _stream_tsv_to_table(
     conn: sqlite3.Connection,
     tsv_path: Path,

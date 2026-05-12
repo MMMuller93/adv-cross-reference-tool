@@ -55,7 +55,9 @@ _load_dotenv()
 SEC_USER_AGENT: str = os.environ.get(
     "SEC_USER_AGENT", "Miles Muller mmmuller93@gmail.com"
 )
-SEC_RATE_LIMIT_SEC: float = 0.11   # ~9 req/s, well under the 10/s SEC ceiling
+SEC_RATE_LIMIT_SEC: float = float(
+    os.environ.get("SEC_RATE_LIMIT_SEC", "0.12")
+)  # ~9 req/s per process by default
 
 EDGAR_BASE: str = "https://www.sec.gov"
 SEC_BULK_NPORT_URL_FMT: str = (
