@@ -4,8 +4,13 @@
 const { createClient } = require('@supabase/supabase-js');
 const fs = require('fs');
 
-const SUPABASE_URL = 'https://ezuqwwffjgfzymqxsctq.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6dXF3d2ZmamdmenltcXhzY3RxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MzMyNjQ0MCwiZXhwIjoyMDc4OTAyNDQwfQ.Rq2lPQ1Uy_zTAPuY7VmEHA0I802vvEV9mm-br3M8aKM';
+const SUPABASE_URL =
+  process.env.ADV_SUPABASE_URL || 'https://ezuqwwffjgfzymqxsctq.supabase.co';
+const SUPABASE_KEY = process.env.ADV_SUPABASE_SERVICE_KEY;
+
+if (!SUPABASE_KEY) {
+  throw new Error('ADV_SUPABASE_SERVICE_KEY is required to upload State ERA data');
+}
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 

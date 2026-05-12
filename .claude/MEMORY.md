@@ -43,6 +43,7 @@
 - **N-PORT Supabase Read Limit Correction (2026-05-12)**: The API fallback briefly used `.limit(5000)`, violating the project rule that Supabase reads must be capped at 1000 rows per request. Use 1000-row pages and keyset pagination for any fallback that can exceed one page.
 - **N-PORT Admin Route Correction (2026-05-12)**: `/api/nport/admin/*` routes originally relied only on server config and were effectively unauthenticated. They now require `NPORT_ADMIN_TOKEN` via `x-admin-token`; keep that requirement before any production integration.
 - **N-PORT Credential Correction (2026-05-12)**: ADV/Form D Supabase JWTs were hardcoded in `nport/api/db/cross_source.js`. They have been moved to env vars. Do not add JWT/API-key literals to tracked code, even for anon keys.
+- **Existing Service-Key Exposure (2026-05-12)**: `enrichment/upload_state_eras.js` contained a tracked ADV service-role JWT and was changed to require `ADV_SUPABASE_SERVICE_KEY` from env. Because the key existed in git history before this session, rotate the exposed service-role key before treating the repo as clean.
 
 ---
 
@@ -220,6 +221,7 @@
   - Added/committed isolated N-PORT API fallback in `/private/tmp/nport-buildout-claude` (`ec62955`) so company/fund position endpoints can smoke-test before MV refresh.
   - Corrected API grouping/sorting to use `report_period_date` for holdings snapshots.
   - Added `NPORT_ADMIN_TOKEN` guard to admin routes and removed hardcoded ADV/Form D Supabase JWTs from the N-PORT cross-source client.
+  - Removed the tracked ADV service-role JWT from `enrichment/upload_state_eras.js`; rotation is still required because history exposure remains.
 - **Verification**:
   - `npm test` in `nport/api` passed: 30 tests.
   - `./.venv/bin/python -m pytest nport -q` passed: 163 tests.

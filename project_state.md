@@ -34,6 +34,7 @@
 - Corrected fallback reads to use 1000-row keyset pages instead of an invalid 5000-row Supabase request
 - Added admin-token protection for `/api/nport/admin/*`, including ID validation/capping on resolution refresh
 - Removed hardcoded ADV/Form D Supabase JWTs from the N-PORT cross-source client; it now reads env vars and degrades gracefully when optional cross-source keys are absent
+- Removed an existing tracked ADV service-role JWT from `enrichment/upload_state_eras.js`; key rotation remains required because git history exposure predates this session
 - Added `nport/scripts/witness_check.sh` and `nport/OPERATIONAL_GUARDRAILS.md`
 - Ran May 12 two-day daily catch-up: 16 filings parsed, 0 private holdings kept, live row counts unchanged
 - Live smoke: Anthropic positions total `320`, source `base_tables`; current holders `37` for `2026-02-28`; timeseries points `32`

@@ -47,3 +47,11 @@
 - **Fix pattern**: Read all Supabase JWTs/API keys from env vars and degrade gracefully when optional cross-source env is absent.
 - **Verify**: `rg "eyJ|service_role" nport/api -g '!**/node_modules/**'` should not find JWT literals.
 - **Hits**: 1
+
+### L-006: Remove existing service-role literals and flag rotation
+- **Signal**: evaluative
+- **Mistake**: An existing upload utility carried an ADV service-role JWT in tracked code.
+- **Root cause**: Older one-off scripts were not held to the same secret hygiene as runtime code.
+- **Fix pattern**: Replace service-role literals with required env vars and explicitly flag key rotation if the secret was ever committed.
+- **Verify**: `rg "eyJ|service_role" enrichment/upload_state_eras.js` should return no JWT literal, and handoff/memory should mention rotation.
+- **Hits**: 1

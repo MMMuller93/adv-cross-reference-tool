@@ -21,6 +21,9 @@ contains no secrets.
   server config as the guard.
 - ADV/Form D Supabase keys belong in environment variables
   (`ADV_SUPABASE_ANON_KEY`, `FORMD_SUPABASE_ANON_KEY`), not in tracked code.
+- A pre-existing ADV service-role JWT was removed from
+  `enrichment/upload_state_eras.js`; rotate that service-role key because
+  removing the literal from HEAD does not erase git history exposure.
 
 ## Required Gates From Here
 
