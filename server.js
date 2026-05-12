@@ -1259,38 +1259,50 @@ app.get('/api/funds/new-managers', async (req, res) => {
     });
     console.log(`  Loaded ${enrichedManagersData.length} enriched managers for matching (indexed by full name + umbrella)`);
 
-    // Batch fetch all advisers for matching (include AUM years to detect defunct advisers)
+    // Batch fetch all advisers for matching. Include registration_type so the
+    // frontend can distinguish RIA vs SEC-ERA vs State-ERA; include AUM years
+    // as a CONFIDENCE signal (active = has AUM data) but DO NOT filter by it.
+    //
+    // Production bug 2026-05-11: previously this filtered out State-ERAs with
+    // no AUM data, which made the bidirectional matcher miss real registered
+    // advisers like Capital Factory (CRD 192514) and Great Circle Ventures GP
+    // (CRD 326490) — both legitimately registered State-ERAs with NULL AUM.
+    // User caught it by Googling "Capital Factory form ADV"; the matcher was
+    // structurally blind to them.
     const advisersData = await fetchAllResultsPaginated((from, to) => {
       return advClient
         .from('advisers_enriched')
-        .select('crd, adviser_name, adviser_entity_legal_name, primary_website, total_aum, aum_2023, aum_2024, aum_2025')
+        .select('crd, adviser_name, adviser_entity_legal_name, primary_website, total_aum, aum_2023, aum_2024, aum_2025, aum_2026, registration_type')
         .range(from, to);
     });
 
-    // Helper to check if adviser is active (has AUM data in recent years)
+    // Active = has any AUM data. Used as a CONFIDENCE flag on the response,
+    // NOT as a filter on the lookup population.
     const isAdviserActive = (adv) => {
-      return adv.aum_2023 || adv.aum_2024 || adv.aum_2025 || adv.total_aum;
+      return adv.aum_2023 || adv.aum_2024 || adv.aum_2025 || adv.aum_2026 || adv.total_aum;
     };
 
-    // Create lookup structures for advisers (only active advisers)
+    // Build lookup against ALL advisers (don't exclude State-ERAs / no-AUM).
+    // Skip blank-name rows (State-ERA scrape gaps).
     const advisersByNameExact = {};
     const advisersByNamePrefix = [];
     let activeCount = 0;
+    let inactiveCount = 0;
     advisersData.forEach(adv => {
-      // Skip defunct advisers (no recent AUM data)
-      if (!isAdviserActive(adv)) return;
-      activeCount++;
+      const name1 = (adv.adviser_name || '').toLowerCase().trim();
+      const name2 = (adv.adviser_entity_legal_name || '').toLowerCase().trim();
+      if (!name1 && !name2) return;  // can't match a blank name
 
-      const name1 = (adv.adviser_name || '').toLowerCase();
-      const name2 = (adv.adviser_entity_legal_name || '').toLowerCase();
+      if (isAdviserActive(adv)) { activeCount++; } else { inactiveCount++; }
+
       if (name1) advisersByNameExact[name1] = adv;
       if (name2) advisersByNameExact[name2] = adv;
       advisersByNamePrefix.push({
         names: [name1, name2].filter(n => n),
-        adv
+        adv,
       });
     });
-    console.log(`  Loaded ${advisersData.length} advisers, ${activeCount} active for matching`);
+    console.log(`  Loaded ${advisersData.length} advisers for matching (${activeCount} with AUM, ${inactiveCount} without — both kept; AUM is a confidence signal, not a filter)`);
 
     // Helper to parse fund name
     const parseFundName = (name) => {
@@ -1354,7 +1366,9 @@ app.get('/api/funds/new-managers', async (req, res) => {
           crd: advData.crd,
           name: advData.adviser_name || advData.adviser_entity_legal_name,
           website: advData.primary_website,
-          aum: advData.total_aum
+          aum: advData.total_aum,
+          registration_type: advData.registration_type,  // SEC-RIA / SEC-ERA / State-RIA / State-ERA / null
+          adviser_active: isAdviserActive(advData),       // has AUM data; helps frontend distinguish dormant vs active
         };
       } else {
         enrichedManager.has_form_adv = false;

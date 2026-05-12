@@ -66,18 +66,25 @@ function parseFilingDate(dateStr) {
 async function getRecentManagers(limit) {
   console.log(`[Fetch] Getting ${limit} most recent new managers...`);
 
-  // Fetch filings with 'a series of' pattern using keyset pagination
-  // Fetch from HIGHEST ID (newest) first, then paginate downward
+  // Production bug 2026-05-11: this used to gate on `entityname ILIKE '%a series of%'`,
+  // which excluded 72.5% of recent unmatched pooled-fund filings (any fund whose
+  // entityname didn't use the series-of platform naming convention). Funds like
+  // "Vaark Syndicate I LLC" appeared on the New Managers tab but were NEVER
+  // enriched — no website, no team. A 10-second Google for "Vaark Syndicate"
+  // returned vaark.vc immediately.
+  //
+  // New gate: industrygrouptype='Pooled Investment Fund' AND non-amendment.
+  // This aligns the enrichment input with the detector's scope.
   const allFilings = [];
   const BATCH_SIZE = 1000;
-  let lastId = 999999999; // Start from highest possible
+  let lastId = 999999999;
 
-  // We only need ~2000 recent filings to get enough unique managers
   while (allFilings.length < 2000) {
     const { data: batch, error } = await formdClient
       .from('form_d_filings')
-      .select('id, entityname, filing_date')
-      .ilike('entityname', '%a series of%')
+      .select('id, entityname, filing_date, related_names, related_roles, stateorcountry, nameofsigner, industrygrouptype, isamendment')
+      .eq('industrygrouptype', 'Pooled Investment Fund')
+      .neq('isamendment', 'true')
       .lt('id', lastId)
       .order('id', { ascending: false })
       .limit(BATCH_SIZE);
@@ -90,46 +97,67 @@ async function getRecentManagers(limit) {
 
     allFilings.push(...batch);
     lastId = batch[batch.length - 1].id;
-    console.log(`[Fetch] Fetched ${allFilings.length} filings so far (latest: ${batch[0]?.filing_date})...`);
+    console.log(`[Fetch] Fetched ${allFilings.length} pooled-fund filings so far (latest: ${batch[0]?.filing_date})...`);
 
     if (batch.length < BATCH_SIZE) break;
   }
 
-  // Sort by parsed date descending (newest first)
   const sortedFilings = allFilings.sort((a, b) => {
     const dateA = parseFilingDate(a.filing_date);
     const dateB = parseFilingDate(b.filing_date);
-    return dateB - dateA; // Descending
+    return dateB - dateA;
   });
 
-  console.log(`[Fetch] Total filings: ${sortedFilings.length}`);
+  console.log(`[Fetch] Total pooled-fund filings: ${sortedFilings.length}`);
   if (sortedFilings.length > 0) {
     console.log(`[Fetch] Most recent: ${sortedFilings[0].filing_date} - ${sortedFilings[0].entityname?.substring(0, 50)}...`);
   }
 
-  // Extract unique series masters
+  // Extract manager identity using the SAME logic the detector uses.
+  // For "a series of X" filings, uses the series master.
+  // For non-series filings (e.g., "Vaark Syndicate I LLC"), uses entityname prefix.
+  // Platform-admin'd filings (Sydecar, AngelList admin-only, Assure, etc.) route
+  // to the real GP via related_names.
+  const { detectPlatform } = require('../lib/platform_detection');
   const seriesPattern = /,?\s+a\s+series\s+of\s+(.+?)(?:\s*,?\s*$|$)/i;
-  const adminUmbrellas = ['roll up vehicles', 'angellist funds', 'multimodal ventures', 'mv funds', 'cgf2021 llc', 'sydecar'];
   const seen = new Set();
   const managers = [];
 
   for (const filing of sortedFilings) {
-    const match = (filing.entityname || '').match(seriesPattern);
-    if (match) {
-      const masterLlc = match[1].trim();
-      const isAdmin = adminUmbrellas.some(p => masterLlc.toLowerCase().includes(p));
-      if (!isAdmin && !seen.has(masterLlc.toLowerCase())) {
-        seen.add(masterLlc.toLowerCase());
-        managers.push({
-          series_master_llc: masterLlc,
-          filing_date: filing.filing_date
-        });
-      }
+    const en = filing.entityname || '';
+    const platform = detectPlatform(filing);
+    let candidate;
+    const seriesMatch = en.match(seriesPattern);
+    if (seriesMatch) {
+      candidate = seriesMatch[1].trim();
+      // If the series-master IS the platform (Sydecar/CGF2021/Roll Up Vehicles/etc.),
+      // skip — the platform isn't the GP; the real manager-identity needs deeper work
+      // that the enrichment engine isn't equipped to do for these. They show on the
+      // tab as platform-routed; not enriched here.
+      if (platform.is_platform) continue;
+    } else {
+      // Non-series: strip suffixes to get firm-name prefix
+      candidate = en
+        .replace(/,?\s*(LP|LLC|L\.P\.|L\.L\.C\.|Ltd|Limited|Inc|Incorporated)\.?\s*$/i, '')
+        .replace(/\s+(Fund\s+)?[IVX]+$/i, '')
+        .replace(/\s+Fund\s+\d+$/i, '')
+        .trim();
+      // Require at least 4 chars and 2 alphabetic tokens to avoid spurious "Fund I" etc.
+      const tokens = candidate.split(/\s+/).filter(t => /[a-zA-Z]/.test(t));
+      if (candidate.length < 4 || tokens.length < 2) continue;
     }
+    if (!candidate) continue;
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    managers.push({
+      series_master_llc: candidate,
+      filing_date: filing.filing_date,
+    });
     if (managers.length >= limit) break;
   }
 
-  console.log(`[Fetch] Found ${managers.length} unique managers`);
+  console.log(`[Fetch] Found ${managers.length} unique managers (pooled-fund, non-platform; series + non-series)`);
   return managers;
 }
 

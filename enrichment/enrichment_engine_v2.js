@@ -731,6 +731,23 @@ function isValidLinkedInMatch(fundName, profileTitle) {
   const lowerTitle = profileTitle.toLowerCase();
   const lowerName = fundName.toLowerCase();
 
+  // PRODUCTION BUG 2026-05-11: Esteban Mancuso ended up as a current Capital
+  // Factory team member because his LinkedIn bio starts with "Ex CEO, ex
+  // Managing Partner en VC, ex consultor..." — the firm-name check passed
+  // (because "Capital Factory" was elsewhere in his profile) but his title
+  // is explicitly past-tense. Reject any title that starts with or contains
+  // "ex / former / past / previously" or alumni / advisor language.
+  const formerIndicators = /\b(ex|former|past|formerly|previously|prior|retired|alumni|alumnus|alumna)\b/i;
+  if (formerIndicators.test(lowerTitle)) {
+    return false;
+  }
+  // Also reject titles that are explicitly "advisor" (vs current management)
+  // — advisors are listed separately, not part of management team
+  if (/\b(advisor|advisory|advisor to|board member|board observer)\b/i.test(lowerTitle)
+      && !/\b(managing|founder|principal|partner|director|officer)\b/i.test(lowerTitle)) {
+    return false;
+  }
+
   // Method 1: Full fund name appears in title (best match)
   if (lowerTitle.includes(lowerName)) {
     return true;

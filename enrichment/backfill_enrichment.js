@@ -57,7 +57,11 @@ async function getAllUnenrichedManagers(limit) {
   const enrichedNames = new Set((enriched || []).map(e => e.series_master_llc?.toLowerCase()));
   console.log(`[Backfill] Found ${enrichedNames.size} already enriched managers`);
 
-  // Get all Form D filings with series pattern using keyset pagination
+  // Production bug 2026-05-11: was `entityname ILIKE '%a series of%'`, which
+  // excluded all non-series-format pooled funds (Vaark Syndicate, etc.) from
+  // enrichment. Replaced with industrygrouptype gate; same manager-extraction
+  // logic for both series and non-series.
+  const { detectPlatform } = require('../lib/platform_detection');
   const seriesPattern = /,?\s+a\s+series\s+of\s+(.+?)(?:\s*,?\s*$|$)/i;
   const seen = new Set();
   const managers = [];
@@ -69,8 +73,9 @@ async function getAllUnenrichedManagers(limit) {
   while (managers.length < limit) {
     const { data: batch, error } = await formdClient
       .from('form_d_filings')
-      .select('id, entityname')
-      .ilike('entityname', '%a series of%')
+      .select('id, entityname, related_names, related_roles, nameofsigner')
+      .eq('industrygrouptype', 'Pooled Investment Fund')
+      .neq('isamendment', 'true')
       .gt('id', lastId)
       .order('id', { ascending: true })
       .limit(BATCH_SIZE);
@@ -84,28 +89,35 @@ async function getAllUnenrichedManagers(limit) {
     totalFilings += batch.length;
     lastId = batch[batch.length - 1].id;
 
-    // Extract unique series masters
     for (const filing of batch) {
-      const match = (filing.entityname || '').match(seriesPattern);
-      if (match) {
-        const masterLlc = match[1].trim();
-        const key = masterLlc.toLowerCase();
-
-        // Skip if already enriched, already seen, or admin umbrella
-        if (enrichedNames.has(key) || seen.has(key) || isAdminUmbrella(masterLlc)) {
-          continue;
-        }
-
-        seen.add(key);
-        managers.push({ series_master_llc: masterLlc });
-
-        if (managers.length >= limit) break;
+      const en = filing.entityname || '';
+      const platform = detectPlatform(filing);
+      let candidate = null;
+      const m = en.match(seriesPattern);
+      if (m) {
+        if (platform.is_platform) continue;  // platform-master not a real GP
+        candidate = m[1].trim();
+      } else {
+        // Non-series: strip suffixes to get firm-name prefix
+        candidate = en
+          .replace(/,?\s*(LP|LLC|L\.P\.|L\.L\.C\.|Ltd|Limited|Inc|Incorporated)\.?\s*$/i, '')
+          .replace(/\s+(Fund\s+)?[IVX]+$/i, '')
+          .replace(/\s+Fund\s+\d+$/i, '')
+          .trim();
+        const tokens = candidate.split(/\s+/).filter(t => /[a-zA-Z]/.test(t));
+        if (candidate.length < 4 || tokens.length < 2) continue;
       }
+      if (!candidate) continue;
+      const key = candidate.toLowerCase();
+      if (enrichedNames.has(key) || seen.has(key) || isAdminUmbrella(candidate)) continue;
+      seen.add(key);
+      managers.push({ series_master_llc: candidate });
+      if (managers.length >= limit) break;
     }
 
     if (batch.length < BATCH_SIZE) break;
 
-    console.log(`[Backfill] Scanned ${totalFilings} filings, found ${managers.length} unenriched...`);
+    console.log(`[Backfill] Scanned ${totalFilings} pooled-fund filings, found ${managers.length} unenriched...`);
   }
 
   console.log(`[Backfill] Total unenriched managers found: ${managers.length}`);
