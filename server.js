@@ -1331,19 +1331,28 @@ app.get('/api/funds/new-managers', async (req, res) => {
     // Both sides require ≥2 tokens: rejects ambiguous single-token firms
     // (KIG → KIG INVESTMENT MGMT; Capital Factory bare → CAPITAL FACTORY).
     // Acceptable tradeoff — detector lib catches single-token cases.
-    // Stopwords used ONLY for the "distinctive intersection ≥1" gate at the end.
-    // They aren't removed from the raw token sets (which keep "venture", "partner",
-    // etc. to enforce containment); they just don't count toward the distinctive-
-    // overlap requirement. Without this gate, "Front Porch Venture Partners SPV"
-    // would match "U.S. VENTURE PARTNERS" because {venture,partner} ⊆ mgr —
-    // requiring at least one shared NON-stopword token prevents that.
-    // "first" included because legal_name "VENTURE FIRST" → tokens {venture,first}
-    // were getting subsumed by "First Bight Ventures" via the same pattern.
-    const MATCH_STOPWORDS = new Set(['the','of','and','co','llc','lp','llp','ltd','inc','corp','fund','funds','capital','ventures','venture','partners','partner','holdings','group','management','mgmt','advisors','advisers','gp','master','feeder','series','spv','spvs','holding','first','new','global','international']);
+    // Stopwords used for the distinctive-overlap gate. They aren't removed from
+    // the raw token sets (which keep "venture", "partner", etc. to enforce
+    // containment); they just don't count toward "distinctive" gates.
+    // Added 2026-05-11: "investment(s)", "partnership(s)" — both common generic
+    // firm-name modifiers that lead to wrong matches when they're the only
+    // overlap.
+    const MATCH_STOPWORDS = new Set([
+      'the','of','and','co','llc','lp','llp','ltd','inc','corp','company',
+      'fund','funds','capital','ventures','venture','partners','partner','partnership','partnerships',
+      'holdings','holding','group','management','mgmt','advisors','advisers',
+      'gp','master','feeder','series','spv','spvs','investment','investments',
+      'first','new','global','international',
+    ]);
     const stem = (t) => (t.length >= 4 && t.endsWith('s') ? t.slice(0, -1) : t);
     const rawTokens = (s) => {
       const toks = (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(/\s+/).filter(Boolean);
       return new Set(toks.filter(t => t.length >= 2).map(stem));
+    };
+    const distinctiveOf = (tokens) => {
+      const out = new Set();
+      for (const t of tokens) if (!MATCH_STOPWORDS.has(t)) out.add(t);
+      return out;
     };
     const sharedDistinctive = (a, b) => {
       let n = 0;
@@ -1356,24 +1365,37 @@ app.get('/api/funds/new-managers', async (req, res) => {
         return advisersByNameExact[lowerName];
       }
       const mgrTokens = rawTokens(lowerName);
+      const mgrDist = distinctiveOf(mgrTokens);
       if (mgrTokens.size < 2) return null;
 
       for (const { names, adv } of advisersByNamePrefix) {
-        for (const name of names) {
+        for (let nameIdx = 0; nameIdx < names.length; nameIdx++) {
+          const name = names[nameIdx];
           if (!name) continue;
           const advTokens = rawTokens(name);
           if (advTokens.size < 2) continue;
-          // Require at least 1 NON-stopword token shared between the names.
-          // Otherwise {venture, partner} alone would match "Front Porch Venture
-          // Partners" to "U.S. Venture Partners" — both have only stopword overlap.
+          // Production bug 2026-05-11: short adviser_entity_legal_name values
+          // like "ANCHOR CAPITAL" (2 tokens) are common prefixes across many
+          // unrelated firms. Skip legal_name matching when ≤2 raw tokens —
+          // adviser_name (the primary field) is more specific.
+          // names[0] = adviser_name, names[1] = adviser_entity_legal_name.
+          if (nameIdx === 1 && advTokens.size <= 2) continue;
           if (sharedDistinctive(mgrTokens, advTokens) < 1) continue;
-          // Direction A: adv tokens ⊆ mgr tokens (adviser name fully inside manager)
+          const advDist = distinctiveOf(advTokens);
+          // Direction A: adv ⊆ mgr (adviser name fully inside manager).
+          // Reject if mgr has DISTINCTIVE tokens that adv lacks — those extras
+          // suggest a different firm (e.g., AGC AI Nexus Fund vs AI FUNDS).
           if (advTokens.size <= mgrTokens.size && [...advTokens].every(t => mgrTokens.has(t))) {
-            return adv;
+            const mgrExtraDist = [...mgrDist].filter(t => !advDist.has(t));
+            if (mgrExtraDist.length === 0) return adv;
           }
-          // Direction B: mgr tokens ⊆ adv tokens (manager name fully inside adviser)
+          // Direction B: mgr ⊆ adv (manager name fully inside adviser).
+          // Reject if adv has DISTINCTIVE tokens that mgr lacks (e.g.,
+          // Forge Investments vs VALLEY FORGE INVESTMENT CONSULTANTS;
+          // Infinitas Capital Master vs BLUE INFINITAS CAPITAL).
           if (mgrTokens.size <= advTokens.size && [...mgrTokens].every(t => advTokens.has(t))) {
-            return adv;
+            const advExtraDist = [...advDist].filter(t => !mgrDist.has(t));
+            if (advExtraDist.length === 0) return adv;
           }
         }
       }
