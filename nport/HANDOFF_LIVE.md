@@ -68,7 +68,8 @@ Daily Q2-to-date ingestion was run for the 45-day window ending 2026-05-11,
 a 2-day catch-up was run on 2026-05-12, and a 3-day catch-up was run on
 2026-05-14.
 
-Latest read-only preflight counts after the daily replay and identifier cleanup:
+Latest read-only preflight counts after the daily replay, identifier cleanup,
+and materialized-view refresh:
 
 ```text
 private_companies: 843
@@ -82,7 +83,7 @@ nport_holdings_ncsr: 0
 fund_portfolio_managers: 0
 fund_ncen_records: 0
 position_deltas: 0
-nport_company_positions_mv: 0
+nport_company_positions_mv: 52453
 ```
 
 Daily-specific coverage checks:
@@ -118,6 +119,14 @@ Anthropic API fallback smoke unchanged: 320 positions, 37 current holders,
 latest period_date 2026-02-28
 ```
 
+May 14 materialized-view refresh:
+
+```text
+REFRESH MATERIALIZED VIEW nport_company_positions_mv; completed in Supabase
+nport_company_positions_mv: 52453
+Anthropic API smoke now uses source=materialized_view
+```
+
 The daily identifier cleanup backed up the noisy pre-fix rows here before
 deleting them:
 
@@ -125,22 +134,20 @@ deleting them:
 /private/tmp/nport_daily_identifiers_backup_before_cleanup.jsonl
 ```
 
-`nport_company_positions_mv` is empty until this SQL is run in Supabase:
+After future bulk or daily ingestion, refresh the company positions
+materialized view before product review:
 
 ```sql
 REFRESH MATERIALIZED VIEW nport_company_positions_mv;
 ```
 
-Do the refresh after the active daily scraper finishes or after intentionally
-stopping it, otherwise the MV will not include the most recent Q2 rows.
+Run the refresh after the active daily scraper finishes or after intentionally
+stopping it, otherwise the MV will not include the most recent rows.
 
-At handoff time, browser-based refresh was blocked because Chrome automation
-returned a user-denied permission response. The SQL above still needs to be run
-manually in Supabase SQL Editor or through an authenticated SQL-capable tool.
-
-The API now has a defensive base-table fallback for company/fund position
-routes, so smoke checks and product review can proceed before the MV refresh.
-The fallback reconstructs MV-shaped rows from `nport_holdings`,
+The API also has a defensive base-table fallback for company/fund position
+routes, so smoke checks and product review can proceed if the MV is empty or
+stale after a future ingestion batch. The fallback reconstructs MV-shaped rows
+from `nport_holdings`,
 `nport_filings`, `nport_registrants`, and `private_companies`. The fallback
 uses 1000-row keyset pages for holdings reads so it does not violate PFR's
 Supabase read ceiling.
@@ -158,12 +165,12 @@ year-end, not the portfolio snapshot date. User-facing latest-holder and
 timeseries API responses group/sort on `report_period_date` first and preserve
 the fiscal year-end separately as `report_period_end`.
 
-Live API smoke check after the fallback/date patch:
+Live API smoke check after the MV refresh:
 
 ```text
 GET /api/nport/companies/anthropic/positions?page=1&pageSize=5
   total: 320
-  source: base_tables
+  source: materialized_view
   first period_date: 2026-02-28
   first fiscal_year_end: 2026-08-31
   first registrant: Growth Fund of America
@@ -306,9 +313,8 @@ nport/scripts/witness_check.sh
 
 ## Still Pending
 
-- Refresh `nport_company_positions_mv`.
-- Run post-refresh company-page smoke checks against `anthropic`; API fallback
-  smoke checks already pass before refresh.
+- Run `REFRESH MATERIALIZED VIEW nport_company_positions_mv;` again after
+  future ingestion batches.
 - Start N-CEN, N-1A, and N-CSR enrichment jobs if those enrichments are needed
   before product integration.
 - Decide whether to keep this as the isolated N-PORT branch or merge a one-line

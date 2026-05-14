@@ -24,8 +24,13 @@ if [[ -f .env ]]; then
   source .env
   set +a
 fi
-./.venv/bin/python -m nport.scraper.preflight_live
+PREFLIGHT_OUTPUT="$(./.venv/bin/python -m nport.scraper.preflight_live)"
+echo "$PREFLIGHT_OUTPUT"
 
 echo
-echo "Witness check complete. If nport_company_positions_mv is 0, run:"
-echo "  REFRESH MATERIALIZED VIEW nport_company_positions_mv;"
+if echo "$PREFLIGHT_OUTPUT" | grep -q "nport_company_positions_mv: 0"; then
+  echo "Witness check complete. nport_company_positions_mv is empty; run:"
+  echo "  REFRESH MATERIALIZED VIEW nport_company_positions_mv;"
+else
+  echo "Witness check complete. nport_company_positions_mv has rows."
+fi

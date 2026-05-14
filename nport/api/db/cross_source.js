@@ -93,7 +93,8 @@ async function getCrossSourceCompanyView(slug, deps = {}) {
     .from('nport_company_positions_mv')
     .select('*')
     .eq('company_slug', slug)
-    .order('report_period_date', { ascending: false });
+    .order('report_period_date', { ascending: false })
+    .order('currency_value_usd', { ascending: false, nullsFirst: false });
 
   // Use ilike for permissive name match against Form D entity columns.
   const safeName = String(company.display_name || '').replace(/[%,]/g, ' ').trim();

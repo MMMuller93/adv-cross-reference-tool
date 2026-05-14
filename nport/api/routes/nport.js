@@ -265,7 +265,8 @@ async function fetchCompanyPositions(deps, slug, { page, pageSize, offset, maxRo
     .from('nport_company_positions_mv')
     .select('*', { count: 'exact' })
     .eq('company_slug', slug)
-    .order('report_period_date', { ascending: false });
+    .order('report_period_date', { ascending: false })
+    .order('currency_value_usd', { ascending: false, nullsFirst: false });
   if (pageSize !== undefined && offset !== undefined) {
     mvQuery = mvQuery.range(offset, offset + pageSize - 1);
   }
@@ -274,7 +275,7 @@ async function fetchCompanyPositions(deps, slug, { page, pageSize, offset, maxRo
   if ((mvRows || []).length > 0 || (count || 0) > 0) {
     return {
       company,
-      positions: mvRows || [],
+      positions: sortPositions(mvRows || []),
       total: count || (mvRows || []).length,
       source: 'materialized_view',
     };
@@ -778,6 +779,7 @@ router.get('/funds/:cik/:series_id/positions', async (req, res) => {
       .in('registrant_cik', variants)
       .eq('series_id', seriesId)
       .order('report_period_date', { ascending: false })
+      .order('currency_value_usd', { ascending: false, nullsFirst: false })
       .range(offset, offset + pageSize - 1);
     if (error) throw error;
     let positions = data || [];

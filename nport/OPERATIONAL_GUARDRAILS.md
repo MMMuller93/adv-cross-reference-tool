@@ -13,9 +13,10 @@ contains no secrets.
 - A user-facing API fallback initially treated `REPORT_ENDING_PERIOD` as the
   latest holdings period. SEC docs and real `SUBMISSION.tsv` rows show that is
   the fund fiscal year-end; `REPORT_DATE` is the holdings snapshot date.
-- The live materialized view remains unrefreshed. The base-table API fallback is
-  useful for smoke checks, but it is not a substitute for refreshing and
-  verifying `nport_company_positions_mv` before product integration.
+- The live materialized view must be refreshed after ingestion batches. The
+  base-table API fallback is useful for smoke checks, but it is not a substitute
+  for refreshing and verifying `nport_company_positions_mv` before product
+  integration.
 - Admin mutation routes must stay protected by `NPORT_ADMIN_TOKEN`. Do not
   expose alias creation or resolution refresh endpoints with only service-key
   server config as the guard.
@@ -50,16 +51,23 @@ contains no secrets.
    `SUPABASE_URL_NPORT`, `SUPABASE_SERVICE_KEY_NPORT`, `NPORT_ADMIN_TOKEN`,
    `ADV_SUPABASE_ANON_KEY`, and `FORMD_SUPABASE_ANON_KEY`.
 
-## Current Blocker
+## Current State
 
-Supabase SQL access is still needed for:
+The materialized view was refreshed on 2026-05-14:
+
+```text
+nport_company_positions_mv: 52453
+Anthropic company positions source: materialized_view
+```
+
+After future bulk or daily ingestion, run:
 
 ```sql
 REFRESH MATERIALIZED VIEW nport_company_positions_mv;
 ```
 
-The project ref is `figvonwrlcpveyceengf`; the dashboard URL is documented in
-`nport/HANDOFF_LIVE.md`.
+Production completion remains gated on intentionally merging the N-PORT mount,
+deploying, and verifying `privatefundsradar.com`.
 
 ## Overnight Work Rule
 

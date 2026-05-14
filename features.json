@@ -4,13 +4,13 @@
     "description": "Compliance detection system for Form D/ADV cross-reference analysis",
     "port": 3009,
     "created_at": "2025-11",
-    "last_updated": "2026-05-12"
+    "last_updated": "2026-05-14"
   },
   "session_state": {
     "current_session": 11,
     "last_working_commit": "05456fa",
     "environment_verified": true,
-    "notes": "N-PORT isolated live ingestion loaded through 2026Q1 bulk plus Q2-to-date daily catch-up on 2026-05-14. API fallback smoke checks pass before MV refresh. MV refresh remains pending because SQL editor/browser access was blocked."
+    "notes": "N-PORT isolated live ingestion loaded through 2026Q1 bulk plus Q2-to-date daily catch-up on 2026-05-14. Materialized view refreshed and Anthropic API smoke checks now use source=materialized_view."
   },
   "features": [
     {
@@ -26,10 +26,10 @@
         "Materialized company positions view refreshed"
       ],
       "priority": 1,
-      "status": "blocked",
-      "passes": false,
-      "tested_at": "2026-05-12",
-      "notes": "Bulk and daily ingestion loaded in pfr-nport through the 2026-05-14 catch-up. Latest live counts: nport_filings=57407, nport_holdings=315872. Tests pass, daily coverage checks pass, Anthropic API fallback smoke passes, fallback reads now use 1000-row keyset pages, admin routes require NPORT_ADMIN_TOKEN, and cross-source JWTs were moved to env vars. Witness status is PARTIAL because nport_company_positions_mv is still 0. Blocked only on running REFRESH MATERIALIZED VIEW nport_company_positions_mv in Supabase SQL editor."
+      "status": "done",
+      "passes": true,
+      "tested_at": "2026-05-14",
+      "notes": "Bulk and daily ingestion loaded in pfr-nport through the 2026-05-14 catch-up. Latest live counts: nport_filings=57407, nport_holdings=315872, nport_company_positions_mv=52453. Tests pass, daily coverage checks pass, Anthropic API smoke now uses source=materialized_view with 320 positions and 37 current holders. Fallback reads use 1000-row keyset pages, admin routes require NPORT_ADMIN_TOKEN, and cross-source JWTs were moved to env vars. Production integration remains a separate deploy/mount step."
     },
     {
       "id": "feat-001",
@@ -218,10 +218,11 @@
     }
   ],
   "completed_features": [
+    "nport-001",
     "feat-001", "feat-002", "feat-003", "feat-004",
     "radar-001", "radar-002", "radar-003", "radar-004", "radar-005"
   ],
-  "blocked_features": ["nport-001"],
+  "blocked_features": [],
   "known_issues": [
     {
       "id": "issue-001",
@@ -249,8 +250,10 @@
     }
   ],
   "next_actions": [
-    "Run REFRESH MATERIALIZED VIEW nport_company_positions_mv in pfr-nport Supabase SQL editor",
-    "After MV refresh, smoke-test Anthropic company positions from nport_company_positions_mv",
+    "Commit and push the isolated N-PORT branch when ready",
+    "Set production env vars before any main-app mount: SUPABASE_URL_NPORT, SUPABASE_SERVICE_KEY_NPORT, NPORT_ADMIN_TOKEN, ADV_SUPABASE_ANON_KEY, FORMD_SUPABASE_ANON_KEY",
+    "Merge the intentional one-line N-PORT mount into the main PFR app only when ready for production review",
+    "Run post-merge production smoke checks on privatefundsradar.com",
     "Verify frontend displays in browser (fund types, EDGAR links, adviser loading)",
     "Run updated detect_compliance_issues.js to validate ADV filing detector accuracy",
     "Re-inspect Form D/ADV matching quality (match-001)",

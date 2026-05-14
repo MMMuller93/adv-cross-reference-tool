@@ -5,7 +5,7 @@
 - **Port**: 3009
 - **Goal**: Comprehensive intelligence platform for private fund managers
 - **Started**: 2025-11
-- **Last Updated**: 2026-05-12
+- **Last Updated**: 2026-05-14
 - **Version**: 2.7.0
 
 ---
@@ -23,16 +23,23 @@
 ## Active Task
 **Currently Working On**: N-PORT live ingestion in isolated `nport/` subtree
 **Feature ID**: N-PORT private-company holdings database
-**Status**: Bulk + daily live ingestion loaded through 2026-05-14; API fallback smoke-tested; MV refresh blocked pending SQL access
+**Status**: Bulk + daily live ingestion loaded through 2026-05-14; materialized view refreshed and smoke-tested
 
 ### Recent Completion (Session May 14, 2026)
+
+✅ **N-PORT materialized-view refresh**
+- User ran `REFRESH MATERIALIZED VIEW nport_company_positions_mv;` in Supabase
+- Read-only preflight now reports `nport_company_positions_mv=52453`
+- Anthropic API smoke uses `source=materialized_view`: 320 positions, 37 current holders, latest `period_date=2026-02-28`
+- Latest Anthropic top holder from MV smoke: Growth Fund of America, `$1,315,268,824.79`
+- Updated MV-backed API ordering so current-position pages sort by latest snapshot date, then `currency_value_usd`
 
 ✅ **N-PORT daily catch-up**
 - Ran 3-day daily NPORT-P/NPORT-P/A catch-up for filings through 2026-05-14
 - Parsed 32 filings; kept 41 private-company holdings
 - Live counts now: `nport_registrants=1589`, `nport_filings=57407`, `nport_holdings=315872`, `nport_identifiers=667711`
 - Anthropic fallback smoke unchanged: 320 positions, 37 current holders, latest `period_date=2026-02-28`
-- Still pending: `REFRESH MATERIALIZED VIEW nport_company_positions_mv;`
+- Future ingestion batches still need a follow-up `REFRESH MATERIALIZED VIEW nport_company_positions_mv;`
 
 ### Recent Completion (Session May 12, 2026)
 
@@ -48,8 +55,7 @@
 - Ran May 12 two-day daily catch-up: 16 filings parsed, 0 private holdings kept, live row counts unchanged
 - Live smoke: Anthropic positions total `320`, source `base_tables`; current holders `37` for `2026-02-28`; timeseries points `32`
 - Tests: `npm test` in `nport/api` → 30 passed; `./.venv/bin/python -m pytest nport -q` → 163 passed
-- Witness status: PARTIAL because MV refresh is still blocked and `nport_company_positions_mv=0`
-- Still pending: run `REFRESH MATERIALIZED VIEW nport_company_positions_mv;` in Supabase SQL editor or another SQL-capable authenticated tool
+- Historical note: this witness status was PARTIAL at the time because MV refresh was still blocked and `nport_company_positions_mv=0`; the May 14 refresh resolved that blocker.
 
 ### Recent Completion (Session May 11, 2026)
 
@@ -75,7 +81,7 @@
 - Backed up and deleted noisy pre-fix daily identifiers: `/private/tmp/nport_daily_identifiers_backup_before_cleanup.jsonl`
 - Backed up pre-repair daily holdings: `/private/tmp/nport_daily_scrape_backup_before_fvl_repair.jsonl`
 - Tests: `./.venv/bin/python -m pytest nport/scraper/tests nport/tests/integration/test_e2e_pipeline.py -q` → 42 passed
-- Pending: `REFRESH MATERIALIZED VIEW nport_company_positions_mv;` in Supabase SQL editor, then post-refresh Anthropic smoke test
+- Historical note: at the end of this session, `REFRESH MATERIALIZED VIEW nport_company_positions_mv;` and the post-refresh Anthropic smoke test were still pending; both were completed on 2026-05-14.
 
 ### Recent Completion (Session Jan 4, 2026)
 
