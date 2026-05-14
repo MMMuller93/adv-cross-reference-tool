@@ -320,6 +320,7 @@ const CompanyPage = ({ slug }) => {
   const [error, setError] = useStateN(null);
   const [main, setMain] = useStateN(null);          // /companies/:slug
   const [timeseries, setTimeseries] = useStateN(null); // /timeseries
+  const [holdersPayload, setHoldersPayload] = useStateN(null); // /holders
   const [markupsPayload, setMarkupsPayload] = useStateN(null); // /markups
   const [cross, setCross] = useStateN(null);          // /cross
 
@@ -327,9 +328,10 @@ const CompanyPage = ({ slug }) => {
     let cancelled = false;
     async function load() {
       setLoading(true); setError(null);
-      const [a, b, c, d] = await Promise.all([
+      const [a, b, c, d, e] = await Promise.all([
         fetchNport(`/api/nport/companies/${encodeURIComponent(slug)}`),
         fetchNport(`/api/nport/companies/${encodeURIComponent(slug)}/timeseries`),
+        fetchNport(`/api/nport/companies/${encodeURIComponent(slug)}/holders`),
         fetchNport(`/api/nport/companies/${encodeURIComponent(slug)}/markups`),
         fetchNport(`/api/nport/companies/${encodeURIComponent(slug)}/cross`)
       ]);
@@ -337,8 +339,9 @@ const CompanyPage = ({ slug }) => {
       if (!a.ok || !a.data) { setError(a.error || 'Company not found'); setLoading(false); return; }
       setMain(a.data);
       setTimeseries(b.ok ? b.data : null);
-      setMarkupsPayload(c.ok ? c.data : null);
-      setCross(d.ok ? d.data : null);
+      setHoldersPayload(c.ok ? c.data : null);
+      setMarkupsPayload(d.ok ? d.data : null);
+      setCross(e.ok ? e.data : null);
       setLoading(false);
     }
     load();
@@ -354,10 +357,23 @@ const CompanyPage = ({ slug }) => {
 
   const company = main.company;
   const latestMarks = main.latest_marks || { report_period_end: null, classes: [] };
-  const topHolders = main.top_holders || [];
+  const holderRows = ((holdersPayload && holdersPayload.holders) || []).map((h) => ({
+    ...h,
+    value_usd: h.value_usd ?? h.total_value_usd ?? h.currency_value_usd,
+    share_class: h.share_class ?? h.share_class_normalized,
+  }));
+  const topHolders = main.top_holders || holderRows;
   const markups = (markupsPayload && markupsPayload.markups) || main.markups || [];
   const history = (markupsPayload && markupsPayload.history) || [];
-  const tsPoints = (timeseries && timeseries.points) || [];
+  const tsPoints = ((timeseries && (timeseries.points || timeseries.series)) || []).map((p) => ({
+    ...p,
+    period: p.period || p.report_period_date || p.report_period_end,
+    value_usd: p.value_usd ?? p.total_value_usd,
+  }));
+  const crossFormDFilings = (cross && (cross.form_d_filings || cross.formDFilings)) || [];
+  const crossRelatedAdvisers = (cross && (cross.related_advisers || cross.relatedAdvisers)) || [];
+  const disclosedValue = company.total_disclosed_usd ?? topHolders.reduce((sum, h) => sum + (Number(h.value_usd) || 0), 0);
+  const distinctFilers = company.distinct_filers ?? new Set(topHolders.map((h) => h.registrant_id || h.registrant_cik || h.registrant_name)).size;
 
   return (
     <PageChrome breadcrumb={`company / ${slug}`}>
@@ -389,8 +405,8 @@ const CompanyPage = ({ slug }) => {
         </div>
 
         <div className="mt-6 grid grid-cols-2 md:grid-cols-5 gap-4">
-          <Stat label="Disclosed N-PORT exposure" value={fmtUsd(company.total_disclosed_usd)} hint="latest period" />
-          <Stat label="Distinct fund-family holders" value={fmtInt(company.distinct_filers)} />
+          <Stat label="Disclosed N-PORT exposure" value={fmtUsd(disclosedValue)} hint="latest period" />
+          <Stat label="Distinct fund-family holders" value={fmtInt(distinctFilers)} />
           <Stat label="Last known valuation" value={fmtUsd(company.latest_known_valuation_usd)} />
           <Stat label="Total funding to date" value={fmtUsd(company.total_funding_usd)} />
           <Stat label="Sector" value={titleCaseSector(company.sector)} />
@@ -514,11 +530,11 @@ const CompanyPage = ({ slug }) => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div>
             <h3 className="text-xs uppercase tracking-wider text-gray-500 mb-2">Form D filings mentioning {company.display_name}</h3>
-            {(!cross || cross.form_d_filings.length === 0) ? (
+            {crossFormDFilings.length === 0 ? (
               <p className="text-sm text-gray-500">No Form D filings on record.</p>
             ) : (
               <ul className="space-y-2">
-                {cross.form_d_filings.map((f) => (
+                {crossFormDFilings.map((f) => (
                   <li key={f.accession} className="text-xs text-gray-700 flex items-start justify-between gap-3 py-2 border-b border-gray-50 last:border-b-0">
                     <div className="min-w-0">
                       <div className="font-medium text-gray-900 truncate">{f.entityname}</div>
@@ -535,11 +551,11 @@ const CompanyPage = ({ slug }) => {
           </div>
           <div>
             <h3 className="text-xs uppercase tracking-wider text-gray-500 mb-2">ADV-registered advisers holding {company.display_name}</h3>
-            {(!cross || cross.related_advisers.length === 0) ? (
+            {crossRelatedAdvisers.length === 0 ? (
               <p className="text-sm text-gray-500">No related ADV records.</p>
             ) : (
               <ul className="space-y-2">
-                {cross.related_advisers.map((a) => (
+                {crossRelatedAdvisers.map((a) => (
                   <li key={a.crd} className="text-xs text-gray-700 flex items-start justify-between gap-3 py-2 border-b border-gray-50 last:border-b-0">
                     <div className="min-w-0">
                       <div className="font-medium text-gray-900 truncate">{a.adviser_name}</div>

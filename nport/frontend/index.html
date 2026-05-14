@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
       body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
@@ -29,9 +30,9 @@
         </p>
       </div>
     </main>
-    <script src="mocks/nport.js"></script>
-    <script src="nport_pages.js"></script>
-    <script>
+    <script src="/mocks/nport.js"></script>
+    <script type="text/babel" src="/nport_pages.js"></script>
+    <script type="text/babel">
       // Mount NportRouter on the matched route. This file lives in
       // nport/frontend/ and is served by nport/api/server.js as static.
       (function () {
