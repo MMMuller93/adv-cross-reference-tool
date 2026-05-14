@@ -4325,16 +4325,46 @@ function App() {
                                   const normalized = names.map((n, i) => ({
                                     name: normalizeRelatedPartyName(n.trim()),
                                     role: roles[i] || ''
-                                  })).filter(item => item.name); // Remove nulls
+                                  })).filter(item => item.name);
 
-                                  return normalized.length > 0 ? (
+                                  // When user is searching, prioritize related parties whose name
+                                  // matches the search term. The Funds search OR-matches both the
+                                  // fund entityname AND related_names server-side; previously the
+                                  // 2-row truncation could hide the matched person, making the search
+                                  // look broken (e.g., Biophytis SA matched on "Claude Allary" who
+                                  // was party #9 of 9 — invisible in the collapsed view).
+                                  const q = (searchTerm || '').trim().toLowerCase();
+                                  const sorted = q
+                                    ? [...normalized].sort((a, b) => {
+                                        const aM = a.name.toLowerCase().includes(q) ? 1 : 0;
+                                        const bM = b.name.toLowerCase().includes(q) ? 1 : 0;
+                                        return bM - aM;
+                                      })
+                                    : normalized;
+                                  const visible = sorted.slice(0, 2);
+                                  const remaining = sorted.length - visible.length;
+                                  const hiddenMatches = q
+                                    ? sorted.slice(2).filter(x => x.name.toLowerCase().includes(q)).length
+                                    : 0;
+
+                                  return sorted.length > 0 ? (
                                     <div className="space-y-1">
-                                      {normalized.slice(0, 2).map((item, i) => (
-                                        <div key={i}>
-                                          <div className="text-[11px] text-gray-700">{item.name}</div>
-                                          {item.role && <div className="text-[9px] text-gray-400">{item.role.trim()}</div>}
+                                      {visible.map((item, i) => {
+                                        const isMatch = q && item.name.toLowerCase().includes(q);
+                                        return (
+                                          <div key={i}>
+                                            <div className={isMatch ? "text-[11px] text-amber-700 font-medium" : "text-[11px] text-gray-700"}>
+                                              {item.name}{isMatch ? " ★" : ""}
+                                            </div>
+                                            {item.role && <div className="text-[9px] text-gray-400">{item.role.trim()}</div>}
+                                          </div>
+                                        );
+                                      })}
+                                      {remaining > 0 && (
+                                        <div className="text-[9px] text-gray-400 italic">
+                                          +{remaining} more{hiddenMatches > 0 ? ` (${hiddenMatches} match${hiddenMatches === 1 ? '' : 'es'})` : ""}
                                         </div>
-                                      ))}
+                                      )}
                                     </div>
                                   ) : (
                                     <span className="text-[11px] text-gray-400">—</span>
