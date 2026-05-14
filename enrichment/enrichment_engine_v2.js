@@ -1602,6 +1602,52 @@ async function enrichManager(name, options = {}) {
     enrichmentData.data_sources.push('linkedin');
     console.log(`[Enrichment] LinkedIn: ${enrichmentData.linkedin_company_url}`);
   }
+
+  // FALLBACK: derive website from LinkedIn company slug.
+  //
+  // Production case 2026-05-14 (4th 1 Ventures LLC):
+  //   - Brave/Google search found 4thand1ventures.com
+  //   - extractWebsite picked it
+  //   - validateWebsiteWithAI rejected it (confidence < 0.5) because the site
+  //     brand uses "4th & 1 Ventures" (ampersand) and query was "4th 1 Ventures"
+  //   - LinkedIn search separately found linkedin.com/company/4thand1ventures
+  //   - The LinkedIn SLUG ("4thand1ventures") IS the website domain
+  //
+  // When LinkedIn slug is present AND website is missing, HEAD-check
+  // `https://www.<slug>.com` and `https://<slug>.com`. If reachable, accept.
+  // LinkedIn slugs are chosen by verified company admins; multi-source
+  // corroboration (LinkedIn + reachable domain) is a stronger signal than
+  // the AI's brand-name strict match.
+  if (!enrichmentData.website_url && enrichmentData.linkedin_company_url) {
+    const slugMatch = enrichmentData.linkedin_company_url.match(/linkedin\.com\/company\/([^\/?#]+)/i);
+    if (slugMatch && slugMatch[1]) {
+      const slug = slugMatch[1].toLowerCase().replace(/[^a-z0-9-]/g, '');
+      // skip if slug is purely numeric (e.g., "12345") or too short
+      if (slug.length >= 4 && !/^[0-9-]+$/.test(slug)) {
+        const candidates = [`https://www.${slug}.com`, `https://${slug}.com`];
+        for (const url of candidates) {
+          try {
+            const res = await fetchWithTimeout(url, {
+              method: 'HEAD',
+              redirect: 'follow',
+              headers: { 'User-Agent': 'Mozilla/5.0 (FundRadar/1.0)' },
+            }, 6000);
+            if (res.status >= 200 && res.status < 400) {
+              // Use the final URL (after redirects) when available
+              const finalUrl = res.url && res.url.startsWith('http') ? res.url : url;
+              enrichmentData.website_url = finalUrl;
+              enrichmentData.data_sources.push('website_from_linkedin_slug');
+              // Clear the validation-failed flag — the LinkedIn corroboration overrides
+              enrichmentData.flagged_issues = (enrichmentData.flagged_issues || [])
+                .filter(f => f !== 'website_validation_failed');
+              console.log(`[Enrichment] Derived website from LinkedIn slug "${slug}": ${finalUrl}`);
+              break;
+            }
+          } catch (e) { /* try next candidate */ }
+        }
+      }
+    }
+  }
   
   // Extract Twitter (skip API call if already have from external DB)
   if (!enrichmentData.twitter_handle) {

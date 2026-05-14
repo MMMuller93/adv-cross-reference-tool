@@ -116,25 +116,30 @@ async function getRecentManagers(limit) {
   // Extract manager identity using the SAME logic the detector uses.
   // For "a series of X" filings, uses the series master.
   // For non-series filings (e.g., "Vaark Syndicate I LLC"), uses entityname prefix.
-  // Platform-admin'd filings (Sydecar, AngelList admin-only, Assure, etc.) route
-  // to the real GP via related_names.
-  const { detectPlatform } = require('../lib/platform_detection');
+  //
+  // BUG FIX 2026-05-14: previously skipped any filing whose related_names
+  // mentioned a platform admin (e.g., "LLC Sydecar | Brett Sagan"). That over-
+  // skipped real GPs — "Ancient Crunch a Series of 4th 1 Ventures LLC" has
+  // 4th 1 Ventures as the real manager AND Sydecar as the platform admin in
+  // related_names. We were silently dropping all such managers. Now we only
+  // skip when the SERIES-MASTER itself is a known platform LLC (CGF2021,
+  // Roll Up Vehicles, Angellist-GP-Funds, etc.) — i.e., the platform's own
+  // admin shell, not a real GP.
+  const { isAdminUmbrella } = require('../lib/platform_detection');
   const seriesPattern = /,?\s+a\s+series\s+of\s+(.+?)(?:\s*,?\s*$|$)/i;
   const seen = new Set();
   const managers = [];
 
   for (const filing of sortedFilings) {
     const en = filing.entityname || '';
-    const platform = detectPlatform(filing);
     let candidate;
     const seriesMatch = en.match(seriesPattern);
     if (seriesMatch) {
       candidate = seriesMatch[1].trim();
-      // If the series-master IS the platform (Sydecar/CGF2021/Roll Up Vehicles/etc.),
-      // skip — the platform isn't the GP; the real manager-identity needs deeper work
-      // that the enrichment engine isn't equipped to do for these. They show on the
-      // tab as platform-routed; not enriched here.
-      if (platform.is_platform) continue;
+      // Skip ONLY when the series-master itself is a platform admin LLC.
+      // Mentions of Sydecar/AngelList in related_names alone DON'T disqualify:
+      // those are platform admin signals, not GP signals.
+      if (isAdminUmbrella(candidate)) continue;
     } else {
       // Non-series: strip suffixes to get firm-name prefix
       candidate = en

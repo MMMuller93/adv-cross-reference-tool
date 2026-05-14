@@ -61,7 +61,9 @@ async function getAllUnenrichedManagers(limit) {
   // excluded all non-series-format pooled funds (Vaark Syndicate, etc.) from
   // enrichment. Replaced with industrygrouptype gate; same manager-extraction
   // logic for both series and non-series.
-  const { detectPlatform } = require('../lib/platform_detection');
+  // BUG FIX 2026-05-14: only skip when series-master is a platform LLC,
+  // not when related_names mentions a platform admin. See enrich_recent.js.
+  const { isAdminUmbrella: isPlatformMaster } = require('../lib/platform_detection');
   const seriesPattern = /,?\s+a\s+series\s+of\s+(.+?)(?:\s*,?\s*$|$)/i;
   const seen = new Set();
   const managers = [];
@@ -91,12 +93,11 @@ async function getAllUnenrichedManagers(limit) {
 
     for (const filing of batch) {
       const en = filing.entityname || '';
-      const platform = detectPlatform(filing);
       let candidate = null;
       const m = en.match(seriesPattern);
       if (m) {
-        if (platform.is_platform) continue;  // platform-master not a real GP
         candidate = m[1].trim();
+        if (isPlatformMaster(candidate)) continue;  // platform's own shell, not a real GP
       } else {
         // Non-series: strip suffixes to get firm-name prefix
         candidate = en
