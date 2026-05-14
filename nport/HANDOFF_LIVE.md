@@ -324,6 +324,13 @@ nport/scripts/witness_check.sh
 - Company and fund position APIs fall back to base-table joins when the
   materialized view is empty, and current-period rollups use the actual
   portfolio snapshot date instead of fiscal year-end.
+- Current-holder rollups now use the latest available filing per fund/security,
+  not the single latest company-wide date. This prevents one newer monthly filer
+  from hiding other still-current holders whose latest public N-PORT snapshot is
+  a nearby earlier month-end.
+- Company holder tables show `First seen`, defined as the earliest public
+  N-PORT snapshot for that exact fund/security. This is not an acquisition date;
+  true purchase/acquisition dates require N-CSR enrichment.
 - The standalone server serves `/company/:slug`, `/fund/:cik/:series_id`, and
   `/admin/unresolved` through the N-PORT SPA so the local dashboard is directly
   usable on port `3010`.

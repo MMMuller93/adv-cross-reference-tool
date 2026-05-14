@@ -670,7 +670,7 @@ const CompanyPage = ({ slug }) => {
       </div>
 
       {/* Current holders table */}
-      <SectionCard title="Current holders" subtitle={`Fund positions reported for ${fmtDate(latestSnapshotDate)} — ranked by reported value`}>
+      <SectionCard title="Current holders" subtitle={`Latest available filing per fund/security through ${fmtDate(latestSnapshotDate)} — first seen is the earliest public N-PORT snapshot`}>
         {topHolders.length === 0 ? (
           <p className="text-sm text-gray-500">No holders reported.</p>
         ) : (
@@ -680,6 +680,7 @@ const CompanyPage = ({ slug }) => {
                 <tr>
                   <th className="text-left py-2 pr-3">Fund family</th>
                   <th className="text-left pr-3">Portfolio snapshot</th>
+                  <th className="text-left pr-3">First seen</th>
                   <th className="text-right pr-3">Reported value</th>
                   <th className="text-right pr-3">% of fund NAV</th>
                   <th className="text-right pr-3">Shares / units</th>
@@ -706,6 +707,7 @@ const CompanyPage = ({ slug }) => {
                           </div>
                         </td>
                         <td className="py-2.5 pr-3 text-gray-700">{fmtDate(h.report_period_date)}</td>
+                        <td className="py-2.5 pr-3 text-gray-700">{fmtDate(h.first_seen_report_date)}</td>
                         <td className="py-2.5 pr-3 text-right tabular-nums font-semibold text-gray-900">{fmtUsd(h.value_usd)}</td>
                         <td className="py-2.5 pr-3 text-right tabular-nums text-gray-700">{h.pct_of_nav != null ? fmtPct(h.pct_of_nav, false) : '—'}</td>
                         <td className="py-2.5 pr-3 text-right tabular-nums text-gray-700">{fmtDecimal(h.balance, 0)}</td>
@@ -726,11 +728,13 @@ const CompanyPage = ({ slug }) => {
                       </tr>
                       {isExpanded && (
                         <tr className="bg-slate-50/70 border-b border-gray-100">
-                          <td colSpan="7" className="px-4 py-3">
+                          <td colSpan="8" className="px-4 py-3">
                             <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
                               <Detail label="Raw security name" value={h.raw_issuer_name} />
                               <Detail label="Raw security title" value={h.raw_issuer_title} className="md:col-span-2" />
                               <Detail label="SEC accession" value={h.accession_number} mono />
+                              <Detail label="First public N-PORT appearance" value={fmtDate(h.first_seen_report_date)} />
+                              <Detail label="First-seen accession" value={h.first_seen_accession_number} mono />
                               <Detail label="Fund net assets" value={fmtUsd(h.net_assets_usd)} />
                               <Detail label="Fund total assets" value={fmtUsd(h.total_assets_usd)} />
                               <Detail label="N-PORT filed" value={fmtDate(h.filing_date)} />

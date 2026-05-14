@@ -464,6 +464,124 @@ test('GET /companies/:slug/holders — 200 happy path', async () => {
   assert.equal(res.body.company_slug, 'anthropic');
   assert.equal(res.body.period_date, '2025-12-31');
   assert.equal(res.body.holders[0].registrant_name, 'Fidelity Investments');
+  assert.equal(res.body.holders[0].first_seen_report_date, '2025-12-31');
+  assert.equal(res.body.holders[0].first_seen_accession_number, '0001234567-25-000001');
+});
+
+test('GET /companies/:slug/holders — first seen tracks same fund and security across periods', async () => {
+  installMocks({
+    nportRouter: (table) => {
+      if (table === 'nport_company_positions_mv') {
+        return {
+          data: [
+            {
+              company_slug: 'anthropic',
+              company_name: 'Anthropic',
+              registrant_cik: '24238',
+              registrant_name: 'Fidelity Investments',
+              series_id: 'S000004007',
+              series_name: 'Contrafund',
+              fund_type: 'open_end',
+              report_period_end: '2026-08-31',
+              report_period_date: '2025-12-31',
+              balance: 1000,
+              currency_value_usd: 187000000,
+              asset_cat: 'EC',
+              exposure_type: 'direct',
+              share_class_normalized: 'Series F',
+              raw_issuer_name: 'ANTHROPIC PBC',
+              raw_issuer_title: 'ANTHROPIC PBC SER F PC PP',
+              accession_number: '0001234567-25-000001',
+            },
+            {
+              company_slug: 'anthropic',
+              company_name: 'Anthropic',
+              registrant_cik: '24238',
+              registrant_name: 'Fidelity Investments',
+              series_id: 'S000004007',
+              series_name: 'Contrafund',
+              fund_type: 'open_end',
+              report_period_end: '2026-05-31',
+              report_period_date: '2025-09-30',
+              balance: 1000,
+              currency_value_usd: 140000000,
+              asset_cat: 'EC',
+              exposure_type: 'direct',
+              share_class_normalized: 'Series F',
+              raw_issuer_name: 'ANTHROPIC PBC',
+              raw_issuer_title: 'ANTHROPIC PBC SER F PC PP',
+              accession_number: '0001234567-24-000009',
+            },
+          ],
+          error: null,
+          count: 2,
+        };
+      }
+      return defaultNportRouter(table);
+    },
+  });
+  const res = await request(baseUrl, 'GET', '/api/nport/companies/anthropic/holders');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.holders.length, 1);
+  assert.equal(res.body.holders[0].report_period_date, '2025-12-31');
+  assert.equal(res.body.holders[0].first_seen_report_date, '2025-09-30');
+  assert.equal(res.body.holders[0].first_seen_accession_number, '0001234567-24-000009');
+});
+
+test('GET /companies/:slug/holders — includes latest available row per fund-security key', async () => {
+  installMocks({
+    nportRouter: (table) => {
+      if (table === 'nport_company_positions_mv') {
+        return {
+          data: [
+            {
+              company_slug: 'anthropic',
+              registrant_cik: '24238',
+              registrant_name: 'Fidelity Investments',
+              series_id: 'S000004007',
+              series_name: 'Contrafund',
+              report_period_end: '2026-08-31',
+              report_period_date: '2025-12-31',
+              balance: 1000,
+              currency_value_usd: 187000000,
+              asset_cat: 'EC',
+              exposure_type: 'direct',
+              share_class_normalized: 'Series F',
+              raw_issuer_title: 'ANTHROPIC PBC SER F PC PP',
+              accession_number: '0001234567-25-000001',
+            },
+            {
+              company_slug: 'anthropic',
+              registrant_cik: '719608',
+              registrant_name: 'New Economy Fund',
+              series_id: null,
+              series_name: 'New Economy Fund',
+              report_period_end: '2026-05-31',
+              report_period_date: '2025-11-30',
+              balance: 500,
+              currency_value_usd: 75000000,
+              asset_cat: 'EC',
+              exposure_type: 'direct',
+              share_class_normalized: 'Class A',
+              raw_issuer_title: 'ANTHROPIC PBC CL A PP',
+              accession_number: '0007654321-25-000001',
+            },
+          ],
+          error: null,
+          count: 2,
+        };
+      }
+      return defaultNportRouter(table);
+    },
+  });
+  const res = await request(baseUrl, 'GET', '/api/nport/companies/anthropic/holders');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.period_date, '2025-12-31');
+  assert.equal(res.body.holders.length, 2);
+  assert.deepEqual(
+    res.body.holders.map((h) => h.registrant_name).sort(),
+    ['Fidelity Investments', 'New Economy Fund']
+  );
 });
 
 test('GET /companies/:slug/timeseries — 200 happy path', async () => {

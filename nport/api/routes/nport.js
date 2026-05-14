@@ -136,6 +136,60 @@ function positionPeriod(row) {
   return row && (row.report_period_date || row.report_period_end || null);
 }
 
+function holderSecurityKey(row) {
+  return [
+    row && row.registrant_cik,
+    row && (row.series_id || row.series_name),
+    row && (row.share_class_normalized || row.raw_issuer_title || row.issuer_title),
+    row && row.asset_cat,
+    row && row.exposure_type,
+  ]
+    .map((value) => String(value || '').trim().toUpperCase())
+    .join('|');
+}
+
+function addFirstSeenMetadata(allPositions, currentPositions) {
+  const firstByKey = new Map();
+  for (const row of allPositions || []) {
+    const key = holderSecurityKey(row);
+    const period = positionPeriod(row);
+    if (!key || !period) continue;
+    const existing = firstByKey.get(key);
+    if (!existing || period < existing.period) {
+      firstByKey.set(key, {
+        period,
+        accession_number: row.accession_number || null,
+      });
+    }
+  }
+
+  return (currentPositions || []).map((row) => {
+    const firstSeen = firstByKey.get(holderSecurityKey(row));
+    return {
+      ...row,
+      first_seen_report_date: (firstSeen && firstSeen.period) || positionPeriod(row),
+      first_seen_accession_number: (firstSeen && firstSeen.accession_number) || row.accession_number || null,
+    };
+  });
+}
+
+function latestPositionsByHolderSecurity(positions) {
+  const latestByKey = new Map();
+  for (const row of positions || []) {
+    const key = holderSecurityKey(row);
+    const period = positionPeriod(row);
+    if (!key || !period) continue;
+    const existing = latestByKey.get(key);
+    const existingPeriod = existing ? positionPeriod(existing) : null;
+    const rowValue = toNumber(row.currency_value_usd) || 0;
+    const existingValue = existing ? toNumber(existing.currency_value_usd) || 0 : 0;
+    if (!existing || period > existingPeriod || (period === existingPeriod && rowValue > existingValue)) {
+      latestByKey.set(key, row);
+    }
+  }
+  return sortPositions(Array.from(latestByKey.values()));
+}
+
 function sortPositions(rows) {
   return [...(rows || [])].sort((a, b) => {
     const ap = positionPeriod(a) || '';
@@ -518,8 +572,9 @@ router.get('/companies/:slug/positions', async (req, res) => {
 
 /**
  * GET /api/nport/companies/:slug/holders
- * Current-period holder rollup. We compute the latest holdings snapshot date
- * for this company on the fly (no nport_company_holders_current_mv exists).
+ * Current holder rollup. We use the latest available row per fund/security
+ * because N-PORT filers do not all publish the same month-end snapshot at
+ * the same time.
  */
 router.get('/companies/:slug/holders', async (req, res) => {
   if (!configGuard(res)) return;
@@ -542,13 +597,14 @@ router.get('/companies/:slug/holders', async (req, res) => {
       });
     }
 
-    const currentPositions = (positions || []).filter((row) => positionPeriod(row) === periodDate);
+    const currentPositions = latestPositionsByHolderSecurity(positions || []);
+    const currentWithFirstSeen = addFirstSeenMetadata(positions || [], currentPositions);
 
     return res.json({
       company_slug: slug,
       period_date: periodDate,
       period_end: periodDate,
-      holders: await enrichPositionsWithFilingMetadata(deps, currentPositions),
+      holders: await enrichPositionsWithFilingMetadata(deps, currentWithFirstSeen),
     });
   } catch (err) {
     return serverError(res, err);
