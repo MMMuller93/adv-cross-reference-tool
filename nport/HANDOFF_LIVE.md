@@ -228,6 +228,26 @@ At handoff time there are no daily scraper processes running.
 
 ## Commands
 
+Start the standalone local dashboard/API:
+
+```bash
+cd /private/tmp/nport-buildout-claude
+set -a
+source .env
+set +a
+NPORT_PORT=3010 node nport/api/server.js
+```
+
+Useful local URLs:
+
+```text
+http://127.0.0.1:3010/
+http://127.0.0.1:3010/company/anthropic
+http://127.0.0.1:3010/company/openai
+http://127.0.0.1:3010/company/spacex
+http://127.0.0.1:3010/admin/unresolved
+```
+
 Read-only live preflight:
 
 ```bash
@@ -304,6 +324,9 @@ nport/scripts/witness_check.sh
 - Company and fund position APIs fall back to base-table joins when the
   materialized view is empty, and current-period rollups use the actual
   portfolio snapshot date instead of fiscal year-end.
+- The standalone server serves `/company/:slug`, `/fund/:cik/:series_id`, and
+  `/admin/unresolved` through the N-PORT SPA so the local dashboard is directly
+  usable on port `3010`.
 - Base-table fallback reads were changed from a single 5000-row Supabase
   request to 1000-row keyset pages, matching the project read-limit rule.
 - N-PORT admin mutation routes now require `NPORT_ADMIN_TOKEN`; refresh IDs are

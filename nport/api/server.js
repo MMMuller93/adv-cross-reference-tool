@@ -45,10 +45,16 @@ function buildApp() {
 
   // Static frontend (../frontend) — convenient single-process dev.
   const path = require('path');
-  app.use('/', express.static(path.join(__dirname, '..', 'frontend')));
+  const frontendDir = path.join(__dirname, '..', 'frontend');
+  const frontendIndex = path.join(frontendDir, 'index.html');
+  app.use('/', express.static(frontendDir));
 
   const nportRoutes = require('./routes/nport');
   app.use('/api/nport', nportRoutes);
+
+  app.get('/company/:slug', (_req, res) => res.sendFile(frontendIndex));
+  app.get('/fund/:cik/:series_id', (_req, res) => res.sendFile(frontendIndex));
+  app.get('/admin/unresolved', (_req, res) => res.sendFile(frontendIndex));
 
   // If NPORT_PG_CONN is set, swap the routes' supabase client for the
   // local-postgres shim so the same routes work against a dev DB.
