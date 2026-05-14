@@ -17,6 +17,9 @@ const { useState: useStateN, useEffect: useEffectN, useMemo: useMemoN, useRef: u
 window.matchNportRoute = function (pathname) {
   if (!pathname) pathname = window.location.pathname;
   let m;
+  if (pathname === '/' || pathname === '') {
+    return { kind: 'dashboard' };
+  }
   if ((m = pathname.match(/^\/company\/([^/]+)\/?$/))) {
     return { kind: 'company', slug: decodeURIComponent(m[1]) };
   }
@@ -111,6 +114,11 @@ const fmtDate = (d) => {
 const titleCaseSector = (s) => {
   if (!s) return '—';
   return s.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' / ');
+};
+
+const companyDisplayName = (company) => {
+  if (!company) return '—';
+  return String(company.display_name || company.slug || '—').replace(/^\|+/, '').trim() || company.slug || '—';
 };
 
 const median = (values) => {
@@ -218,6 +226,134 @@ const ErrorState = ({ message }) => (
     <p className="text-[11px] text-gray-400 mt-3">Tip: add <code className="px-1 rounded bg-gray-100">?mock=1</code> to the URL to view with mock data.</p>
   </div>
 );
+
+// ---------------------------------------------------------------------------
+// Dashboard — /
+// ---------------------------------------------------------------------------
+const DashboardPage = () => {
+  const [loading, setLoading] = useStateN(true);
+  const [error, setError] = useStateN(null);
+  const [companies, setCompanies] = useStateN([]);
+  const [query, setQuery] = useStateN('');
+
+  useEffectN(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true); setError(null);
+      const r = await fetchNport('/api/nport/companies?pageSize=1000');
+      if (cancelled) return;
+      if (!r.ok || !r.data) {
+        setError(r.error || 'Failed to load companies');
+        setLoading(false);
+        return;
+      }
+      setCompanies(r.data.companies || []);
+      setLoading(false);
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  const q = query.trim().toLowerCase();
+  const filtered = companies
+    .filter((c) => {
+      if (!q) return true;
+      return [c.display_name, c.slug, c.sector, c.primary_domain]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q));
+    })
+    .sort((a, b) => companyDisplayName(a).localeCompare(companyDisplayName(b)))
+    .slice(0, 80);
+  const focusSlugs = ['anthropic', 'openai', 'spacex', 'databricks', 'stripe', 'canva', 'epic-games', 'xai'];
+  const focusCompanies = focusSlugs
+    .map((slug) => companies.find((c) => c.slug === slug))
+    .filter(Boolean);
+
+  if (loading) {
+    return <PageChrome breadcrumb="n-port"><Spinner label="Loading N-PORT companies..." /></PageChrome>;
+  }
+  if (error) {
+    return <PageChrome breadcrumb="n-port"><ErrorState message={error} /></PageChrome>;
+  }
+
+  return (
+    <PageChrome breadcrumb="n-port">
+      <div className="bg-white rounded-2xl ring-1 ring-gray-200 mb-6 p-6">
+        <div className="flex items-start justify-between gap-6 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">N-PORT private-company holdings</h1>
+            <p className="text-sm text-gray-600 mt-1 max-w-3xl">
+              Search registered funds and ETFs that disclose positions in private companies. Start with a company, then open fund-family drilldowns and SEC source filings.
+            </p>
+          </div>
+          <div className="text-right shrink-0">
+            <div className="text-[10px] uppercase tracking-wider text-gray-400">Companies seeded</div>
+            <div className="text-lg font-semibold text-gray-900 tabular-nums">{fmtInt(companies.length)}</div>
+          </div>
+        </div>
+        <div className="mt-6">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search company, domain, or sector..."
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:bg-white focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+          />
+        </div>
+      </div>
+
+      {focusCompanies.length > 0 && !q && (
+        <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+          {focusCompanies.map((c) => (
+            <a key={c.slug} href={`/company/${c.slug}`} className="bg-white rounded-2xl ring-1 ring-gray-200 p-5 hover:ring-slate-300 hover:shadow-sm transition">
+              <div className="text-sm font-semibold text-gray-900">{companyDisplayName(c)}</div>
+              <div className="text-xs text-gray-500 mt-1">{titleCaseSector(c.sector)}</div>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <Stat label="Valuation" value={fmtUsd(c.latest_known_valuation_usd)} />
+                <Stat label="Round" value={c.most_recent_round || '—'} />
+              </div>
+            </a>
+          ))}
+        </section>
+      )}
+
+      <SectionCard title={q ? 'Search results' : 'Company directory'} subtitle={`${fmtInt(filtered.length)} shown`}>
+        {filtered.length === 0 ? (
+          <p className="text-sm text-gray-500">No companies match this search.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-[11px] uppercase tracking-wider text-gray-400 border-b border-gray-100">
+                <tr>
+                  <th className="text-left py-2 pr-3">Company</th>
+                  <th className="text-left pr-3">Sector</th>
+                  <th className="text-left pr-3">Latest round</th>
+                  <th className="text-right pr-3">Known valuation</th>
+                  <th className="text-right">Open</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((c) => (
+                  <tr key={c.slug} className="border-b border-gray-50 hover:bg-gray-50">
+                    <td className="py-2.5 pr-3">
+                      <a href={`/company/${c.slug}`} className="font-medium text-gray-900 hover:underline">{companyDisplayName(c)}</a>
+                      <div className="text-[11px] text-gray-500">{c.primary_domain || c.slug}</div>
+                    </td>
+                    <td className="py-2.5 pr-3 text-gray-700">{titleCaseSector(c.sector)}</td>
+                    <td className="py-2.5 pr-3 text-gray-700">{c.most_recent_round || '—'}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums font-semibold text-gray-900">{fmtUsd(c.latest_known_valuation_usd)}</td>
+                    <td className="py-2.5 text-right">
+                      <a href={`/company/${c.slug}`} className="text-xs text-slate-600 hover:text-slate-800 inline-flex items-center gap-1">view company <IconExternal className="w-3 h-3" /></a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
+    </PageChrome>
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Charts — value-over-time (single line) and markup history (multi-line).
@@ -442,7 +578,7 @@ const CompanyPage = ({ slug }) => {
         <div className="flex items-start justify-between gap-6">
           <div>
             <div className="flex items-baseline gap-3 flex-wrap">
-              <h1 className="text-2xl font-bold tracking-tight text-gray-900">{company.display_name}</h1>
+              <h1 className="text-2xl font-bold tracking-tight text-gray-900">{companyDisplayName(company)}</h1>
               {company.primary_domain && (
                 <a href={`https://${company.primary_domain}`} target="_blank" rel="noreferrer"
                    className="text-xs text-slate-500 hover:text-slate-700 inline-flex items-center gap-1">
@@ -631,7 +767,7 @@ const CompanyPage = ({ slug }) => {
         subtitle="Form D filings + ADV-registered advisers + N-PORT consolidated">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div>
-            <h3 className="text-xs uppercase tracking-wider text-gray-500 mb-2">Form D filings mentioning {company.display_name}</h3>
+            <h3 className="text-xs uppercase tracking-wider text-gray-500 mb-2">Form D filings mentioning {companyDisplayName(company)}</h3>
             {crossFormDFilings.length === 0 ? (
               <p className="text-sm text-gray-500">No Form D filings on record.</p>
             ) : (
@@ -652,7 +788,7 @@ const CompanyPage = ({ slug }) => {
             )}
           </div>
           <div>
-            <h3 className="text-xs uppercase tracking-wider text-gray-500 mb-2">ADV-registered advisers holding {company.display_name}</h3>
+            <h3 className="text-xs uppercase tracking-wider text-gray-500 mb-2">ADV-registered advisers holding {companyDisplayName(company)}</h3>
             {crossRelatedAdvisers.length === 0 ? (
               <p className="text-sm text-gray-500">No related ADV records.</p>
             ) : (
@@ -1155,6 +1291,7 @@ const TriageActions = ({ group, directory, onMatch, onCreate, onJunk }) => {
 window.NportRouter = function NportRouter() {
   const route = window.matchNportRoute(window.location.pathname);
   if (!route) return null;
+  if (route.kind === 'dashboard') return <DashboardPage />;
   if (route.kind === 'company') return <CompanyPage slug={route.slug} />;
   if (route.kind === 'fund')    return <FundPage cik={route.cik} seriesId={route.series_id} />;
   if (route.kind === 'admin')   return <AdminUnresolvedPage />;
