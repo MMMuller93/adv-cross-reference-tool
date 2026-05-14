@@ -443,7 +443,7 @@ const formatDate = (dateStr) => {
 // Format filing date consistently - handles DD-MMM-YYYY, YYYY-MM-DD, etc.
 // Returns YYYY-MM-DD format for consistent sorting
 const formatFilingDate = (dateStr) => {
-  if (!dateStr || dateStr === '' || dateStr === '-') return '-';
+  if (!dateStr || dateStr === '' || dateStr === '-') return null;
   try {
     const monthMap = {
       'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04',
@@ -480,7 +480,7 @@ const formatDateDisplay = (dateStr) => {
   if (!dateStr || dateStr === '-') return '-';
   try {
     const normalized = formatFilingDate(dateStr);
-    if (normalized === '-' || normalized === dateStr) return dateStr;
+    if (!normalized || normalized === dateStr) return dateStr;
     const parts = normalized.split('-');
     if (parts.length === 3) {
       return `${parts[1]}/${parts[2]}/${parts[0]}`;
@@ -2961,13 +2961,14 @@ function App() {
     switch (type) {
       case 'advisers':
         title = 'Adviser Registry Export';
-        headers = ['Name', 'CRD', 'State', 'Type', 'AUM'];
+        headers = ['Name', 'CRD', 'State', 'Type', 'AUM', 'Website'];
         rows = data.map(a => [
           a.adviser_name || a.adviser_entity_legal_name || 'N/A',
           a.crd || 'N/A',
           a.state_country || 'N/A',
           a.type || 'RIA',
-          formatCurrency(getEffectiveAum(a))
+          formatCurrency(getEffectiveAum(a)),
+          a.website_url || a.other_website_urls || 'N/A'
         ]);
         break;
       case 'funds':
@@ -3028,14 +3029,25 @@ function App() {
         break;
       case 'new_managers':
         title = 'New Managers Discovery Export';
-        headers = ['Series Master LLC', 'Funds', 'Total Offering', 'First Filing', 'Fund Type', 'Key Person', 'Contact'];
+        headers = ['Series Master LLC', 'Fund Count', 'Total Offering', 'First Filing', 'Primary Fund Type', 'Key Person', 'Key Person Role', 'Jurisdictions', 'Related Parties', 'Contact Phone', 'Contact Email'];
         rows = data.map(m => {
           const keyPerson = getKeyPerson(m);
           const primaryType = getPrimaryFundType(m);
-          let contact = 'N/A';
+          const jurisdictions = [...new Set((m.funds || []).map(f => f.stateorcountry).filter(Boolean))].join('; ');
+          const allRelatedParties = [...new Set((m.funds || []).flatMap(f => {
+            if (!f.related_names) return [];
+            const names = f.related_names.split('|');
+            const roles = f.related_roles ? f.related_roles.split('|') : [];
+            return names
+              .map(n => normalizeRelatedPartyName(n.trim()))
+              .filter(n => n)
+              .map((n, i) => `${n}${roles[i] ? ` (${roles[i].trim()})` : ''}`);
+          }))].join('; ');
+          let phone = '', email = '';
           for (const f of (m.funds || [])) {
-            if (f.contactemail) { contact = f.contactemail; break; }
-            if (f.contactphonenumber) { contact = f.contactphonenumber; break; }
+            if (!phone && f.contactphonenumber) phone = f.contactphonenumber;
+            if (!email && f.contactemail) email = f.contactemail;
+            if (phone && email) break;
           }
           return [
             m.series_master_llc || 'N/A',
@@ -3043,16 +3055,21 @@ function App() {
             formatCurrency(m.total_offering_amount),
             formatDate(m.first_filing_date),
             primaryType || 'N/A',
-            keyPerson ? `${keyPerson.name}${keyPerson.role ? ` (${keyPerson.role})` : ''}` : 'N/A',
-            contact
+            keyPerson?.name || 'N/A',
+            keyPerson?.role || 'N/A',
+            jurisdictions || 'N/A',
+            allRelatedParties || 'N/A',
+            phone || 'N/A',
+            email || 'N/A'
           ];
         });
         break;
       case 'cross_reference':
         title = 'Private Markets Intelligence Export';
-        headers = ['ADV Fund Name', 'Form D Match', 'Issues', 'Score'];
+        headers = ['ADV Fund Name', 'Adviser', 'Form D Match', 'Issues', 'Match Score'];
         rows = data.map(m => [
           m.adv_fund_name || 'N/A',
+          m.adviser_entity_legal_name || 'N/A',
           m.formd_entity_name || 'No match',
           m.issues || 'None',
           m.match_score ? `${(m.match_score * 100).toFixed(0)}%` : 'N/A'
@@ -3259,8 +3276,12 @@ function App() {
       console.log('[searchFunds] Parsed query:', parsedQuery);
 
       // DEFAULT VIEW: Fetch recent Form D filings sorted by date (when no search term)
-      // When searching: Also fetch ADV funds and merge (backend requires 5 chars min)
-      const hasSearchTerm = parsedQuery.apiQuery && parsedQuery.apiQuery.length >= 5;
+      // When searching: Also fetch ADV funds and merge.
+      // Min-length 3 matches the Advisers tab gate; backend has no min-length
+      // requirement (the older 5-char claim was stale). Lower than 3 produces
+      // too many spurious substring matches; 3+ catches names like "antr",
+      // "kig", "spv", "vc1", etc.
+      const hasSearchTerm = parsedQuery.apiQuery && parsedQuery.apiQuery.length >= 3;
 
       // Always fetch Form D filings (they're the default view)
       const formdParams = new URLSearchParams({ limit: '500' });
@@ -4323,11 +4344,22 @@ function App() {
                                 )}
                               </td>
                               <td className="px-3 py-2.5">
-                                <div className="text-[11px] text-gray-600 font-mono tabular-nums">
-                                  {formatDateDisplay(fund.form_d_filing_date || fund.adv_filing_date) || '—'}
-                                </div>
-                                {fund.source === 'adv' && fund.form_d_filing_date && (
-                                  <div className="text-[9px] text-gray-400">Form D: {formatDateDisplay(fund.form_d_filing_date)}</div>
+                                {fund.form_d_filing_date ? (
+                                  <div className="text-[11px] text-gray-700 font-mono tabular-nums">
+                                    {formatDateDisplay(fund.form_d_filing_date)}
+                                    <div className="text-[9px] text-gray-400 font-sans">Form D</div>
+                                  </div>
+                                ) : null}
+                                {fund.adv_filing_date ? (
+                                  <div className={fund.form_d_filing_date ? "mt-1" : ""}>
+                                    <div className="text-[11px] text-gray-500 font-mono tabular-nums">
+                                      {formatDateDisplay(fund.adv_filing_date)}
+                                    </div>
+                                    <div className="text-[9px] text-gray-400 font-sans">ADV</div>
+                                  </div>
+                                ) : null}
+                                {!fund.form_d_filing_date && !fund.adv_filing_date && (
+                                  <span className="text-[11px] text-gray-400">—</span>
                                 )}
                               </td>
                               <td className="px-3 py-2.5 text-right">
