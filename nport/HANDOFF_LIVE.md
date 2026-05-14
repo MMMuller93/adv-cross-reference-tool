@@ -65,7 +65,8 @@ step via `require('./nport/api/mount')(app)`.
 
 Bulk backfill was run from `2019Q4` through `2026Q1`.
 Daily Q2-to-date ingestion was run for the 45-day window ending 2026-05-11,
-then a 2-day catch-up was run on 2026-05-12.
+a 2-day catch-up was run on 2026-05-12, and a 3-day catch-up was run on
+2026-05-14.
 
 Latest read-only preflight counts after the daily replay and identifier cleanup:
 
@@ -73,9 +74,9 @@ Latest read-only preflight counts after the daily replay and identifier cleanup:
 private_companies: 843
 private_company_aliases: 924
 sanctioned_securities: 30
-nport_registrants: 1586
-nport_filings: 57375
-nport_holdings: 315831
+nport_registrants: 1589
+nport_filings: 57407
+nport_holdings: 315872
 nport_identifiers: 667711
 nport_holdings_ncsr: 0
 fund_portfolio_managers: 0
@@ -101,6 +102,20 @@ filings_seen: 16
 filings_parsed: 16
 holdings_kept: 0
 row counts unchanged
+```
+
+May 14 catch-up:
+
+```text
+filings_seen: 32
+filings_parsed: 32
+holdings_kept: 41
+nport_registrants: 1586 -> 1589
+nport_filings: 57375 -> 57407
+nport_holdings: 315831 -> 315872
+nport_identifiers: unchanged at 667711
+Anthropic API fallback smoke unchanged: 320 positions, 37 current holders,
+latest period_date 2026-02-28
 ```
 
 The daily identifier cleanup backed up the noisy pre-fix rows here before

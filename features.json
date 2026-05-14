@@ -10,7 +10,7 @@
     "current_session": 11,
     "last_working_commit": "05456fa",
     "environment_verified": true,
-    "notes": "N-PORT isolated live ingestion loaded through 2026Q1 bulk plus Q2-to-date daily. API fallback smoke checks pass before MV refresh. MV refresh remains pending because SQL editor/browser access was blocked."
+    "notes": "N-PORT isolated live ingestion loaded through 2026Q1 bulk plus Q2-to-date daily catch-up on 2026-05-14. API fallback smoke checks pass before MV refresh. MV refresh remains pending because SQL editor/browser access was blocked."
   },
   "features": [
     {
@@ -29,7 +29,7 @@
       "status": "blocked",
       "passes": false,
       "tested_at": "2026-05-12",
-      "notes": "Bulk and daily ingestion loaded in pfr-nport. Tests pass, daily coverage checks pass, Anthropic API fallback smoke passes, fallback reads now use 1000-row keyset pages, admin routes require NPORT_ADMIN_TOKEN, and cross-source JWTs were moved to env vars. Witness status is PARTIAL because nport_company_positions_mv is still 0. Blocked only on running REFRESH MATERIALIZED VIEW nport_company_positions_mv in Supabase SQL editor."
+      "notes": "Bulk and daily ingestion loaded in pfr-nport through the 2026-05-14 catch-up. Latest live counts: nport_filings=57407, nport_holdings=315872. Tests pass, daily coverage checks pass, Anthropic API fallback smoke passes, fallback reads now use 1000-row keyset pages, admin routes require NPORT_ADMIN_TOKEN, and cross-source JWTs were moved to env vars. Witness status is PARTIAL because nport_company_positions_mv is still 0. Blocked only on running REFRESH MATERIALIZED VIEW nport_company_positions_mv in Supabase SQL editor."
     },
     {
       "id": "feat-001",

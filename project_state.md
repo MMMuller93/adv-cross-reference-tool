@@ -23,7 +23,16 @@
 ## Active Task
 **Currently Working On**: N-PORT live ingestion in isolated `nport/` subtree
 **Feature ID**: N-PORT private-company holdings database
-**Status**: Bulk + daily live ingestion loaded; API fallback smoke-tested; MV refresh blocked pending SQL access
+**Status**: Bulk + daily live ingestion loaded through 2026-05-14; API fallback smoke-tested; MV refresh blocked pending SQL access
+
+### Recent Completion (Session May 14, 2026)
+
+✅ **N-PORT daily catch-up**
+- Ran 3-day daily NPORT-P/NPORT-P/A catch-up for filings through 2026-05-14
+- Parsed 32 filings; kept 41 private-company holdings
+- Live counts now: `nport_registrants=1589`, `nport_filings=57407`, `nport_holdings=315872`, `nport_identifiers=667711`
+- Anthropic fallback smoke unchanged: 320 positions, 37 current holders, latest `period_date=2026-02-28`
+- Still pending: `REFRESH MATERIALIZED VIEW nport_company_positions_mv;`
 
 ### Recent Completion (Session May 12, 2026)
 
