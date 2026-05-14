@@ -3,6 +3,7 @@
 // Styled to match existing app.js (Tailwind, Chart.js, gray-50 surfaces,
 // slate accents). Loaded only when window.location.pathname matches one of:
 //   /company/:slug
+//   /fund/:cik
 //   /fund/:cik/:series_id
 //   /admin/unresolved
 // app.js boot intercepts and renders <NportRouter /> in those cases.
@@ -21,6 +22,9 @@ window.matchNportRoute = function (pathname) {
   }
   if ((m = pathname.match(/^\/fund\/(\d+)\/([^/]+)\/?$/))) {
     return { kind: 'fund', cik: m[1], series_id: m[2] };
+  }
+  if ((m = pathname.match(/^\/fund\/(\d+)\/?$/))) {
+    return { kind: 'fund', cik: m[1], series_id: null };
   }
   if (pathname.match(/^\/admin\/unresolved\/?$/)) {
     return { kind: 'admin' };
@@ -92,6 +96,11 @@ const fmtInt = (n) => {
   return Number(n).toLocaleString('en-US');
 };
 
+const fmtDecimal = (n, digits = 2) => {
+  if (n === null || n === undefined || isNaN(Number(n))) return '—';
+  return Number(n).toLocaleString('en-US', { maximumFractionDigits: digits });
+};
+
 const fmtDate = (d) => {
   if (!d) return '—';
   const dt = new Date(d);
@@ -102,6 +111,31 @@ const fmtDate = (d) => {
 const titleCaseSector = (s) => {
   if (!s) return '—';
   return s.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' / ');
+};
+
+const median = (values) => {
+  const nums = values.map(Number).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  if (nums.length === 0) return null;
+  const mid = Math.floor(nums.length / 2);
+  return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
+};
+
+const secFilingUrl = (cik, accession) => {
+  if (!cik || !accession) return null;
+  const cikTrimmed = String(cik).replace(/^0+/, '') || '0';
+  const accessionNoDashes = String(accession).replace(/-/g, '');
+  return `https://www.sec.gov/Archives/edgar/data/${cikTrimmed}/${accessionNoDashes}/${accession}-index.html`;
+};
+
+const securityTypeLabel = (assetCat) => {
+  const labels = {
+    EC: 'Equity',
+    EP: 'Preferred equity',
+    LON: 'Loan / credit',
+    DBT: 'Debt',
+    DE: 'Derivative',
+  };
+  return labels[assetCat] || assetCat || '—';
 };
 
 // ---------------------------------------------------------------------------
@@ -323,6 +357,7 @@ const CompanyPage = ({ slug }) => {
   const [holdersPayload, setHoldersPayload] = useStateN(null); // /holders
   const [markupsPayload, setMarkupsPayload] = useStateN(null); // /markups
   const [cross, setCross] = useStateN(null);          // /cross
+  const [expandedHoldings, setExpandedHoldings] = useStateN({});
 
   useEffectN(() => {
     let cancelled = false;
@@ -356,13 +391,36 @@ const CompanyPage = ({ slug }) => {
   }
 
   const company = main.company;
-  const latestMarks = main.latest_marks || { report_period_end: null, classes: [] };
   const holderRows = ((holdersPayload && holdersPayload.holders) || []).map((h) => ({
     ...h,
     value_usd: h.value_usd ?? h.total_value_usd ?? h.currency_value_usd,
     share_class: h.share_class ?? h.share_class_normalized,
   }));
   const topHolders = main.top_holders || holderRows;
+  const marksByClass = new Map();
+  for (const h of topHolders) {
+    const shareClass = h.share_class || h.share_class_normalized || 'Unspecified';
+    const value = Number(h.value_usd || h.currency_value_usd);
+    const balance = Number(h.balance);
+    if (!Number.isFinite(value) || !Number.isFinite(balance) || balance === 0) continue;
+    const row = marksByClass.get(shareClass) || { prices: [], holders: 0, total_balance: 0 };
+    row.prices.push(value / balance);
+    row.holders += 1;
+    row.total_balance += balance;
+    marksByClass.set(shareClass, row);
+  }
+  const computedLatestMarks = {
+    report_period_end: (holdersPayload && holdersPayload.period_date) || null,
+    classes: Array.from(marksByClass.entries()).map(([share_class, row]) => ({
+      share_class,
+      median_per_share: median(row.prices),
+      holders: row.holders,
+      total_balance: row.total_balance,
+    })).sort((a, b) => b.holders - a.holders),
+  };
+  const latestMarks = main.latest_marks && main.latest_marks.classes && main.latest_marks.classes.length > 0
+    ? main.latest_marks
+    : computedLatestMarks;
   const markups = (markupsPayload && markupsPayload.markups) || main.markups || [];
   const history = (markupsPayload && markupsPayload.history) || [];
   const tsPoints = ((timeseries && (timeseries.points || timeseries.series)) || []).map((p) => ({
@@ -374,6 +432,8 @@ const CompanyPage = ({ slug }) => {
   const crossRelatedAdvisers = (cross && (cross.related_advisers || cross.relatedAdvisers)) || [];
   const disclosedValue = company.total_disclosed_usd ?? topHolders.reduce((sum, h) => sum + (Number(h.value_usd) || 0), 0);
   const distinctFilers = company.distinct_filers ?? new Set(topHolders.map((h) => h.registrant_id || h.registrant_cik || h.registrant_name)).size;
+  const latestSnapshotDate = (holdersPayload && holdersPayload.period_date) || (topHolders[0] && topHolders[0].report_period_date);
+  const toggleHolding = (key) => setExpandedHoldings((prev) => ({ ...prev, [key]: !prev[key] }));
 
   return (
     <PageChrome breadcrumb={`company / ${slug}`}>
@@ -405,7 +465,7 @@ const CompanyPage = ({ slug }) => {
         </div>
 
         <div className="mt-6 grid grid-cols-2 md:grid-cols-5 gap-4">
-          <Stat label="Disclosed N-PORT exposure" value={fmtUsd(disclosedValue)} hint="latest period" />
+          <Stat label="Disclosed N-PORT exposure" value={fmtUsd(disclosedValue)} hint={latestSnapshotDate ? `as of ${fmtDate(latestSnapshotDate)}` : 'latest period'} />
           <Stat label="Distinct fund-family holders" value={fmtInt(distinctFilers)} />
           <Stat label="Last known valuation" value={fmtUsd(company.latest_known_valuation_usd)} />
           <Stat label="Total funding to date" value={fmtUsd(company.total_funding_usd)} />
@@ -415,14 +475,14 @@ const CompanyPage = ({ slug }) => {
 
       {/* Latest marks + QoQ deltas */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <SectionCard title="Latest marks by share class"
-          subtitle={`Period ending ${fmtDate(latestMarks.report_period_end)} — median per share across holders`}>
+        <SectionCard title="Latest valuation by security class"
+          subtitle={`Portfolio snapshot ${fmtDate(latestMarks.report_period_end)} — median reported value per share/unit`}>
           {latestMarks.classes.length === 0 ? (
             <p className="text-sm text-gray-500">No recent marks.</p>
           ) : (
             <table className="w-full text-sm">
               <thead className="text-[11px] uppercase tracking-wider text-gray-400">
-                <tr><th className="text-left py-2">Share class</th><th className="text-right">Median / sh</th><th className="text-right">Holders</th><th className="text-right">Total shares</th></tr>
+                <tr><th className="text-left py-2">Security class</th><th className="text-right">Median value / share</th><th className="text-right">Holders</th><th className="text-right">Total shares / units</th></tr>
               </thead>
               <tbody>
                 {latestMarks.classes.map((c) => (
@@ -438,7 +498,7 @@ const CompanyPage = ({ slug }) => {
           )}
         </SectionCard>
 
-        <SectionCard title="Q-over-Q markup deltas" subtitle="Per-share change vs. prior public period">
+        <SectionCard title="Quarterly valuation changes" subtitle="Per-share change vs. prior public filing period">
           {markups.length === 0 ? (
             <p className="text-sm text-gray-500">No deltas this period.</p>
           ) : (
@@ -473,8 +533,8 @@ const CompanyPage = ({ slug }) => {
         </SectionCard>
       </div>
 
-      {/* Top holders table */}
-      <SectionCard title="Top holders (current period)" subtitle={`Ranked by position value — ${fmtInt(topHolders.length)} shown`}>
+      {/* Current holders table */}
+      <SectionCard title="Current holders" subtitle={`Fund positions reported for ${fmtDate(latestSnapshotDate)} — ranked by reported value`}>
         {topHolders.length === 0 ? (
           <p className="text-sm text-gray-500">No holders reported.</p>
         ) : (
@@ -482,30 +542,72 @@ const CompanyPage = ({ slug }) => {
             <table className="w-full text-sm">
               <thead className="text-[11px] uppercase tracking-wider text-gray-400 border-b border-gray-100">
                 <tr>
-                  <th className="text-left py-2 pr-3">Registrant</th>
-                  <th className="text-left pr-3">Series</th>
-                  <th className="text-right pr-3">Position</th>
-                  <th className="text-left pr-3">Share class</th>
-                  <th className="text-left pr-3">PM</th>
-                  <th className="text-right">Open</th>
+                  <th className="text-left py-2 pr-3">Fund family</th>
+                  <th className="text-left pr-3">Portfolio snapshot</th>
+                  <th className="text-right pr-3">Reported value</th>
+                  <th className="text-right pr-3">% of fund NAV</th>
+                  <th className="text-right pr-3">Shares / units</th>
+                  <th className="text-left pr-3">Security</th>
+                  <th className="text-right">Links</th>
                 </tr>
               </thead>
               <tbody>
                 {topHolders.map((h, i) => {
-                  const fundUrl = h.series_id ? `/fund/${stripCikLeadingZeros(h.registrant_cik)}/${h.series_id}${isMockMode() ? '?mock=1' : ''}` : null;
+                  const key = `${h.accession_number || i}-${h.holding_id_internal || h.share_class || i}`;
+                  const cik = stripCikLeadingZeros(h.registrant_cik);
+                  const fundUrl = h.series_id
+                    ? `/fund/${cik}/${h.series_id}${isMockMode() ? '?mock=1' : ''}`
+                    : `/fund/${cik}?company=${encodeURIComponent(slug)}${isMockMode() ? '&mock=1' : ''}`;
+                  const filingUrl = secFilingUrl(h.registrant_cik, h.accession_number);
+                  const isExpanded = !!expandedHoldings[key];
                   return (
-                    <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 pr-3 font-medium text-gray-900">{h.registrant_name}</td>
-                      <td className="py-2.5 pr-3 text-[11px] font-mono text-gray-500">{h.series_id || '—'}</td>
-                      <td className="py-2.5 pr-3 text-right tabular-nums font-semibold text-gray-900">{fmtUsd(h.value_usd)}</td>
-                      <td className="py-2.5 pr-3 text-gray-700">{h.share_class || '—'}</td>
-                      <td className="py-2.5 pr-3 text-gray-700">{h.pm_name || '—'}</td>
-                      <td className="py-2.5 text-right">
-                        {fundUrl ? (
-                          <a href={fundUrl} className="text-xs text-slate-600 hover:text-slate-800 inline-flex items-center gap-1">view fund <IconExternal className="w-3 h-3" /></a>
-                        ) : <span className="text-xs text-gray-300">—</span>}
-                      </td>
-                    </tr>
+                    <React.Fragment key={key}>
+                      <tr className="border-b border-gray-50 hover:bg-gray-50">
+                        <td className="py-2.5 pr-3">
+                          <a href={fundUrl} className="font-medium text-gray-900 hover:underline">{h.registrant_name}</a>
+                          <div className="text-[11px] text-gray-500">
+                            {h.series_name || 'Fund family'}{h.series_id ? <span className="ml-1 font-mono">{h.series_id}</span> : null}
+                          </div>
+                        </td>
+                        <td className="py-2.5 pr-3 text-gray-700">{fmtDate(h.report_period_date)}</td>
+                        <td className="py-2.5 pr-3 text-right tabular-nums font-semibold text-gray-900">{fmtUsd(h.value_usd)}</td>
+                        <td className="py-2.5 pr-3 text-right tabular-nums text-gray-700">{h.pct_of_nav != null ? fmtPct(h.pct_of_nav, false) : '—'}</td>
+                        <td className="py-2.5 pr-3 text-right tabular-nums text-gray-700">{fmtDecimal(h.balance, 0)}</td>
+                        <td className="py-2.5 pr-3 text-gray-700">
+                          <div>{h.share_class || '—'}</div>
+                          <div className="text-[11px] text-gray-500">{securityTypeLabel(h.asset_cat)}</div>
+                        </td>
+                        <td className="py-2.5 text-right">
+                          <div className="flex items-center justify-end gap-3">
+                            {filingUrl && (
+                              <a href={filingUrl} target="_blank" rel="noreferrer" className="text-xs text-slate-600 hover:text-slate-800 inline-flex items-center gap-1">SEC <IconExternal className="w-3 h-3" /></a>
+                            )}
+                            <button type="button" onClick={() => toggleHolding(key)} className="text-xs text-slate-600 hover:text-slate-800">
+                              {isExpanded ? 'hide' : 'details'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="bg-slate-50/70 border-b border-gray-100">
+                          <td colSpan="7" className="px-4 py-3">
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+                              <Detail label="Raw security name" value={h.raw_issuer_name} />
+                              <Detail label="Raw security title" value={h.raw_issuer_title} className="md:col-span-2" />
+                              <Detail label="SEC accession" value={h.accession_number} mono />
+                              <Detail label="Fund net assets" value={fmtUsd(h.net_assets_usd)} />
+                              <Detail label="Fund total assets" value={fmtUsd(h.total_assets_usd)} />
+                              <Detail label="N-PORT filed" value={fmtDate(h.filing_date)} />
+                              <Detail label="Source batch" value={h.source_bulk_quarter || 'daily filing'} />
+                              <Detail label="Fund type" value={h.fund_type && h.fund_type !== 'unknown' ? h.fund_type.replace(/_/g, ' ') : 'Not classified'} />
+                              <Detail label="Exposure type" value={h.exposure_type || 'direct'} />
+                              <Detail label="Fiscal year-end" value={fmtDate(h.report_period_end)} />
+                              <Detail label="Internal holding ID" value={h.holding_id_internal} mono />
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -519,7 +621,7 @@ const CompanyPage = ({ slug }) => {
         <SectionCard title="Holdings time series" subtitle="Total disclosed N-PORT $ across all holders per quarter">
           <TimeSeriesChart points={tsPoints} label="Disclosed $" />
         </SectionCard>
-        <SectionCard title="All-tranches markup history" subtitle="Implied $ per share by tranche">
+        <SectionCard title="Security-class valuation history" subtitle="Implied reported value per share/unit by class">
           <MarkupHistoryChart series={history} />
         </SectionCard>
       </div>
@@ -581,6 +683,13 @@ const Stat = ({ label, value, hint }) => (
   </div>
 );
 
+const Detail = ({ label, value, mono, className = '' }) => (
+  <div className={className}>
+    <div className="text-[10px] uppercase tracking-wider text-gray-400">{label}</div>
+    <div className={`mt-0.5 text-gray-800 break-words ${mono ? 'font-mono text-[11px]' : ''}`}>{value || '—'}</div>
+  </div>
+);
+
 const stripCikLeadingZeros = (cik) => {
   if (!cik) return '';
   return String(cik).replace(/^0+/, '') || '0';
@@ -598,10 +707,26 @@ const FundPage = ({ cik, seriesId }) => {
     let cancelled = false;
     async function load() {
       setLoading(true); setError(null);
-      const r = await fetchNport(`/api/nport/funds/${cik}/${seriesId}`);
+      const companyFilter = new URLSearchParams(window.location.search).get('company');
+      const r = seriesId
+        ? await fetchNport(`/api/nport/funds/${cik}/${seriesId}`)
+        : await fetchNport(`/api/nport/funds/${cik}`);
+      const [positionsR, managersR, adviserR] = await Promise.all([
+        seriesId
+          ? fetchNport(`/api/nport/funds/${cik}/${seriesId}/positions?pageSize=1000`)
+          : fetchNport(`/api/nport/funds/${cik}/positions?pageSize=1000${companyFilter ? `&company=${encodeURIComponent(companyFilter)}` : ''}`),
+        seriesId ? fetchNport(`/api/nport/funds/${cik}/${seriesId}/managers`) : Promise.resolve({ ok: true, data: { managers: [] } }),
+        seriesId ? fetchNport(`/api/nport/funds/${cik}/${seriesId}/adviser`) : Promise.resolve({ ok: true, data: null }),
+      ]);
       if (cancelled) return;
       if (!r.ok || !r.data) { setError(r.error || 'Fund not found'); setLoading(false); return; }
-      setData(r.data);
+      setData({
+        overview: r.data,
+        positions: positionsR.ok ? (positionsR.data.positions || []) : [],
+        managers: managersR.ok ? (managersR.data.managers || []) : [],
+        adviser: adviserR.ok ? adviserR.data : null,
+        companyFilter,
+      });
       setLoading(false);
     }
     load();
@@ -615,37 +740,47 @@ const FundPage = ({ cik, seriesId }) => {
     return <PageChrome breadcrumb={`fund / ${cik} / ${seriesId}`}><ErrorState message={error || 'Fund not found'} /></PageChrome>;
   }
 
+  const series = seriesId ? (data.overview.series || null) : null;
+  const filer = data.overview.filer || null;
   const positions = data.positions || [];
   const qoq = data.qoq_changes || [];
   const managers = data.managers || [];
+  const adviserRecord = data.adviser && (data.adviser.adviser || data.adviser.adv_adviser || data.adviser);
+  const latestPositionDate = positions[0] && (positions[0].report_period_date || positions[0].report_period_end);
+  const latestPositions = latestPositionDate ? positions.filter((p) => (p.report_period_date || p.report_period_end) === latestPositionDate) : positions;
+  const privateExposureUsd = latestPositions.reduce((sum, p) => sum + (Number(p.currency_value_usd || p.value_usd) || 0), 0);
+  const navValues = latestPositions.map((p) => Number(p.net_assets_usd)).filter((n) => Number.isFinite(n) && n > 0);
+  const latestNav = navValues.length > 0 ? Math.max(...navValues) : null;
+  const exposurePct = latestNav ? (privateExposureUsd / latestNav) * 100 : null;
+  const pageTitle = series ? (series.series_name || seriesId) : (filer && filer.name) || `CIK ${cik}`;
+  const registrantName = series ? series.registrant_name : (filer && filer.name);
 
   return (
-    <PageChrome breadcrumb={`fund / ${data.series_name || seriesId}`}>
+    <PageChrome breadcrumb={`fund / ${pageTitle}`}>
       {/* Header */}
       <div className="bg-white rounded-2xl ring-1 ring-gray-200 mb-6 p-6">
         <div className="flex items-start justify-between gap-6 flex-wrap">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-900">{data.series_name}</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">{pageTitle}</h1>
             <p className="text-sm text-gray-500 mt-1">
-              <span className="font-mono text-xs">CIK {data.cik}</span>
-              <span className="mx-2">·</span>
-              <span className="font-mono text-xs">Series {data.series_id}</span>
-              {data.registrant_name && <><span className="mx-2">·</span>{data.registrant_name}</>}
+              <span className="font-mono text-xs">CIK {String(cik).padStart(10, '0')}</span>
+              {series && <><span className="mx-2">·</span><span className="font-mono text-xs">Series {series.series_id || seriesId}</span></>}
+              {registrantName && <><span className="mx-2">·</span>{registrantName}</>}
             </p>
             <p className="text-sm text-gray-700 mt-2">
-              Adviser: <span className="font-medium">{data.adviser_name}</span>
-              {data.adviser_crd && (
-                <a href={`/?adviser=${data.adviser_crd}`} className="ml-2 text-xs text-slate-600 hover:text-slate-800 inline-flex items-center gap-1 underline-offset-2 hover:underline">
-                  CRD {data.adviser_crd}
+              Adviser: <span className="font-medium">{adviserRecord && (adviserRecord.adviser_name || adviserRecord.investment_adviser_name) || 'Not linked yet'}</span>
+              {adviserRecord && adviserRecord.crd && (
+                <a href={`/?adviser=${adviserRecord.crd}`} className="ml-2 text-xs text-slate-600 hover:text-slate-800 inline-flex items-center gap-1 underline-offset-2 hover:underline">
+                  CRD {adviserRecord.crd}
                   <IconExternal className="w-3 h-3" />
                 </a>
               )}
             </p>
           </div>
           <div className="grid grid-cols-3 gap-4">
-            <Stat label="Total NAV" value={fmtUsd(data.total_nav_usd)} hint={fmtDate(data.latest_period_end)} />
-            <Stat label="Private exposure" value={fmtUsd(data.private_exposure_usd)} />
-            <Stat label="% of NAV" value={data.private_exposure_pct != null ? `${data.private_exposure_pct.toFixed(2)}%` : '—'} />
+            <Stat label="Fund NAV" value={fmtUsd(latestNav)} hint={fmtDate(latestPositionDate)} />
+            <Stat label="Private-company exposure" value={fmtUsd(privateExposureUsd)} />
+            <Stat label="% of NAV" value={exposurePct != null ? fmtPct(exposurePct, false) : '—'} />
           </div>
         </div>
       </div>
@@ -682,7 +817,7 @@ const FundPage = ({ cik, seriesId }) => {
       </SectionCard>
 
       {/* Private-company exposure table */}
-      <SectionCard title="Private-company exposure" subtitle={`${fmtInt(positions.length)} positions as of ${fmtDate(data.latest_period_end)}`}>
+      <SectionCard title="Private-company holdings" subtitle={`${fmtInt(positions.length)} reported positions${data.companyFilter ? ` matching ${data.companyFilter}` : ''}`}>
         {positions.length === 0 ? (
           <p className="text-sm text-gray-500">No private positions reported.</p>
         ) : (
@@ -691,31 +826,41 @@ const FundPage = ({ cik, seriesId }) => {
               <thead className="text-[11px] uppercase tracking-wider text-gray-400 border-b border-gray-100">
                 <tr>
                   <th className="text-left py-2 pr-3">Company</th>
-                  <th className="text-left pr-3">Share class</th>
-                  <th className="text-right pr-3">Value</th>
-                  <th className="text-right pr-3">Acq. cost</th>
+                  <th className="text-left pr-3">Security</th>
+                  <th className="text-right pr-3">Reported value</th>
                   <th className="text-right pr-3">% of NAV</th>
-                  <th className="text-right">Open</th>
+                  <th className="text-left pr-3">Snapshot</th>
+                  <th className="text-right">Links</th>
                 </tr>
               </thead>
               <tbody>
-                {positions.map((p, i) => (
-                  <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="py-2.5 pr-3 font-medium text-gray-900">{p.company_name}</td>
-                    <td className="py-2.5 pr-3 text-gray-700">{p.share_class || '—'}</td>
-                    <td className="py-2.5 pr-3 text-right tabular-nums font-semibold text-gray-900">{fmtUsd(p.value_usd)}</td>
-                    <td className="py-2.5 pr-3 text-right tabular-nums text-gray-700">{fmtUsd(p.acquisition_cost_usd)}</td>
-                    <td className="py-2.5 pr-3 text-right tabular-nums text-gray-700">{p.pct_of_nav != null ? `${p.pct_of_nav.toFixed(2)}%` : '—'}</td>
-                    <td className="py-2.5 text-right">
-                      {p.company_slug ? (
-                        <a href={`/company/${p.company_slug}${isMockMode() ? '?mock=1' : ''}`}
-                           className="text-xs text-slate-600 hover:text-slate-800 inline-flex items-center gap-1">
-                          view company <IconExternal className="w-3 h-3" />
-                        </a>
-                      ) : <span className="text-xs text-gray-300">—</span>}
-                    </td>
-                  </tr>
-                ))}
+                {positions.map((p, i) => {
+                  const filingUrl = secFilingUrl(p.registrant_cik, p.accession_number);
+                  return (
+                    <tr key={`${p.accession_number || i}-${p.holding_id_internal || i}`} className="border-b border-gray-50 hover:bg-gray-50">
+                      <td className="py-2.5 pr-3">
+                        {p.company_slug ? (
+                          <a href={`/company/${p.company_slug}${isMockMode() ? '?mock=1' : ''}`} className="font-medium text-gray-900 hover:underline">{p.company_name}</a>
+                        ) : <span className="font-medium text-gray-900">{p.company_name || '—'}</span>}
+                        <div className="text-[11px] text-gray-500">{p.raw_issuer_name || p.issuer_name || '—'}</div>
+                      </td>
+                      <td className="py-2.5 pr-3 text-gray-700">
+                        <div>{p.share_class || p.share_class_normalized || '—'}</div>
+                        <div className="text-[11px] text-gray-500">{securityTypeLabel(p.asset_cat)}</div>
+                      </td>
+                      <td className="py-2.5 pr-3 text-right tabular-nums font-semibold text-gray-900">{fmtUsd(p.value_usd ?? p.currency_value_usd)}</td>
+                      <td className="py-2.5 pr-3 text-right tabular-nums text-gray-700">{p.pct_of_nav != null ? fmtPct(p.pct_of_nav, false) : '—'}</td>
+                      <td className="py-2.5 pr-3 text-gray-700">{fmtDate(p.report_period_date || p.report_period_end)}</td>
+                      <td className="py-2.5 text-right">
+                        {filingUrl ? (
+                          <a href={filingUrl} target="_blank" rel="noreferrer" className="text-xs text-slate-600 hover:text-slate-800 inline-flex items-center gap-1">
+                            SEC filing <IconExternal className="w-3 h-3" />
+                          </a>
+                        ) : <span className="text-xs text-gray-300">—</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

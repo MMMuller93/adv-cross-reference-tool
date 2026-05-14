@@ -147,6 +147,23 @@ function sortPositions(rows) {
   });
 }
 
+async function enrichPositionsWithFilingMetadata(deps, rows) {
+  const positions = rows || [];
+  if (positions.length === 0) return positions;
+  const filings = await fetchRowsByIn(
+    deps.nportClient,
+    'nport_filings',
+    'accession_number, filing_date, net_assets_usd, total_assets_usd, source_bulk_quarter, source_url, is_amendment, is_final_filing',
+    'accession_number',
+    positions.map((row) => row.accession_number)
+  );
+  const byAccession = new Map((filings || []).map((row) => [row.accession_number, row]));
+  return positions.map((row) => ({
+    ...row,
+    ...(byAccession.get(row.accession_number) || {}),
+  }));
+}
+
 async function fetchRowsByIn(client, table, columns, key, values, chunkSize = 100) {
   const unique = Array.from(new Set((values || []).filter(Boolean).map(String)));
   const out = [];
@@ -295,15 +312,18 @@ async function fetchCompanyPositions(deps, slug, { page, pageSize, offset, maxRo
 }
 
 async function fetchFundPositionsFromBase(deps, variants, seriesId, { maxRows = 5000 } = {}) {
-  const { data: filings, error: filingErr } = await deps.nportClient
+  let filingQuery = deps.nportClient
     .from('nport_filings')
     .select(
       'accession_number, cik, registrant_name, series_id, series_name, report_period_end, report_period_date, fund_type, is_interval_fund, is_variable_insurance, parent_registrant_id'
     )
     .in('cik', variants)
-    .eq('series_id', seriesId)
     .order('report_period_date', { ascending: false })
     .limit(Math.min(BASE_TABLE_READ_PAGE_SIZE, maxRows));
+  if (seriesId !== null && seriesId !== undefined) {
+    filingQuery = filingQuery.eq('series_id', seriesId);
+  }
+  const { data: filings, error: filingErr } = await filingQuery;
   if (filingErr) throw filingErr;
   if (!filings || filings.length === 0) return [];
 
@@ -522,11 +542,13 @@ router.get('/companies/:slug/holders', async (req, res) => {
       });
     }
 
+    const currentPositions = (positions || []).filter((row) => positionPeriod(row) === periodDate);
+
     return res.json({
       company_slug: slug,
       period_date: periodDate,
       period_end: periodDate,
-      holders: (positions || []).filter((row) => positionPeriod(row) === periodDate),
+      holders: await enrichPositionsWithFilingMetadata(deps, currentPositions),
     });
   } catch (err) {
     return serverError(res, err);
@@ -714,6 +736,58 @@ router.get('/funds/:cik', async (req, res) => {
     return res.json({
       filer: registrant,
       series: Array.from(seriesBySid.values()),
+    });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+/**
+ * GET /api/nport/funds/:cik/positions
+ * All private-company positions held by this fund family, optionally narrowed
+ * to one company via ?company=slug. This supports CIK-only drilldowns when SEC
+ * bulk data does not carry a series_id for a holder row.
+ */
+router.get('/funds/:cik/positions', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const { cik } = req.params;
+    if (!/^\d+$/.test(cik)) {
+      return badRequest(res, 'cik must be numeric', 'INVALID_CIK');
+    }
+    const { company } = req.query;
+    const { page, pageSize, offset } = parsePagination(req);
+    const variants = cikVariants(cik);
+
+    let query = deps.nportClient
+      .from('nport_company_positions_mv')
+      .select('*', { count: 'exact' })
+      .in('registrant_cik', variants)
+      .order('report_period_date', { ascending: false })
+      .order('currency_value_usd', { ascending: false, nullsFirst: false })
+      .range(offset, offset + pageSize - 1);
+    if (company) query = query.eq('company_slug', String(company));
+
+    const { data, error, count } = await query;
+    if (error) throw error;
+    let positions = data || [];
+    let total = count || 0;
+    let source = 'materialized_view';
+
+    if (positions.length === 0 && total === 0 && !company) {
+      const baseRows = await fetchFundPositionsFromBase(deps, variants, null);
+      positions = baseRows.slice(offset, offset + pageSize);
+      total = baseRows.length;
+      source = 'base_tables';
+    }
+
+    return res.json({
+      total,
+      page,
+      pageSize,
+      cik,
+      source,
+      positions: await enrichPositionsWithFilingMetadata(deps, positions),
     });
   } catch (err) {
     return serverError(res, err);
