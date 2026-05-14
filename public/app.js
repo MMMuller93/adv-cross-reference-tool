@@ -2494,6 +2494,13 @@ function App() {
 
   // Search & Filter state (initialized from URL)
   const [searchTerm, setSearchTerm] = useState(initialURLState.q);
+  // Scope-limit the Funds search to a specific field. 'all' (default) preserves
+  // the existing OR-match across entityname + related_names + adviser side.
+  // Power use cases: 'name' to avoid hits via person names ("claude" in
+  // related_names polluting results when you want fund names only);
+  // 'related' to find funds by principal/key-person name; 'adviser' for
+  // adviser-side searches via the ADV side.
+  const [searchScope, setSearchScope] = useState(initialURLState.scope || 'all');
   const [filters, setFilters] = useState({
     state: initialURLState.state,
     type: initialURLState.type,
@@ -2654,7 +2661,7 @@ function App() {
       nmHasAdv,
       adviser: selectedAdviser?.crd || ''
     });
-  }, [activeTab, searchTerm, filters.state, filters.type, filters.exemption, filters.minAum, filters.maxAum, filters.strategy, filters.hasAdv, nmStartDate, nmEndDate, nmFundType, nmState, nmHasAdv, selectedAdviser]);
+  }, [activeTab, searchTerm, searchScope, filters.state, filters.type, filters.exemption, filters.minAum, filters.maxAum, filters.strategy, filters.hasAdv, nmStartDate, nmEndDate, nmFundType, nmState, nmHasAdv, selectedAdviser]);
 
   // Auto-load adviser or fund from URL on initial load (supports SEO URLs)
   const urlEntityLoadedRef = useRef(false);
@@ -3283,32 +3290,51 @@ function App() {
       // "kig", "spv", "vc1", etc.
       const hasSearchTerm = parsedQuery.apiQuery && parsedQuery.apiQuery.length >= 3;
 
-      // Always fetch Form D filings (they're the default view)
-      const formdParams = new URLSearchParams({ limit: '500' });
-      if (hasSearchTerm) {
-        formdParams.append('query', parsedQuery.apiQuery);
-      }
-      if (currentFilters.state) formdParams.append('state', currentFilters.state);
+      // Scope routing. Form D side knows entityname + related_names;
+      // ADV side knows fund_name + adviser_entity_legal_name. Map scopes:
+      //   'all'     → query both endpoints OR-matching all their fields
+      //   'name'    → both endpoints, name-only ilike on each
+      //   'related' → Form D only, related_names ilike; skip ADV (no related field)
+      //   'adviser' → ADV only, adviser_entity_legal_name ilike; skip Form D
+      const scope = searchScope || 'all';
+      const queryFormD = hasSearchTerm && scope !== 'adviser';
+      const queryADV   = hasSearchTerm && scope !== 'related';
 
-      console.log('[searchFunds] Fetching Form D filings...');
-      const formdResponse = await fetch(`/api/funds/formd?${formdParams}`);
-      const formdData = await formdResponse.json();
-      console.log('[searchFunds] Form D response:', formdData.results?.length, 'results');
-      console.log('[searchFunds] First 3 results:', formdData.results?.slice(0, 3).map(r => r.entityname));
+      // Always fetch Form D filings (they're the default view); skip only when
+      // search is scoped to adviser-only AND user is actively searching.
+      let formdData = { results: [] };
+      if (!hasSearchTerm || queryFormD) {
+        const formdParams = new URLSearchParams({ limit: '500' });
+        if (hasSearchTerm) {
+          formdParams.append('query', parsedQuery.apiQuery);
+          if (scope !== 'all') formdParams.append('scope', scope);
+        }
+        if (currentFilters.state) formdParams.append('state', currentFilters.state);
+        console.log('[searchFunds] Fetching Form D filings (scope=' + (hasSearchTerm ? scope : 'default') + ')...');
+        const formdResponse = await fetch(`/api/funds/formd?${formdParams}`);
+        formdData = await formdResponse.json();
+        console.log('[searchFunds] Form D response:', formdData.results?.length, 'results');
+        console.log('[searchFunds] First 3 results:', formdData.results?.slice(0, 3).map(r => r.entityname));
+      } else {
+        console.log('[searchFunds] Skipping Form D fetch (scope=adviser)');
+      }
 
       // If searching OR "Has Form ADV" filter is active, also get ADV funds and merge
       let advResults = [];
-      if (hasSearchTerm || currentFilters.hasAdv === 'yes') {
+      if ((queryADV) || currentFilters.hasAdv === 'yes') {
         const advParams = new URLSearchParams({
           pageSize: '500',
           sortBy: 'updated_at',
           sortOrder: 'desc'
         });
-        if (hasSearchTerm) advParams.append('query', parsedQuery.apiQuery);
+        if (hasSearchTerm) {
+          advParams.append('query', parsedQuery.apiQuery);
+          if (scope !== 'all') advParams.append('scope', scope);
+        }
         if (currentFilters.exemption === '3c1') advParams.append('exemption3c1', 'yes');
         if (currentFilters.exemption === '3c7') advParams.append('exemption3c7', 'yes');
 
-        console.log('[searchFunds] Fetching ADV funds...');
+        console.log('[searchFunds] Fetching ADV funds (scope=' + (hasSearchTerm ? scope : 'default') + ')...');
         const advResponse = await fetch(`/api/funds/adv?${advParams}`);
         const advData = await advResponse.json();
         advResults = advData.results || [];
@@ -4055,8 +4081,8 @@ function App() {
           <>
             {/* Header */}
             <header className="h-14 border-b border-gray-200 flex items-center justify-between px-6 sticky top-0 bg-white/90 backdrop-blur-md z-20">
-              <div className="flex-1 max-w-xl">
-                <div className="relative group">
+              <div className="flex-1 max-w-2xl flex items-center gap-2">
+                <div className="relative group flex-1">
                   <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-slate-600 transition-colors" />
                   <input
                     type="search"
@@ -4066,6 +4092,19 @@ function App() {
                     onChange={(e) => setSearchTerm(e.target.value)}
                   />
                 </div>
+                {activeTab === 'funds' && (
+                  <select
+                    value={searchScope}
+                    onChange={(e) => setSearchScope(e.target.value)}
+                    title="Limit search to a specific field. Default searches all."
+                    className="py-2 px-2 border border-gray-200 rounded-lg bg-gray-50/50 text-gray-700 text-[11px] focus:outline-none focus:bg-white focus:ring-1 focus:ring-slate-500 focus:border-slate-500 shadow-sm cursor-pointer"
+                  >
+                    <option value="all">In: all fields</option>
+                    <option value="name">In: fund name</option>
+                    <option value="related">In: related parties</option>
+                    <option value="adviser">In: adviser name</option>
+                  </select>
+                )}
               </div>
               <div className="ml-6 flex items-center space-x-6">
                 {user ? (

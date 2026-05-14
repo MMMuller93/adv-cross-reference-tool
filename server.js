@@ -501,18 +501,29 @@ app.get('/api/advisers/:crd/funds', async (req, res) => {
 // API: Search ADV Funds with pagination
 app.get('/api/funds/adv', async (req, res) => {
   try {
-    const { query, page = 1, pageSize = 100, exemption3c1, exemption3c7, sortBy = 'updated_at', sortOrder = 'desc' } = req.query;
+    const { query, page = 1, pageSize = 100, exemption3c1, exemption3c7, sortBy = 'updated_at', sortOrder = 'desc', scope = 'all' } = req.query;
 
     const pageNum = parseInt(page);
     const pageSizeNum = Math.min(parseInt(pageSize), 500);
     const offset = (pageNum - 1) * pageSizeNum;
 
-    console.log(`[Gemini] Searching ADV funds: ${query || '(all)'}`);
+    console.log(`[Gemini] Searching ADV funds: ${query || '(all)'} (scope=${scope})`);
+
+    // scope=related is Form-D-only (related_names lives on form_d_filings); short-circuit
+    if (query && scope === 'related') {
+      return res.json({ results: [], total: 0, count: 0, note: 'scope=related is Form-D-only' });
+    }
 
     let dbQuery = advClient.from('funds_enriched').select('*', { count: 'exact' });
 
     if (query) {
-      dbQuery = dbQuery.or(`fund_name.ilike.%${query}%,adviser_entity_legal_name.ilike.%${query}%`);
+      if (scope === 'name') {
+        dbQuery = dbQuery.ilike('fund_name', `%${query}%`);
+      } else if (scope === 'adviser') {
+        dbQuery = dbQuery.ilike('adviser_entity_legal_name', `%${query}%`);
+      } else {
+        dbQuery = dbQuery.or(`fund_name.ilike.%${query}%,adviser_entity_legal_name.ilike.%${query}%`);
+      }
     }
 
     if (exemption3c1 === 'yes') {
@@ -720,15 +731,29 @@ app.get('/api/funds/formd-match', async (req, res) => {
 // API: Search Form D filings
 app.get('/api/funds/formd', async (req, res) => {
   try {
-    const { query, limit = 1000, startDate, endDate, state } = req.query;
-    console.log(`[Gemini] Searching Form D: ${query || '(all)'}`);
+    const { query, limit = 1000, startDate, endDate, state, scope } = req.query;
+    console.log(`[Gemini] Searching Form D: ${query || '(all)'} (scope=${scope || 'all'})`);
 
     let dbQuery = formdClient
       .from('form_d_filings')
       .select('accessionnumber,entityname,cik,filing_date,stateorcountry,federalexemptions_items_list,investmentfundtype,related_names,related_roles,totalofferingamount,totalamountsold,issuerphonenumber,minimuminvestmentaccepted,totalnumberalreadyinvested,nameofsigner,signaturetitle,street1,city,zipcode,sale_date,totalremaining,salescomm_dollaramount,findersfee_dollaramount,hasnonaccreditedinvestors,numbernonaccreditedinvestors,isamendment,industrygrouptype,entitytype,jurisdictionofinc,file_num');
 
     if (query) {
-      dbQuery = dbQuery.or(`entityname.ilike.%${query}%,related_names.ilike.%${query}%`);
+      // Scope-limit which fields the query matches against:
+      //   - 'name'    → entityname only (the fund/entity name)
+      //   - 'related' → related_names only (key person / GP / promoter)
+      //   - 'adviser' → not applicable on Form D side; return empty
+      //   - 'all' (default) → entityname OR related_names (legacy behavior)
+      if (scope === 'name') {
+        dbQuery = dbQuery.ilike('entityname', `%${query}%`);
+      } else if (scope === 'related') {
+        dbQuery = dbQuery.ilike('related_names', `%${query}%`);
+      } else if (scope === 'adviser') {
+        // Form D doesn't track an adviser_name directly; return empty.
+        return res.json({ results: [], total: 0, note: 'scope=adviser is ADV-only' });
+      } else {
+        dbQuery = dbQuery.or(`entityname.ilike.%${query}%,related_names.ilike.%${query}%`);
+      }
     }
 
     // State filter (server-side - works fine)
