@@ -106,6 +106,14 @@ const fmtDecimal = (n, digits = 2) => {
 
 const fmtDate = (d) => {
   if (!d) return '—';
+  if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    const [year, month, day] = d.split('-').map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  }
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return String(d);
   return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -168,6 +176,28 @@ const securityTypeLabel = (assetCat) => {
     DE: 'Derivative',
   };
   return labels[assetCat] || assetCat || '—';
+};
+
+const unitLabel = (unit, otherUnitDesc) => {
+  const labels = {
+    NS: 'shares',
+    PA: 'principal',
+    OU: otherUnitDesc || 'other units',
+  };
+  return labels[unit] || unit || '—';
+};
+
+const yesNo = (value) => {
+  if (value === true) return 'Yes';
+  if (value === false) return 'No';
+  return '—';
+};
+
+const currentMark = (holding) => {
+  const value = Number(holding.value_usd ?? holding.currency_value_usd);
+  const balance = Number(holding.balance);
+  if (!Number.isFinite(value) || !Number.isFinite(balance) || balance === 0) return null;
+  return value / balance;
 };
 
 // ---------------------------------------------------------------------------
@@ -738,6 +768,7 @@ const CompanyPage = ({ slug }) => {
                         <td className="py-2.5 pr-3 text-gray-700">
                           <div>{h.share_class || '—'}</div>
                           <div className="text-[11px] text-gray-500">{securityTypeLabel(h.asset_cat)}</div>
+                          <NportFacts holding={h} />
                         </td>
                         <td className="py-2.5 text-right">
                           <div className="flex items-center justify-end gap-3">
@@ -765,8 +796,20 @@ const CompanyPage = ({ slug }) => {
                               <Detail label="Source batch" value={h.source_bulk_quarter || 'daily filing'} />
                               <Detail label="Fund type" value={h.fund_type && h.fund_type !== 'unknown' ? h.fund_type.replace(/_/g, ' ') : 'Not classified'} />
                               <Detail label="Exposure type" value={h.exposure_type || 'direct'} />
+                              <Detail label="Restricted security" value={yesNo(h.is_restricted_security)} />
+                              <Detail label="Fair value level" value={h.fair_value_level ? `Level ${h.fair_value_level}` : null} />
+                              <Detail label="Payoff profile" value={h.payoff_profile} />
+                              <Detail label="Balance unit" value={unitLabel(h.unit, h.other_unit_desc)} />
+                              <Detail label="Issuer type" value={h.issuer_type} />
+                              <Detail label="Investment country" value={h.investment_country} />
+                              <Detail label="Issuer LEI" value={h.issuer_lei} mono />
+                              <Detail label="Issuer CUSIP" value={h.issuer_cusip} mono />
+                              <Detail label="Other asset" value={h.other_asset} />
+                              <Detail label="Derivative category" value={h.derivative_cat} />
+                              <Detail label="Resolution source" value={h.resolution_source} />
                               <Detail label="Fiscal year-end" value={fmtDate(h.report_period_end)} />
                               <Detail label="Internal holding ID" value={h.holding_id_internal} mono />
+                              <Detail label="SEC holding ID" value={h.holding_id} mono />
                             </div>
                           </td>
                         </tr>
@@ -853,6 +896,36 @@ const Detail = ({ label, value, mono, className = '' }) => (
     <div className={`mt-0.5 text-gray-800 break-words ${mono ? 'font-mono text-[11px]' : ''}`}>{value || '—'}</div>
   </div>
 );
+
+const FactPill = ({ label, value, tone = 'slate' }) => {
+  const tones = {
+    slate: 'bg-slate-50 text-slate-700 ring-slate-200',
+    amber: 'bg-amber-50 text-amber-800 ring-amber-200',
+    emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  };
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 ring-1 ${tones[tone] || tones.slate}`}>
+      <span className="text-[9px] uppercase tracking-wider opacity-60">{label}</span>
+      <span className="font-semibold tabular-nums">{value || '—'}</span>
+    </span>
+  );
+};
+
+const NportFacts = ({ holding }) => {
+  const mark = currentMark(holding);
+  const restrictedTone = holding.is_restricted_security === true ? 'amber' : 'slate';
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1 text-[10px] leading-5">
+      <FactPill label="Restricted" value={yesNo(holding.is_restricted_security)} tone={restrictedTone} />
+      <FactPill label="FV" value={holding.fair_value_level ? `L${holding.fair_value_level}` : '—'} tone={holding.fair_value_level === 3 ? 'emerald' : 'slate'} />
+      <FactPill label="Asset" value={securityTypeLabel(holding.asset_cat)} />
+      <FactPill label="Payoff" value={holding.payoff_profile || '—'} />
+      <FactPill label="Units" value={unitLabel(holding.unit, holding.other_unit_desc)} />
+      <FactPill label="Issuer" value={holding.issuer_type || '—'} />
+      <FactPill label={holding.unit === 'PA' ? 'Mark/principal' : 'Mark/share'} value={mark ? fmtUsdPerShare(mark) : '—'} />
+    </div>
+  );
+};
 
 const stripCikLeadingZeros = (cik) => {
   if (!cik) return '';

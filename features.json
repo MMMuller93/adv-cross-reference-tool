@@ -29,7 +29,7 @@
       "status": "done",
       "passes": true,
       "tested_at": "2026-05-15",
-      "notes": "Created fund_ncen_adviser_links, loaded 41 Anthropic holder N-CEN summaries and 879 normalized adviser/subadviser links. ARK Venture Fund resolves to CRD 169525 with ADV phone/CCO/Form ADV/website. BlackRock Funds is intentionally ambiguous at CIK level but resolves by exact series. Witness check passed: 166 Python tests, 36 Node route tests, live preflight with fund_ncen_adviser_links=879."
+      "notes": "Created fund_ncen_adviser_links, loaded 41 Anthropic holder N-CEN summaries and 879 normalized adviser/subadviser links. ARK Venture Fund resolves to CRD 169525 with ADV phone/CCO/Form ADV/website. BlackRock Funds is intentionally ambiguous at CIK level but resolves by exact series. Witness check passed: 166 Python tests, 37 Node route tests, live preflight with fund_ncen_adviser_links=879."
     },
     {
       "id": "nport-001",

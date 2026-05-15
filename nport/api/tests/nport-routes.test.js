@@ -160,9 +160,14 @@ function defaultNportRouter(table) {
             report_period_date: '2025-12-31',
             balance: 1000,
             currency_value_usd: 187000000,
+            pct_of_nav: 1.2,
+            asset_cat: 'EP',
+            exposure_type: 'direct',
+            share_class_normalized: 'Series F',
             raw_issuer_name: 'ANTHROPIC PBC',
             raw_issuer_title: 'ANTHROPIC PBC SER F PC PP',
             accession_number: '0001234567-25-000001',
+            holding_id_internal: 1,
           },
         ],
         error: null,
@@ -264,11 +269,25 @@ function defaultNportRouter(table) {
         data: [
           {
             id: 1,
+            accession_number: '0001234567-25-000001',
+            holding_id: '123456',
             issuer_name: 'Anthropic PBC',
             issuer_title: 'ANTHROPIC PBC SER F PC PP',
             issuer_lei: null,
-            asset_cat: 'EC',
+            issuer_cusip: '000000000',
+            unit: 'NS',
+            other_unit_desc: null,
+            currency_code: 'USD',
+            exchange_rate: null,
+            payoff_profile: 'Long',
+            asset_cat: 'EP',
+            issuer_type: 'CORP',
+            investment_country: 'US',
+            is_restricted_security: true,
+            fair_value_level: 3,
+            derivative_cat: null,
             resolution_source: 'unresolved',
+            resolution_confidence: 80,
             source_bulk_quarter: '2026Q1',
             ingested_at: '2026-01-01',
           },
@@ -483,6 +502,11 @@ test('GET /companies/:slug/holders — 200 happy path', async () => {
   assert.equal(res.body.holders[0].registrant_name, 'Fidelity Investments');
   assert.equal(res.body.holders[0].first_seen_report_date, '2025-12-31');
   assert.equal(res.body.holders[0].first_seen_accession_number, '0001234567-25-000001');
+  assert.equal(res.body.holders[0].is_restricted_security, true);
+  assert.equal(res.body.holders[0].fair_value_level, 3);
+  assert.equal(res.body.holders[0].payoff_profile, 'Long');
+  assert.equal(res.body.holders[0].unit, 'NS');
+  assert.equal(res.body.holders[0].issuer_type, 'CORP');
 });
 
 test('GET /companies/:slug/holders — first seen tracks same fund and security across periods', async () => {

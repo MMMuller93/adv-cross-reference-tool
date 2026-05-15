@@ -25,6 +25,27 @@
 **Feature ID**: N-PORT private-company holdings database
 **Status**: Bulk + daily live ingestion loaded through 2026-05-14; materialized view refreshed; Anthropic holder adviser/contact enrichment smoke-tested
 
+### N-PORT Follow-Up Backlog (Keep Visible)
+
+**Usable next version estimate:** 4-6 hours with parallel agents.
+- Full N-CEN adviser backfill beyond Anthropic holders
+- Adviser/contact enrichment on all fund pages
+- Position delta computation
+- UI polish for adviser/fund/company drilldowns
+- Final reviewer/witness verification
+
+**Stronger production-grade version estimate:** 1-2 focused days.
+- N-1A portfolio manager extraction loaded and verified for priority fund families
+- N-CSR acquisition cost/date enrichment for major holders
+- Better duplicate/fund-series labeling
+- Broader QA across OpenAI, SpaceX, Databricks, Stripe, Epic, xAI, and other top companies
+- Tests plus live-data spot checks
+
+**Notes to remember:**
+- Hardest/slower enrichment is N-CSR purchase/acquisition dates; N-PORT does not contain purchase date or purchase price
+- Best parallel setup: N-CEN + CRD QA, N-1A PM extraction, N-CSR acquisition enrichment, deltas/UI polish, plus reviewer/witness agents
+- Product decisions still open: ambiguous adviser UI (note vs candidate list), default latest-only vs history-forward pages, standalone N-PORT dashboard vs main PFR integration
+
 ### Recent Completion (Session May 15, 2026)
 
 ✅ **N-CEN adviser/contact enrichment for Anthropic holder universe**

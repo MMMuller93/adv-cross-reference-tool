@@ -273,7 +273,38 @@ async function enrichPositionsWithFilingMetadata(deps, rows) {
     positions.map((row) => row.accession_number)
   );
   const byAccession = new Map((filings || []).map((row) => [row.accession_number, row]));
+  const holdingFacts = await fetchRowsByIn(
+    deps.nportClient,
+    'nport_holdings',
+    [
+      'id',
+      'holding_id',
+      'issuer_lei',
+      'issuer_cusip',
+      'unit',
+      'other_unit_desc',
+      'currency_code',
+      'exchange_rate',
+      'payoff_profile',
+      'other_asset',
+      'issuer_type',
+      'other_issuer',
+      'investment_country',
+      'is_restricted_security',
+      'fair_value_level',
+      'derivative_cat',
+      'resolution_source',
+      'resolution_confidence',
+      'underlier_issuer_name',
+    ].join(', '),
+    'id',
+    positions.map((row) => row.holding_id_internal)
+  );
+  const byHoldingId = new Map(
+    (holdingFacts || []).map((row) => [Number(row.id), row])
+  );
   return positions.map((row) => ({
+    ...(byHoldingId.get(Number(row.holding_id_internal)) || {}),
     ...row,
     ...(byAccession.get(row.accession_number) || {}),
   }));
