@@ -224,6 +224,23 @@ function defaultNportRouter(table) {
         error: null,
       };
 
+    case 'fund_ncen_adviser_links':
+      return {
+        data: [
+          {
+            accession_number: '0000035402-26-001453',
+            registrant_cik: '0000024238',
+            series_id: 'S000004007',
+            adviser_role: 'investment_adviser',
+            adviser_name: 'Fidelity Management & Research Company LLC',
+            adviser_crd_raw: '000108281',
+            adviser_crd_normalized: '108281',
+            filing_date: '2026-03-12',
+          },
+        ],
+        error: null,
+      };
+
     case 'position_deltas':
       return {
         data: [
@@ -619,6 +636,40 @@ test('GET /companies/:slug/cross — 200 consolidated view', async () => {
   assert.ok(Array.isArray(res.body.relatedAdvisers));
 });
 
+test('GET /companies/:slug/cross — resolves N-CEN links across padded CIK variants', async () => {
+  installMocks({
+    nportRouter: (table) => {
+      if (table === 'fund_ncen_adviser_links') {
+        return (ops) => {
+          const inOp = ops.find(([name, args]) => name === 'in' && args[0] === 'registrant_cik');
+          const queried = new Set((inOp && inOp[1][1]) || []);
+          return {
+            data: queried.has('0000024238')
+              ? [
+                  {
+                    registrant_cik: '0000024238',
+                    series_id: 'S000004007',
+                    adviser_role: 'investment_adviser',
+                    adviser_crd_normalized: '000108281',
+                    filing_date: '2026-03-12',
+                  },
+                ]
+              : [],
+            error: null,
+          };
+        };
+      }
+      return defaultNportRouter(table);
+    },
+  });
+
+  const res = await request(baseUrl, 'GET', '/api/nport/companies/anthropic/cross');
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.relatedAdvisers.length, 1);
+  assert.equal(res.body.relatedAdvisers[0].crd, 108281);
+});
+
 test('GET /companies/:slug/cross — 404 on unknown company', async () => {
   installMocks({
     nportRouter: (t) =>
@@ -683,6 +734,15 @@ test('GET /funds/:cik/:series_id/managers — 200 happy path', async () => {
   assert.equal(res.body.managers[0].pm_name, 'Will Danoff');
 });
 
+test('GET /funds/:cik/adviser — 200 with registrant-level adviser', async () => {
+  installMocks();
+  const res = await request(baseUrl, 'GET', '/api/nport/funds/24238/adviser');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.series_id, null);
+  assert.equal(res.body.adviser_crd, '108281');
+  assert.equal(res.body.adviser.crd, 108281);
+});
+
 test('GET /funds/:cik/:series_id/adviser — 200 with adviser', async () => {
   installMocks();
   const res = await request(
@@ -695,9 +755,128 @@ test('GET /funds/:cik/:series_id/adviser — 200 with adviser', async () => {
   assert.equal(res.body.adviser.crd, 108281);
 });
 
+test('GET /funds/:cik/:series_id/adviser — normalizes zero-padded N-CEN CRD', async () => {
+  installMocks({
+    nportRouter: (t) => {
+      if (t === 'fund_ncen_adviser_links') {
+        return {
+          data: [
+            {
+              accession_number: '0000035402-26-001453',
+              registrant_cik: '0000024238',
+              series_id: 'S000004007',
+              adviser_role: 'investment_adviser',
+              adviser_name: 'Fidelity Management & Research Company LLC',
+              adviser_crd_raw: '000108281',
+              adviser_crd_normalized: '000108281',
+              filing_date: '2026-03-12',
+            },
+          ],
+          error: null,
+        };
+      }
+      return defaultNportRouter(t);
+    },
+  });
+  const res = await request(
+    baseUrl,
+    'GET',
+    '/api/nport/funds/24238/S000004007/adviser'
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.body.adviser_crd, '108281');
+  assert.equal(res.body.ncen_source, 'fund_ncen_adviser_links');
+  assert.equal(res.body.adviser.crd, 108281);
+});
+
+test('GET /funds/:cik/adviser — does not pick an arbitrary adviser for multi-adviser registrants', async () => {
+  installMocks({
+    nportRouter: (t) => {
+      if (t === 'fund_ncen_adviser_links') {
+        return {
+          data: [
+            {
+              accession_number: '0000844779-26-000001',
+              registrant_cik: '0000844779',
+              series_id: 'S000038448',
+              adviser_role: 'investment_adviser',
+              adviser_name: 'BlackRock Advisors, LLC',
+              adviser_crd_raw: '000106614',
+              adviser_crd_normalized: '106614',
+              filing_date: '2026-03-12',
+            },
+            {
+              accession_number: '0000844779-26-000001',
+              registrant_cik: '0000844779',
+              series_id: 'S000087852',
+              adviser_role: 'investment_adviser',
+              adviser_name: 'BlackRock Fund Advisors',
+              adviser_crd_raw: '000105247',
+              adviser_crd_normalized: '105247',
+              filing_date: '2026-03-12',
+            },
+          ],
+          error: null,
+        };
+      }
+      if (t === 'fund_ncen_records') return { data: [], error: null };
+      return defaultNportRouter(t);
+    },
+  });
+
+  const res = await request(baseUrl, 'GET', '/api/nport/funds/844779/adviser');
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.adviser_crd, null);
+  assert.equal(res.body.adviser, null);
+  assert.match(res.body.note, /Multiple N-CEN investment advisers/);
+});
+
+test('GET /funds/:cik/:series_id/adviser — does not fall back to another series adviser on exact miss', async () => {
+  installMocks({
+    nportRouter: (t) => {
+      if (t === 'fund_ncen_adviser_links') {
+        return (ops) => {
+          const eqSeries = ops.find(([name, args]) => name === 'eq' && args[0] === 'series_id');
+          if (eqSeries) return { data: [], error: null };
+          return {
+            data: [
+              {
+                accession_number: '0000035402-26-001453',
+                registrant_cik: '0000024238',
+                series_id: 'S000099999',
+                adviser_role: 'investment_adviser',
+                adviser_name: 'Fidelity Management & Research Company LLC',
+                adviser_crd_raw: '000108281',
+                adviser_crd_normalized: '108281',
+                filing_date: '2026-03-12',
+              },
+            ],
+            error: null,
+          };
+        };
+      }
+      if (t === 'fund_ncen_records') return { data: [], error: null };
+      return defaultNportRouter(t);
+    },
+  });
+
+  const res = await request(
+    baseUrl,
+    'GET',
+    '/api/nport/funds/24238/S000004007/adviser'
+  );
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.adviser_crd, null);
+  assert.equal(res.body.exact_series_match, false);
+  assert.match(res.body.note, /No exact N-CEN adviser link/);
+});
+
 test('GET /funds/:cik/:series_id/adviser — 200 null when no link', async () => {
   installMocks({
     nportRouter: (t) => {
+      if (t === 'fund_ncen_adviser_links') return { data: [], error: null };
       if (t === 'fund_ncen_records') return { data: [], error: null };
       return defaultNportRouter(t);
     },

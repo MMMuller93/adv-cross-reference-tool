@@ -5,7 +5,7 @@
 - **Port**: 3009
 - **Goal**: Comprehensive intelligence platform for private fund managers
 - **Started**: 2025-11
-- **Last Updated**: 2026-05-14
+- **Last Updated**: 2026-05-15
 - **Version**: 2.7.0
 
 ---
@@ -23,7 +23,22 @@
 ## Active Task
 **Currently Working On**: N-PORT live ingestion in isolated `nport/` subtree
 **Feature ID**: N-PORT private-company holdings database
-**Status**: Bulk + daily live ingestion loaded through 2026-05-14; materialized view refreshed and smoke-tested
+**Status**: Bulk + daily live ingestion loaded through 2026-05-14; materialized view refreshed; Anthropic holder adviser/contact enrichment smoke-tested
+
+### Recent Completion (Session May 15, 2026)
+
+✅ **N-CEN adviser/contact enrichment for Anthropic holder universe**
+- Added normalized `fund_ncen_adviser_links` table for per-series N-CEN adviser/subadviser links; kept `fund_ncen_records` as a filing-level summary only
+- Updated N-CEN parser to preserve `mgmtInvSeriesId`, fund name, and LEI on each adviser/subadviser link
+- Added live N-CEN backfill command with dry-run default, pre/post counts, backup of affected `nport_registrants`, 500-row upsert batches, raw+normalized CRD storage, and ambiguous multi-adviser CIK handling
+- Loaded latest N-CEN data for all 41 Anthropic holder CIKs: `fund_ncen_records=41`, `fund_ncen_adviser_links=879`, failures `0`
+- Linked 40 unambiguous registrants to ADV CRD; left BlackRock Funds (`0000844779`) intentionally unlinked at registrant level because latest N-CEN has multiple primary adviser CRDs, while exact series-level links remain available
+- API now resolves `/api/nport/funds/:cik/adviser` and `/api/nport/funds/:cik/:series_id/adviser`, normalizes zero-padded N-CEN CRDs to ADV CRDs, and avoids arbitrary adviser selection for multi-adviser registrants
+- Fund page now shows adviser name, CRD/Form ADV link, website, ADV firm AUM, phone, registration type, CCO, and regulatory contact where available
+- Fixed standalone frontend boot race where fresh `/company/*` or `/fund/*` routes could show the placeholder instead of mounting the React page
+- Live checks: ARK Venture Fund resolves to ARK Investment Management LLC / CRD `169525` with ADV contact data; BlackRock CIK-level route returns an ambiguity note; a concrete BlackRock series resolves to CRD `106614`
+- Witness: `./.venv/bin/python -m pytest nport -q` → 166 passed; `nport/api npm test` → 37 passed; `nport/scripts/witness_check.sh` passed with `nport_company_positions_mv=52453` and `fund_ncen_adviser_links=879`
+- Local standalone server is running on `http://127.0.0.1:3010/company/anthropic` in detached `screen` session `nport-api-3010`
 
 ### Recent Completion (Session May 14, 2026)
 

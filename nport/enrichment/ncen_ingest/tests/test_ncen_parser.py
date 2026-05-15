@@ -54,6 +54,18 @@ def test_fidelity_adviser_crd():
     assert adv.is_subadviser is False
 
 
+def test_fidelity_adviser_links_preserve_series():
+    """Per-series adviser links keep mgmtInvSeriesId for N-PORT joins."""
+    f = parse_ncen_xml(_load("ncen_fidelity_raw.xml"))
+    assert len(f.investment_adviser_links) >= 4
+    series_ids = {a.series_id for a in f.investment_adviser_links}
+    assert "S000006036" in series_ids
+    first = next(a for a in f.investment_adviser_links if a.series_id == "S000006036")
+    assert first.series_name == "Fidelity Advisor New Insights Fund"
+    assert first.name == "Fidelity Management & Research Company LLC"
+    assert first.crd == "000108281"
+
+
 def test_fidelity_subadvisers():
     """Confirm sub-advisers (FMR UK, HK, Japan)."""
     f = parse_ncen_xml(_load("ncen_fidelity_raw.xml"))
@@ -69,6 +81,9 @@ def test_fidelity_subadvisers():
     assert uk.country == "GB"
     assert uk.is_subadviser is True
 
+    uk_link = next(s for s in f.sub_adviser_links if "UK" in (s.name or ""))
+    assert uk_link.series_id == "S000006036"
+
 
 # ---------------------------------------------------------------------------
 # Vanguard
@@ -83,6 +98,8 @@ def test_vanguard_basic():
     assert adv.name == "The Vanguard Group, Inc."
     assert adv.crd == "000105958"
     assert adv.file_no == "801-11953"
+    assert len(f.investment_adviser_links) >= 10
+    assert any(a.series_id == "S000002839" for a in f.investment_adviser_links)
 
 
 # ---------------------------------------------------------------------------

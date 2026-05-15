@@ -34,6 +34,7 @@ nport-deltas   = "nport.delta_detection.compute_deltas:main"
 nport-seed-merge = "nport.seed_loader.merge_and_emit:main"
 nport-seed-supabase = "nport.seed_loader.load_seed_supabase:main"
 nport-ncen     = "nport.enrichment.ncen_ingest.daily_ncen:main"
+nport-ncen-backfill-live = "nport.enrichment.ncen_ingest.backfill_live:main"
 nport-n1a-pm   = "nport.enrichment.n1a_extract.dispatcher:main"
 nport-ncsr     = "nport.enrichment.ncsr_enrich.dispatcher:main"
 

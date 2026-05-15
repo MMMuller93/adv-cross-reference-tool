@@ -24,6 +24,7 @@ EXPECTED_RELATIONS = [
     "nport_holdings_ncsr",
     "fund_portfolio_managers",
     "fund_ncen_records",
+    "fund_ncen_adviser_links",
     "position_deltas",
     "nport_company_positions_mv",
 ]

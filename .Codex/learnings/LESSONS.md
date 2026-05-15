@@ -28,6 +28,14 @@
 - **Verify**: `rg "limit\\(([^)]*5000|maxRows)\\)" nport/api/routes/nport.js` must not find uncapped Supabase reads.
 - **Hits**: 1
 
+### L-007: Never infer a series adviser from another N-CEN series
+- **Signal**: evaluative
+- **Mistake**: The first N-CEN adviser API fallback could answer a series-specific route with a registrant-level adviser when the exact `(CIK, series_id)` link was missing.
+- **Root cause**: Treated CIK-level adviser identity as safe, but N-CEN can report multiple primary advisers across series under the same registrant.
+- **Fix pattern**: For `/funds/:cik/:series_id/adviser`, require an exact series N-CEN link; for CIK-level routes, return an ambiguity note when latest N-CEN links contain multiple adviser identities.
+- **Verify**: Node route tests must cover exact-series miss and multi-adviser registrants, and live BlackRock CIK `0000844779` must stay unlinked at registrant level.
+- **Hits**: 1
+
 ## coding-patterns
 
 ### L-004: Protect admin mutation endpoints before local convenience

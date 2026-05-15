@@ -48,8 +48,70 @@ function uniqueRegistrantCiks(positions = []) {
   return [...seen];
 }
 
+function cikVariants(cik) {
+  const text = String(cik || '').trim();
+  if (!text) return [];
+  const trimmed = text.replace(/^0+/, '') || '0';
+  const padded = trimmed.padStart(10, '0');
+  return [...new Set([text, trimmed, padded])];
+}
+
+function positionSeriesKeys(positions = []) {
+  const keys = new Map();
+  for (const p of positions || []) {
+    const cik = p && p.registrant_cik != null ? String(p.registrant_cik) : '';
+    if (!cik) continue;
+    const series = p && p.series_id != null ? String(p.series_id) : '';
+    for (const variant of cikVariants(cik)) {
+      keys.set(`${variant}|${series}`, { cik: variant, series });
+    }
+  }
+  return [...keys.values()];
+}
+
+function normalizeCrd(crd) {
+  const text = String(crd || '').trim();
+  if (!text || text.toUpperCase() === 'N/A') return null;
+  return /^\d+$/.test(text) ? text.replace(/^0+/, '') || '0' : text;
+}
+
+function isMissingRelationError(err) {
+  const text = `${(err && err.code) || ''} ${(err && err.message) || ''}`;
+  return /PGRST205|does not exist|Could not find.*table|fund_ncen_adviser_links/i.test(text);
+}
+
+async function fetchAdvCrdsFromNcenLinks(nport, positions = []) {
+  const ciks = [...new Set(uniqueRegistrantCiks(positions).flatMap(cikVariants))];
+  if (ciks.length === 0) return [];
+  const wanted = new Set(positionSeriesKeys(positions).map((k) => `${k.cik}|${k.series}`));
+  const out = new Set();
+  try {
+    for (let i = 0; i < ciks.length; i += 100) {
+      const chunk = ciks.slice(i, i + 100);
+      const { data, error } = await nport
+        .from('fund_ncen_adviser_links')
+        .select('registrant_cik,series_id,adviser_crd_normalized,adviser_role,filing_date')
+        .in('registrant_cik', chunk)
+        .eq('adviser_role', 'investment_adviser');
+      if (error) throw error;
+      for (const row of data || []) {
+        const cik = row.registrant_cik != null ? String(row.registrant_cik) : '';
+        const series = row.series_id != null ? String(row.series_id) : '';
+        const exactKey = `${cik}|${series}`;
+        const cikLevelKey = `${cik}|`;
+        if (!wanted.has(exactKey) && !wanted.has(cikLevelKey)) continue;
+        const crd = normalizeCrd(row.adviser_crd_normalized);
+        if (crd) out.add(crd);
+      }
+    }
+  } catch (err) {
+    if (!isMissingRelationError(err)) throw err;
+  }
+  return [...out];
+}
+
 async function fetchAdvCrdsFromRegistrants(nport, positions = []) {
-  const ciks = uniqueRegistrantCiks(positions);
+  const ciks = [...new Set(uniqueRegistrantCiks(positions).flatMap(cikVariants))];
   if (ciks.length === 0) return [];
   const out = new Set();
   for (let i = 0; i < ciks.length; i += 100) {
@@ -121,6 +183,9 @@ async function getCrossSourceCompanyView(slug, deps = {}) {
   // Second-stage lookup: ADV advisers referenced by the position rows.
   let crdList = uniqueAdvCrds(nportPositions);
   if (crdList.length === 0) {
+    crdList = await fetchAdvCrdsFromNcenLinks(nport, nportPositions);
+  }
+  if (crdList.length === 0) {
     crdList = await fetchAdvCrdsFromRegistrants(nport, nportPositions);
   }
   let advAdvisers = [];
@@ -147,6 +212,9 @@ module.exports = {
   nportClient,
   uniqueAdvCrds,
   uniqueRegistrantCiks,
+  cikVariants,
+  positionSeriesKeys,
+  fetchAdvCrdsFromNcenLinks,
   fetchAdvCrdsFromRegistrants,
   getCrossSourceCompanyView,
 };

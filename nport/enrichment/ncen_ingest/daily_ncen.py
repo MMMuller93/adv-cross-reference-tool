@@ -118,7 +118,9 @@ class DailyNCenScraper:
             LOG.warning("Could not extract accession from path: %s", row.file_path)
             return None
         accession_nodashes = accession.replace("-", "")
-        # N-CEN primary doc is always primary_doc.xml per the EDGAR submission convention
+        # The submissions API may list xslFormN-CEN_X01/primary_doc.xml as the
+        # display document, which is SEC-rendered HTML. The raw XML remains at
+        # the accession root as primary_doc.xml.
         url = f"{EDGAR_BASE}/{int(row.cik)}/{accession_nodashes}/primary_doc.xml"
         try:
             resp = self._get(url, timeout=60)

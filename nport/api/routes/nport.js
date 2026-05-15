@@ -125,6 +125,67 @@ function cikVariants(cik) {
   return Array.from(new Set([s, padded, trimmed]));
 }
 
+function crdVariants(crd) {
+  const s = String(crd || '').trim();
+  if (!s) return [];
+  const stripped = s.replace(/^0+/, '') || '0';
+  const padded = /^\d+$/.test(stripped) ? stripped.padStart(9, '0') : s;
+  const numeric = /^\d+$/.test(stripped) ? Number(stripped) : null;
+  return Array.from(
+    new Set([s, stripped, padded, numeric].filter((value) => value !== null && value !== ''))
+  );
+}
+
+function normalizeCrd(crd) {
+  const s = String(crd || '').trim();
+  if (!s || s.toUpperCase() === 'N/A') return null;
+  return /^\d+$/.test(s) ? s.replace(/^0+/, '') || '0' : s;
+}
+
+function isMissingRelationError(err) {
+  const text = `${(err && err.code) || ''} ${(err && err.message) || ''}`;
+  return /PGRST205|does not exist|Could not find.*table|fund_ncen_adviser_links/i.test(text);
+}
+
+function uniqueAdviserIdentity(row) {
+  if (!row) return null;
+  return (
+    normalizeCrd(row.adviser_crd_normalized || row.adviser_crd_raw) ||
+    String(row.adviser_lei || '').trim() ||
+    String(row.adviser_name || '').trim()
+  ) || null;
+}
+
+function pickUnambiguousNcenRow(rows) {
+  const candidates = rows || [];
+  if (candidates.length === 0) {
+    return { row: null, ambiguous: false, candidate_count: 0 };
+  }
+  const latestDate = candidates
+    .map((row) => row.filing_date)
+    .filter(Boolean)
+    .sort()
+    .pop();
+  const latestRows = latestDate
+    ? candidates.filter((row) => row.filing_date === latestDate)
+    : candidates;
+  const identities = new Set(latestRows.map(uniqueAdviserIdentity).filter(Boolean));
+  if (identities.size > 1) {
+    return {
+      row: null,
+      ambiguous: true,
+      candidate_count: latestRows.length,
+      identities: [...identities],
+    };
+  }
+  return {
+    row: latestRows[0] || null,
+    ambiguous: false,
+    candidate_count: latestRows.length,
+    identities: [...identities],
+  };
+}
+
 function toNumber(value) {
   if (typeof value === 'number') return value;
   if (value === null || value === undefined || value === '') return null;
@@ -228,6 +289,163 @@ async function fetchRowsByIn(client, table, columns, key, values, chunkSize = 10
     out.push(...(data || []));
   }
   return out;
+}
+
+async function fetchAdvAdviserByCrd(adviserCrd) {
+  const variants = crdVariants(adviserCrd);
+  if (variants.length === 0 || !deps.advClient) return null;
+  const { data, error } = await deps.advClient
+    .from('advisers_enriched')
+    .select('*')
+    .in('crd', variants)
+    .limit(1);
+  if (error) throw error;
+  return (data || [])[0] || null;
+}
+
+async function fetchNcenAdviserLink(variants, seriesId, { allowRegistrantFallback = !seriesId } = {}) {
+  try {
+    if (seriesId) {
+      const exactRes = await deps.nportClient
+        .from('fund_ncen_adviser_links')
+        .select('*')
+        .in('registrant_cik', variants)
+        .eq('series_id', seriesId)
+        .eq('adviser_role', 'investment_adviser')
+        .order('filing_date', { ascending: false })
+        .limit(50);
+      if (exactRes.error) throw exactRes.error;
+      const exact = pickUnambiguousNcenRow(exactRes.data || []);
+      if (exact.row || exact.ambiguous) {
+        return { ...exact, source: 'fund_ncen_adviser_links' };
+      }
+      if (!allowRegistrantFallback) {
+        return {
+          row: null,
+          source: 'fund_ncen_adviser_links',
+          ambiguous: false,
+          candidate_count: 0,
+          exact_series_match: false,
+        };
+      }
+    }
+
+    const fallbackRes = await deps.nportClient
+      .from('fund_ncen_adviser_links')
+      .select('*')
+      .in('registrant_cik', variants)
+      .eq('adviser_role', 'investment_adviser')
+      .order('filing_date', { ascending: false })
+      .limit(1000);
+    if (fallbackRes.error) throw fallbackRes.error;
+    const fallback = pickUnambiguousNcenRow(fallbackRes.data || []);
+    return {
+      ...fallback,
+      source: fallback.row || fallback.ambiguous ? 'fund_ncen_adviser_links' : null,
+    };
+  } catch (err) {
+    if (isMissingRelationError(err)) {
+      return { row: null, source: null, ambiguous: false, candidate_count: 0 };
+    }
+    throw err;
+  }
+}
+
+async function fetchLegacyNcenRecord(variants, seriesId, { allowRegistrantFallback = !seriesId } = {}) {
+  let exact = [];
+  if (seriesId) {
+    const exactRes = await deps.nportClient
+      .from('fund_ncen_records')
+      .select(
+        'investment_adviser_name, investment_adviser_crd, investment_adviser_lei, subadviser_name, subadviser_crd, filing_date, accession_number, fiscal_year_end, fund_type, series_id'
+      )
+      .in('registrant_cik', variants)
+      .eq('series_id', seriesId)
+      .order('filing_date', { ascending: false })
+      .limit(1);
+    if (exactRes.error) throw exactRes.error;
+    exact = exactRes.data || [];
+  }
+  if (exact.length > 0) return { row: exact[0], source: 'fund_ncen_records' };
+  if (!allowRegistrantFallback) {
+    return { row: null, source: null, exact_series_match: false };
+  }
+
+  const fallbackRes = await deps.nportClient
+    .from('fund_ncen_records')
+    .select(
+      'investment_adviser_name, investment_adviser_crd, investment_adviser_lei, subadviser_name, subadviser_crd, filing_date, accession_number, fiscal_year_end, fund_type, series_id'
+    )
+    .in('registrant_cik', variants)
+    .order('filing_date', { ascending: false })
+    .limit(1);
+  if (fallbackRes.error) throw fallbackRes.error;
+  const fallback = fallbackRes.data || [];
+  return {
+    row: fallback[0] || null,
+    source: fallback[0] ? 'fund_ncen_records' : null,
+  };
+}
+
+function adviserCrdFromNcen(row) {
+  if (!row) return null;
+  return normalizeCrd(row.adviser_crd_normalized || row.investment_adviser_crd);
+}
+
+async function resolveFundAdviser(cik, seriesId = null) {
+  const variants = cikVariants(cik);
+  let { row: ncenRow, source, ambiguous, candidate_count, exact_series_match } = await fetchNcenAdviserLink(
+    variants,
+    seriesId,
+    { allowRegistrantFallback: !seriesId }
+  );
+  if (ambiguous) {
+    return {
+      cik,
+      series_id: seriesId,
+      adviser_crd: null,
+      adviser: null,
+      ncen_link: null,
+      ncen_source: source,
+      candidate_count,
+      note: seriesId
+        ? 'Multiple N-CEN investment advisers matched this series'
+        : 'Multiple N-CEN investment advisers matched this registrant; open a specific series to resolve the adviser',
+    };
+  }
+  if (!ncenRow) {
+    const legacy = await fetchLegacyNcenRecord(variants, seriesId, {
+      allowRegistrantFallback: !seriesId,
+    });
+    ncenRow = legacy.row;
+    source = legacy.source;
+    if (legacy.exact_series_match === false) exact_series_match = false;
+  }
+
+  const adviserCrd = adviserCrdFromNcen(ncenRow);
+  if (!adviserCrd) {
+    return {
+      cik,
+      series_id: seriesId,
+      adviser_crd: null,
+      adviser: null,
+      ncen_link: ncenRow || null,
+      ncen_source: source,
+      exact_series_match,
+      note: seriesId
+        ? 'No exact N-CEN adviser link has been resolved for this series'
+        : 'No ADV cross-link resolved for this registrant',
+    };
+  }
+  const adviser = await fetchAdvAdviserByCrd(adviserCrd);
+  return {
+    cik,
+    series_id: seriesId,
+    adviser_crd: adviserCrd,
+    adviser,
+    ncen_link: ncenRow || null,
+    ncen_source: source,
+  };
 }
 
 async function fetchCompanyHoldingsByKeyset(deps, companyId, { maxRows = 10000 } = {}) {
@@ -851,6 +1069,36 @@ router.get('/funds/:cik/positions', async (req, res) => {
 });
 
 /**
+ * GET /api/nport/funds/:cik/adviser
+ * Registrant-level N-CEN -> ADV adviser link.
+ */
+router.get('/funds/:cik/adviser', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const { cik } = req.params;
+    if (!/^\d+$/.test(cik)) {
+      return badRequest(res, 'cik must be numeric', 'INVALID_CIK');
+    }
+
+    const variants = cikVariants(cik);
+    const { data: filer, error: filerErr } = await deps.nportClient
+      .from('nport_registrants')
+      .select('cik')
+      .in('cik', variants)
+      .limit(1);
+    if (filerErr) throw filerErr;
+    if (!filer || filer.length === 0) {
+      return notFound(res, `Filer not found: ${cik}`, 'FILER_NOT_FOUND');
+    }
+
+    const payload = await resolveFundAdviser(cik, null);
+    return res.json(payload);
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+/**
  * GET /api/nport/funds/:cik/:series_id — single fund series detail
  */
 router.get('/funds/:cik/:series_id', async (req, res) => {
@@ -973,9 +1221,8 @@ router.get('/funds/:cik/:series_id/managers', async (req, res) => {
  * GET /api/nport/funds/:cik/:series_id/adviser
  * Cross-link to ADV adviser record.
  *
- * Source of CRD: fund_ncen_records (investment_adviser_crd column). The
- * schema has no per-series adviser_crd column on filings; we look up
- * the most recent N-CEN for this CIK+series.
+ * Source of CRD: normalized fund_ncen_adviser_links by CIK + SEC series ID,
+ * with legacy fund_ncen_records used only as a fallback for older databases.
  */
 router.get('/funds/:cik/:series_id/adviser', async (req, res) => {
   if (!configGuard(res)) return;
@@ -1002,43 +1249,8 @@ router.get('/funds/:cik/:series_id/adviser', async (req, res) => {
       );
     }
 
-    // Look up the most recent N-CEN row for adviser CRD.
-    const { data: ncen, error: ncenErr } = await deps.nportClient
-      .from('fund_ncen_records')
-      .select(
-        'investment_adviser_name, investment_adviser_crd, subadviser_name, subadviser_crd, filing_date'
-      )
-      .in('registrant_cik', variants)
-      .eq('series_id', seriesId)
-      .order('filing_date', { ascending: false })
-      .limit(1);
-    if (ncenErr) throw ncenErr;
-
-    const adviserCrd =
-      ncen && ncen.length > 0 ? ncen[0].investment_adviser_crd : null;
-    if (!adviserCrd) {
-      return res.json({
-        cik,
-        series_id: seriesId,
-        adviser_crd: null,
-        adviser: null,
-        note: 'No ADV cross-link resolved for this series',
-      });
-    }
-
-    const { data: adviser, error: advErr } = await deps.advClient
-      .from('advisers_enriched')
-      .select('*')
-      .eq('crd', adviserCrd)
-      .maybeSingle();
-    if (advErr) throw advErr;
-
-    return res.json({
-      cik,
-      series_id: seriesId,
-      adviser_crd: adviserCrd,
-      adviser: adviser || null,
-    });
+    const payload = await resolveFundAdviser(cik, seriesId);
+    return res.json(payload);
   } catch (err) {
     return serverError(res, err);
   }

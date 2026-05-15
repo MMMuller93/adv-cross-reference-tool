@@ -33,14 +33,15 @@
     <script src="/mocks/nport.js"></script>
     <script type="text/babel" src="/nport_pages.js"></script>
     <script type="text/babel">
-      // Mount NportRouter on the matched route. This file lives in
-      // nport/frontend/ and is served by nport/api/server.js as static.
       (function () {
-        const route = window.matchNportRoute && window.matchNportRoute(window.location.pathname);
-        if (route && typeof window.NportRouter !== 'undefined') {
-          const root = ReactDOM.createRoot(document.getElementById('root'));
-          root.render(React.createElement(window.NportRouter, { route }));
+        function mountWhenReady() {
+          if (typeof window.mountNportRouter === 'function') {
+            window.mountNportRouter();
+            return;
+          }
+          window.setTimeout(mountWhenReady, 25);
         }
+        mountWhenReady();
       })();
     </script>
   </body>

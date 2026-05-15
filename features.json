@@ -4,15 +4,33 @@
     "description": "Compliance detection system for Form D/ADV cross-reference analysis",
     "port": 3009,
     "created_at": "2025-11",
-    "last_updated": "2026-05-14"
+    "last_updated": "2026-05-15"
   },
   "session_state": {
     "current_session": 11,
     "last_working_commit": "05456fa",
     "environment_verified": true,
-    "notes": "N-PORT isolated live ingestion loaded through 2026Q1 bulk plus Q2-to-date daily catch-up on 2026-05-14. Materialized view refreshed and Anthropic API smoke checks now use source=materialized_view."
+    "notes": "N-PORT isolated live ingestion loaded through 2026Q1 bulk plus Q2-to-date daily catch-up on 2026-05-14. Materialized view refreshed. Anthropic holder N-CEN adviser/contact enrichment loaded and smoke-tested on 2026-05-15."
   },
   "features": [
+    {
+      "id": "nport-002",
+      "category": "nport",
+      "description": "N-CEN adviser/contact enrichment for N-PORT fund pages",
+      "acceptance_criteria": [
+        "Preserve per-series N-CEN adviser links via mgmtInvSeriesId",
+        "Normalize zero-padded N-CEN CRDs before joining to ADV advisers_enriched",
+        "Avoid registrant-level adviser links when a CIK has multiple primary adviser CRDs",
+        "Expose fund adviser API routes with ADV contact data",
+        "Render adviser/contact panel on fund pages",
+        "Load and verify Anthropic holder universe"
+      ],
+      "priority": 1,
+      "status": "done",
+      "passes": true,
+      "tested_at": "2026-05-15",
+      "notes": "Created fund_ncen_adviser_links, loaded 41 Anthropic holder N-CEN summaries and 879 normalized adviser/subadviser links. ARK Venture Fund resolves to CRD 169525 with ADV phone/CCO/Form ADV/website. BlackRock Funds is intentionally ambiguous at CIK level but resolves by exact series. Witness check passed: 166 Python tests, 36 Node route tests, live preflight with fund_ncen_adviser_links=879."
+    },
     {
       "id": "nport-001",
       "category": "nport",
@@ -218,7 +236,7 @@
     }
   ],
   "completed_features": [
-    "nport-001",
+    "nport-001", "nport-002",
     "feat-001", "feat-002", "feat-003", "feat-004",
     "radar-001", "radar-002", "radar-003", "radar-004", "radar-005"
   ],

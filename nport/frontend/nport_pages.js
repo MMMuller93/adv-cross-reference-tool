@@ -111,6 +111,30 @@ const fmtDate = (d) => {
   return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
+const splitWebsiteList = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.flatMap(splitWebsiteList);
+  return String(value)
+    .split(/[;,]\s*/)
+    .map((v) => v.trim())
+    .filter(Boolean);
+};
+
+const adviserWebsite = (adviser) => {
+  if (!adviser) return null;
+  const blocked = /(instagram|facebook|linkedin|twitter|x\.com|youtube|reddit|tiktok|discord)\./i;
+  const options = [
+    ...splitWebsiteList(adviser.primary_website),
+    ...splitWebsiteList(adviser.other_websites),
+  ];
+  return options.find((url) => !blocked.test(url)) || options[0] || null;
+};
+
+const ensureUrl = (url) => {
+  if (!url) return null;
+  return /^https?:\/\//i.test(url) ? url : `https://${url}`;
+};
+
 const titleCaseSector = (s) => {
   if (!s) return '—';
   return s.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' / ');
@@ -856,7 +880,7 @@ const FundPage = ({ cik, seriesId }) => {
           ? fetchNport(`/api/nport/funds/${cik}/${seriesId}/positions?pageSize=1000`)
           : fetchNport(`/api/nport/funds/${cik}/positions?pageSize=1000${companyFilter ? `&company=${encodeURIComponent(companyFilter)}` : ''}`),
         seriesId ? fetchNport(`/api/nport/funds/${cik}/${seriesId}/managers`) : Promise.resolve({ ok: true, data: { managers: [] } }),
-        seriesId ? fetchNport(`/api/nport/funds/${cik}/${seriesId}/adviser`) : Promise.resolve({ ok: true, data: null }),
+        seriesId ? fetchNport(`/api/nport/funds/${cik}/${seriesId}/adviser`) : fetchNport(`/api/nport/funds/${cik}/adviser`),
       ]);
       if (cancelled) return;
       if (!r.ok || !r.data) { setError(r.error || 'Fund not found'); setLoading(false); return; }
@@ -885,7 +909,12 @@ const FundPage = ({ cik, seriesId }) => {
   const positions = data.positions || [];
   const qoq = data.qoq_changes || [];
   const managers = data.managers || [];
-  const adviserRecord = data.adviser && (data.adviser.adviser || data.adviser.adv_adviser || data.adviser);
+  const adviserPayload = data.adviser || {};
+  const adviserRecord = adviserPayload.adviser || adviserPayload.adv_adviser || null;
+  const ncenLink = adviserPayload.ncen_link || adviserPayload.ncen || null;
+  const adviserName = (adviserRecord && (adviserRecord.adviser_name || adviserRecord.adviser_entity_legal_name)) ||
+    (ncenLink && (ncenLink.adviser_name || ncenLink.investment_adviser_name));
+  const website = adviserWebsite(adviserRecord);
   const latestPositionDate = positions[0] && (positions[0].report_period_date || positions[0].report_period_end);
   const latestPositions = latestPositionDate ? positions.filter((p) => (p.report_period_date || p.report_period_end) === latestPositionDate) : positions;
   const privateExposureUsd = latestPositions.reduce((sum, p) => sum + (Number(p.currency_value_usd || p.value_usd) || 0), 0);
@@ -908,10 +937,10 @@ const FundPage = ({ cik, seriesId }) => {
               {registrantName && <><span className="mx-2">·</span>{registrantName}</>}
             </p>
             <p className="text-sm text-gray-700 mt-2">
-              Adviser: <span className="font-medium">{adviserRecord && (adviserRecord.adviser_name || adviserRecord.investment_adviser_name) || 'Not linked yet'}</span>
-              {adviserRecord && adviserRecord.crd && (
-                <a href={`/?adviser=${adviserRecord.crd}`} className="ml-2 text-xs text-slate-600 hover:text-slate-800 inline-flex items-center gap-1 underline-offset-2 hover:underline">
-                  CRD {adviserRecord.crd}
+              Adviser: <span className="font-medium">{adviserName || 'Not linked yet'}</span>
+              {adviserPayload && adviserPayload.adviser_crd && adviserRecord && adviserRecord.form_adv_url && (
+                <a href={adviserRecord.form_adv_url} target="_blank" rel="noreferrer" className="ml-2 text-xs text-slate-600 hover:text-slate-800 inline-flex items-center gap-1 underline-offset-2 hover:underline">
+                  CRD {adviserPayload.adviser_crd}
                   <IconExternal className="w-3 h-3" />
                 </a>
               )}
@@ -924,6 +953,61 @@ const FundPage = ({ cik, seriesId }) => {
           </div>
         </div>
       </div>
+
+      {/* Adviser and contact */}
+      <SectionCard title="Adviser and contacts" subtitle="N-CEN adviser link enriched with Form ADV firm data">
+        {!adviserName ? (
+          <p className="text-sm text-gray-500">{adviserPayload.note || 'No adviser link has been resolved yet.'}</p>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-gray-400">Investment adviser</div>
+              <div className="text-sm font-semibold text-gray-900 mt-1">{adviserName}</div>
+              <div className="text-xs text-gray-500 mt-1">
+                {adviserPayload.adviser_crd ? `CRD ${adviserPayload.adviser_crd}` : 'CRD not available'}
+                {ncenLink && ncenLink.filing_date ? ` · N-CEN ${fmtDate(ncenLink.filing_date)}` : ''}
+              </div>
+              <div className="flex flex-wrap gap-3 mt-3">
+                {adviserRecord && adviserRecord.form_adv_url && (
+                  <a href={adviserRecord.form_adv_url} target="_blank" rel="noreferrer" className="text-xs text-slate-600 hover:text-slate-800 inline-flex items-center gap-1">
+                    Form ADV <IconExternal className="w-3 h-3" />
+                  </a>
+                )}
+                {website && (
+                  <a href={ensureUrl(website)} target="_blank" rel="noreferrer" className="text-xs text-slate-600 hover:text-slate-800 inline-flex items-center gap-1">
+                    Website <IconExternal className="w-3 h-3" />
+                  </a>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Stat label="ADV firm AUM" value={fmtUsd(adviserRecord && (adviserRecord.total_aum || adviserRecord.aum_2026))} />
+              <Stat label="Phone" value={(adviserRecord && adviserRecord.phone_number) || '—'} />
+              <Stat label="Registration" value={(adviserRecord && adviserRecord.registration_type) || '—'} />
+              <Stat label="Source" value={adviserPayload.ncen_source === 'fund_ncen_adviser_links' ? (ncenLink && ncenLink.series_id ? 'N-CEN series' : 'N-CEN registrant') : 'N-CEN filing'} />
+            </div>
+            <div className="text-sm">
+              <div className="text-[11px] uppercase tracking-wider text-gray-400">Firm contacts</div>
+              <div className="mt-2 space-y-2">
+                <div>
+                  <div className="text-xs text-gray-500">Regulatory contact</div>
+                  <div className="text-gray-900">{(adviserRecord && adviserRecord.regulatory_contact_name) || '—'}</div>
+                  {adviserRecord && adviserRecord.regulatory_contact_email && (
+                    <a className="text-xs text-slate-600 hover:text-slate-800" href={`mailto:${adviserRecord.regulatory_contact_email}`}>{adviserRecord.regulatory_contact_email}</a>
+                  )}
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500">Chief compliance officer</div>
+                  <div className="text-gray-900">{(adviserRecord && adviserRecord.cco_name) || '—'}</div>
+                  {adviserRecord && adviserRecord.cco_email && (
+                    <a className="text-xs text-slate-600 hover:text-slate-800" href={`mailto:${adviserRecord.cco_email}`}>{adviserRecord.cco_email}</a>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </SectionCard>
 
       {/* Portfolio Managers */}
       <SectionCard title="Portfolio managers" subtitle="From the most recent N-1A / 485BPOS filing">
@@ -1290,7 +1374,6 @@ const TriageActions = ({ group, directory, onMatch, onCreate, onJunk }) => {
 
 // ---------------------------------------------------------------------------
 // Top-level NportRouter — picks the page based on URL.
-// app.js boot section calls this when matchNportRoute() returns non-null.
 // ---------------------------------------------------------------------------
 window.NportRouter = function NportRouter() {
   const route = window.matchNportRoute(window.location.pathname);
@@ -1301,3 +1384,14 @@ window.NportRouter = function NportRouter() {
   if (route.kind === 'admin')   return <AdminUnresolvedPage />;
   return null;
 };
+
+window.mountNportRouter = function mountNportRouter() {
+  const route = window.matchNportRoute && window.matchNportRoute(window.location.pathname);
+  const rootEl = document.getElementById('root');
+  if (!route || !rootEl || rootEl.dataset.nportMounted === '1') return;
+  rootEl.dataset.nportMounted = '1';
+  const root = ReactDOM.createRoot(rootEl);
+  root.render(React.createElement(window.NportRouter, { route }));
+};
+
+window.mountNportRouter();

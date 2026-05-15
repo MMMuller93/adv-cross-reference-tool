@@ -31,6 +31,9 @@ NS = {"n": NCEN_NS}
 class Adviser:
     """An <investmentAdviser> or <subAdviser> entry."""
 
+    series_id: Optional[str] = None
+    series_name: Optional[str] = None
+    series_lei: Optional[str] = None
     name: Optional[str] = None
     crd: Optional[str] = None  # 9-digit zero-padded, or None
     lei: Optional[str] = None
@@ -59,6 +62,8 @@ class NCenFiling:
     file_number: Optional[str] = None
     investment_advisers: list[Adviser] = field(default_factory=list)
     sub_advisers: list[Adviser] = field(default_factory=list)
+    investment_adviser_links: list[Adviser] = field(default_factory=list)
+    sub_adviser_links: list[Adviser] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -105,7 +110,14 @@ def _parse_state_country(node, attr_state: str, attr_country: str) -> tuple[Opti
     return state, country
 
 
-def _parse_adviser(node, *, is_sub: bool) -> Adviser:
+def _parse_adviser(
+    node,
+    *,
+    is_sub: bool,
+    series_id: Optional[str] = None,
+    series_name: Optional[str] = None,
+    series_lei: Optional[str] = None,
+) -> Adviser:
     """Parse a single <investmentAdviser> or <subAdviser> element."""
     if is_sub:
         prefix = "subAdviser"
@@ -134,6 +146,9 @@ def _parse_adviser(node, *, is_sub: bool) -> Adviser:
         is_affiliated = _yn(node, "n:isSubAdviserAffiliated")
 
     return Adviser(
+        series_id=series_id,
+        series_name=series_name,
+        series_lei=series_lei,
         name=name,
         crd=crd,
         lei=lei,
@@ -196,29 +211,83 @@ def parse_ncen_xml(xml_bytes: bytes | str) -> NCenFiling:
     if general_info is not None:
         filing.report_period_end = general_info.get("reportEndingPeriod")
 
-    # Investment advisers: <investmentAdvisers> wraps one-or-more <investmentAdviser>.
-    # CRITICAL: <investmentAdvisers> has minOccurs="0" — null-guard.
-    # Multiple <investmentAdvisers> blocks can appear (one per series); collect all.
-    for adv_node in tree.findall(".//n:investmentAdvisers/n:investmentAdviser", namespaces=NS):
-        filing.investment_advisers.append(_parse_adviser(adv_node, is_sub=False))
+    # N-CEN nests adviser blocks under managementInvestmentQuestion, whose
+    # mgmtInvSeriesId is the same SEC series ID used by N-PORT where present.
+    # Preserve that per-series relationship separately from the historical
+    # deduped filing-level adviser lists used by older callers.
+    for fund_node in tree.findall(".//n:managementInvestmentQuestion", namespaces=NS):
+        series_id = _text(fund_node, "n:mgmtInvSeriesId")
+        series_name = _text(fund_node, "n:mgmtInvFundName")
+        series_lei = _text(fund_node, "n:mgmtInvLei")
+        for adv_node in fund_node.findall(
+            "n:investmentAdvisers/n:investmentAdviser", namespaces=NS
+        ):
+            filing.investment_adviser_links.append(
+                _parse_adviser(
+                    adv_node,
+                    is_sub=False,
+                    series_id=series_id,
+                    series_name=series_name,
+                    series_lei=series_lei,
+                )
+            )
+        for sub_node in fund_node.findall("n:subAdvisers/n:subAdviser", namespaces=NS):
+            filing.sub_adviser_links.append(
+                _parse_adviser(
+                    sub_node,
+                    is_sub=True,
+                    series_id=series_id,
+                    series_name=series_name,
+                    series_lei=series_lei,
+                )
+            )
 
-    # Sub-advisers — same wrapping pattern, multiple sub-advisers per fund possible
-    for sub_node in tree.findall(".//n:subAdvisers/n:subAdviser", namespaces=NS):
-        filing.sub_advisers.append(_parse_adviser(sub_node, is_sub=True))
+    # Fallback for unusual filings whose adviser blocks are not under
+    # managementInvestmentQuestion.
+    if not filing.investment_adviser_links:
+        for adv_node in tree.findall(
+            ".//n:investmentAdvisers/n:investmentAdviser", namespaces=NS
+        ):
+            filing.investment_adviser_links.append(_parse_adviser(adv_node, is_sub=False))
+    if not filing.sub_adviser_links:
+        for sub_node in tree.findall(".//n:subAdvisers/n:subAdviser", namespaces=NS):
+            filing.sub_adviser_links.append(_parse_adviser(sub_node, is_sub=True))
 
-    # Dedup by (crd, name, lei) tuple — Fidelity repeats the same adviser block
-    # across multiple series within the same filing.
-    filing.investment_advisers = _dedupe(filing.investment_advisers)
-    filing.sub_advisers = _dedupe(filing.sub_advisers)
+    filing.investment_adviser_links = _dedupe(
+        filing.investment_adviser_links,
+        include_series=True,
+    )
+    filing.sub_adviser_links = _dedupe(filing.sub_adviser_links, include_series=True)
+
+    # Dedup by (crd, name, lei) tuple — Fidelity/Vanguard repeat the same
+    # adviser across multiple series within the same filing.
+    filing.investment_advisers = _dedupe(
+        [_without_series(a) for a in filing.investment_adviser_links],
+        include_series=False,
+    )
+    filing.sub_advisers = _dedupe(
+        [_without_series(a) for a in filing.sub_adviser_links],
+        include_series=False,
+    )
 
     return filing
 
 
-def _dedupe(advisers: list[Adviser]) -> list[Adviser]:
+def _without_series(adviser: Adviser) -> Adviser:
+    data = adviser.to_dict()
+    data["series_id"] = None
+    data["series_name"] = None
+    data["series_lei"] = None
+    return Adviser(**data)
+
+
+def _dedupe(advisers: list[Adviser], *, include_series: bool = False) -> list[Adviser]:
     seen: set[tuple] = set()
     out: list[Adviser] = []
     for a in advisers:
         key = (a.crd, a.name, a.lei)
+        if include_series:
+            key = (a.series_id, a.series_name, a.series_lei, *key, a.is_subadviser)
         if key in seen:
             continue
         seen.add(key)
