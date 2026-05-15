@@ -14,6 +14,24 @@
   },
   "features": [
     {
+      "id": "nport-003",
+      "category": "nport",
+      "description": "N-PORT dashboard search, sortable tables, and CSV export",
+      "acceptance_criteria": [
+        "Home page defaults to search-first company discovery instead of a long directory",
+        "Company current-holders table supports column sorting",
+        "Fund private-holdings table supports column sorting",
+        "Company page exports current holders to CSV",
+        "Company page exports all paginated historical positions to CSV",
+        "N-PORT metadata fact band uses neutral styling, reserving color for semantic warnings and deltas"
+      ],
+      "priority": 1,
+      "status": "done",
+      "passes": true,
+      "tested_at": "2026-05-15",
+      "notes": "Implemented in isolated nport/frontend/nport_pages.js. Browser smoke verified home search, sortable holder headers, current CSV, and all positions CSV. Witness check passed: 166 Python tests, 37 Node route tests, live preflight."
+    },
+    {
       "id": "nport-002",
       "category": "nport",
       "description": "N-CEN adviser/contact enrichment for N-PORT fund pages",

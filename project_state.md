@@ -48,6 +48,15 @@
 
 ### Recent Completion (Session May 15, 2026)
 
+✅ **N-PORT dashboard usability pass**
+- Reworked the standalone dashboard into a search-first home page; the long alphabetical company directory is hidden until the user types a query
+- Added a high-signal company watchlist to the home page: SpaceX, OpenAI, Anthropic, Databricks, Stripe, ByteDance, Anduril, Canva, xAI, Perplexity, Mistral, and Safe Superintelligence when present in the seed table
+- Added sortable headers to the company current-holders table and fund private-holdings table
+- Added current-holder CSV export and all-historical-position CSV export on company pages
+- Moved current mark/unit into a dedicated sortable table column and made the N-PORT fact band neutral instead of color-coded; colors should now be reserved for warnings and deltas
+- Coverage check against Forbes AI 50 2026 seed names found 24/50 present by direct name or known alias; missing/higher-priority seed candidates include Baseten, Black Forest Labs, Chai Discovery, Clay, Crusoe, Cyera, Decagon, EliseAI, Fal, Fireworks AI, Glean, Hugging Face, LangChain, Reflection, Rogo, Runway, Sierra, Suno, Together AI, and World Labs
+- Verification: JSX/Babel transform passed; N-PORT API tests passed; Playwright browser smoke passed for home search, sortable headers, and both CSV downloads; full witness check passed with 166 Python tests, 37 Node tests, and live preflight
+
 ✅ **N-CEN adviser/contact enrichment for Anthropic holder universe**
 - Added normalized `fund_ncen_adviser_links` table for per-series N-CEN adviser/subadviser links; kept `fund_ncen_records` as a filing-level summary only
 - Updated N-CEN parser to preserve `mgmtInvSeriesId`, fund name, and LEI on each adviser/subadviser link

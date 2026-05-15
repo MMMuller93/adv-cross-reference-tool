@@ -200,6 +200,104 @@ const currentMark = (holding) => {
   return value / balance;
 };
 
+const rowPeriodDate = (row) => row && (row.report_period_date || row.report_period_end || null);
+
+const compareValues = (a, b, type = 'text') => {
+  const emptyA = a === null || a === undefined || a === '';
+  const emptyB = b === null || b === undefined || b === '';
+  if (emptyA && emptyB) return 0;
+  if (emptyA) return 1;
+  if (emptyB) return -1;
+  if (type === 'number') {
+    const na = Number(a);
+    const nb = Number(b);
+    if (!Number.isFinite(na) && !Number.isFinite(nb)) return 0;
+    if (!Number.isFinite(na)) return 1;
+    if (!Number.isFinite(nb)) return -1;
+    return na - nb;
+  }
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+};
+
+const sortRows = (rows, sort, accessors) => {
+  const spec = accessors[sort.key];
+  if (!spec) return rows;
+  return [...rows].sort((a, b) => {
+    const base = compareValues(spec.value(a), spec.value(b), spec.type);
+    return sort.dir === 'asc' ? base : -base;
+  });
+};
+
+const toggleSort = (setSort, key, defaults = {}) => {
+  setSort((prev) => {
+    if (prev.key === key) {
+      return { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' };
+    }
+    return { key, dir: defaults[key] || 'asc' };
+  });
+};
+
+const csvEscape = (value) => {
+  if (value === null || value === undefined) return '';
+  const text = String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+const downloadCsv = (filename, rows, columns) => {
+  const header = columns.map((c) => csvEscape(c.label)).join(',');
+  const body = rows.map((row) => columns.map((c) => csvEscape(c.value(row))).join(',')).join('\n');
+  const blob = new Blob([`${header}\n${body}\n`], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};
+
+async function fetchAllCompanyPositions(slug) {
+  const all = [];
+  const pageSize = 1000;
+  for (let page = 1; page <= 50; page += 1) {
+    const r = await fetchNport(`/api/nport/companies/${encodeURIComponent(slug)}/positions?page=${page}&pageSize=${pageSize}`);
+    if (!r.ok || !r.data) throw new Error(r.error || 'Unable to export positions');
+    const batch = r.data.positions || [];
+    all.push(...batch);
+    const total = Number(r.data.total || 0);
+    if (batch.length < pageSize || (total && all.length >= total)) break;
+  }
+  return all;
+}
+
+const companyPositionCsvColumns = (companySlug) => [
+  { label: 'company_slug', value: () => companySlug },
+  { label: 'company_name', value: (r) => r.company_name || r.display_name || '' },
+  { label: 'registrant_name', value: (r) => r.registrant_name },
+  { label: 'registrant_cik', value: (r) => r.registrant_cik },
+  { label: 'series_name', value: (r) => r.series_name },
+  { label: 'series_id', value: (r) => r.series_id },
+  { label: 'portfolio_snapshot_date', value: (r) => r.report_period_date },
+  { label: 'fiscal_year_end', value: (r) => r.report_period_end },
+  { label: 'first_seen_report_date', value: (r) => r.first_seen_report_date },
+  { label: 'reported_value_usd', value: (r) => r.value_usd ?? r.currency_value_usd },
+  { label: 'pct_of_nav', value: (r) => r.pct_of_nav },
+  { label: 'balance', value: (r) => r.balance },
+  { label: 'unit', value: (r) => unitLabel(r.unit, r.other_unit_desc) },
+  { label: 'current_mark_per_unit', value: (r) => currentMark(r) },
+  { label: 'share_class', value: (r) => r.share_class || r.share_class_normalized },
+  { label: 'asset_category', value: (r) => securityTypeLabel(r.asset_cat) },
+  { label: 'payoff_profile', value: (r) => r.payoff_profile },
+  { label: 'issuer_type', value: (r) => r.issuer_type },
+  { label: 'restricted_security', value: (r) => yesNo(r.is_restricted_security) },
+  { label: 'fair_value_level', value: (r) => r.fair_value_level },
+  { label: 'raw_issuer_name', value: (r) => r.raw_issuer_name || r.issuer_name },
+  { label: 'raw_issuer_title', value: (r) => r.raw_issuer_title || r.issuer_title },
+  { label: 'accession_number', value: (r) => r.accession_number },
+  { label: 'sec_filing_url', value: (r) => secFilingUrl(r.registrant_cik, r.accession_number) },
+];
+
 // ---------------------------------------------------------------------------
 // Tiny inline icons (same SVG-only style as app.js)
 // ---------------------------------------------------------------------------
@@ -215,6 +313,10 @@ const IconPlus       = (p) => <Svg {...p}><path d="M5 12h14"/><path d="M12 5v14"
 const IconX          = (p) => <Svg {...p}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></Svg>;
 const IconAlert      = (p) => <Svg {...p}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></Svg>;
 const IconBuilding   = (p) => <Svg {...p}><rect width="16" height="20" x="4" y="2" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M12 14h.01"/><path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M8 10h.01"/><path d="M8 14h.01"/></Svg>;
+const IconDownload   = (p) => <Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></Svg>;
+const IconChevronUp  = (p) => <Svg {...p}><path d="m18 15-6-6-6 6"/></Svg>;
+const IconChevronDown = (p) => <Svg {...p}><path d="m6 9 6 6 6-6"/></Svg>;
+const IconSearch     = (p) => <Svg {...p}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></Svg>;
 
 // ---------------------------------------------------------------------------
 // Shared chrome — top header bar (logo + back button + mock indicator)
@@ -265,6 +367,24 @@ const SectionCard = ({ title, subtitle, right, children }) => (
   </section>
 );
 
+const SortableHeader = ({ label, sortKey, sort, onSort, align = 'left', className = '' }) => {
+  const active = sort && sort.key === sortKey;
+  const Icon = active && sort.dir === 'asc' ? IconChevronUp : IconChevronDown;
+  return (
+    <th className={`${align === 'right' ? 'text-right' : 'text-left'} ${className}`}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-1 rounded px-1 py-1 -mx-1 hover:bg-gray-100 ${align === 'right' ? 'justify-end' : ''} ${active ? 'text-gray-900' : 'text-gray-400'}`}
+        aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      >
+        <span>{label}</span>
+        <Icon className={`w-3 h-3 ${active ? 'opacity-100' : 'opacity-35'}`} />
+      </button>
+    </th>
+  );
+};
+
 const Spinner = ({ label }) => (
   <div className="py-12 flex flex-col items-center justify-center text-center">
     <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-200 border-t-slate-600 mb-3"></div>
@@ -309,7 +429,7 @@ const DashboardPage = () => {
   }, []);
 
   const q = query.trim().toLowerCase();
-  const filtered = companies
+  const searchResults = companies
     .filter((c) => {
       if (!q) return true;
       return [c.display_name, c.slug, c.sector, c.primary_domain]
@@ -318,7 +438,20 @@ const DashboardPage = () => {
     })
     .sort((a, b) => companyDisplayName(a).localeCompare(companyDisplayName(b)))
     .slice(0, 80);
-  const focusSlugs = ['anthropic', 'openai', 'spacex', 'databricks', 'stripe', 'canva', 'epic-games', 'xai'];
+  const focusSlugs = [
+    'spacex',
+    'openai',
+    'anthropic',
+    'databricks',
+    'stripe',
+    'bytedance',
+    'anduril-industries',
+    'canva',
+    'xai',
+    'perplexity-ai',
+    'mistral-ai',
+    'safe-superintelligence',
+  ];
   const focusCompanies = focusSlugs
     .map((slug) => companies.find((c) => c.slug === slug))
     .filter(Boolean);
@@ -337,7 +470,7 @@ const DashboardPage = () => {
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">N-PORT private-company holdings</h1>
             <p className="text-sm text-gray-600 mt-1 max-w-3xl">
-              Search registered funds and ETFs that disclose positions in private companies. Start with a company, then open fund-family drilldowns and SEC source filings.
+              Search registered funds and ETFs that disclose positions in private companies. Open a company to inspect fund holders, security classes, marks, and SEC source filings.
             </p>
           </div>
           <div className="text-right shrink-0">
@@ -345,18 +478,27 @@ const DashboardPage = () => {
             <div className="text-lg font-semibold text-gray-900 tabular-nums">{fmtInt(companies.length)}</div>
           </div>
         </div>
-        <div className="mt-6">
+        <div className="mt-6 relative">
+          <IconSearch className="w-4 h-4 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search company, domain, or sector..."
-            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:bg-white focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 py-3 text-sm outline-none focus:bg-white focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
           />
         </div>
       </div>
 
       {focusCompanies.length > 0 && !q && (
-        <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+        <section className="mb-6">
+          <div className="flex items-end justify-between gap-4 mb-3">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">High-signal companies</h2>
+              <p className="text-xs text-gray-500">A short watchlist for the names most likely to matter in N-PORT private-company analysis.</p>
+            </div>
+            <div className="text-xs text-gray-500">Search above for the full seeded universe.</div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           {focusCompanies.map((c) => (
             <a key={c.slug} href={`/company/${c.slug}`} className="bg-white rounded-2xl ring-1 ring-gray-200 p-5 hover:ring-slate-300 hover:shadow-sm transition">
               <div className="text-sm font-semibold text-gray-900">{companyDisplayName(c)}</div>
@@ -367,11 +509,17 @@ const DashboardPage = () => {
               </div>
             </a>
           ))}
+          </div>
         </section>
       )}
 
-      <SectionCard title={q ? 'Search results' : 'Company directory'} subtitle={`${fmtInt(filtered.length)} shown`}>
-        {filtered.length === 0 ? (
+      <SectionCard title={q ? 'Search results' : 'Company search'} subtitle={q ? `${fmtInt(searchResults.length)} shown` : 'Directory hidden by default to keep the page usable'}>
+        {!q ? (
+          <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-5 py-8 text-center">
+            <p className="text-sm font-medium text-gray-900">Start typing to search the private-company universe.</p>
+            <p className="text-xs text-gray-500 mt-1">This avoids a long alphabetical directory and keeps the homepage focused on discovery.</p>
+          </div>
+        ) : searchResults.length === 0 ? (
           <p className="text-sm text-gray-500">No companies match this search.</p>
         ) : (
           <div className="overflow-x-auto">
@@ -386,7 +534,7 @@ const DashboardPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((c) => (
+                {searchResults.map((c) => (
                   <tr key={c.slug} className="border-b border-gray-50 hover:bg-gray-50">
                     <td className="py-2.5 pr-3">
                       <a href={`/company/${c.slug}`} className="font-medium text-gray-900 hover:underline">{companyDisplayName(c)}</a>
@@ -548,6 +696,9 @@ const CompanyPage = ({ slug }) => {
   const [markupsPayload, setMarkupsPayload] = useStateN(null); // /markups
   const [cross, setCross] = useStateN(null);          // /cross
   const [expandedHoldings, setExpandedHoldings] = useStateN({});
+  const [holderSort, setHolderSort] = useStateN({ key: 'value', dir: 'desc' });
+  const [exportingPositions, setExportingPositions] = useStateN(false);
+  const [exportError, setExportError] = useStateN(null);
 
   useEffectN(() => {
     let cancelled = false;
@@ -624,6 +775,50 @@ const CompanyPage = ({ slug }) => {
   const distinctFilers = company.distinct_filers ?? new Set(topHolders.map((h) => h.registrant_id || h.registrant_cik || h.registrant_name)).size;
   const latestSnapshotDate = (holdersPayload && holdersPayload.period_date) || (topHolders[0] && topHolders[0].report_period_date);
   const toggleHolding = (key) => setExpandedHoldings((prev) => ({ ...prev, [key]: !prev[key] }));
+  const holderSortAccessors = {
+    fund: { type: 'text', value: (h) => h.registrant_name || '' },
+    snapshot: { type: 'text', value: (h) => h.report_period_date || '' },
+    firstSeen: { type: 'text', value: (h) => h.first_seen_report_date || '' },
+    value: { type: 'number', value: (h) => h.value_usd ?? h.currency_value_usd },
+    nav: { type: 'number', value: (h) => h.pct_of_nav },
+    balance: { type: 'number', value: (h) => h.balance },
+    security: { type: 'text', value: (h) => `${h.share_class || h.share_class_normalized || ''} ${securityTypeLabel(h.asset_cat)}` },
+    mark: { type: 'number', value: (h) => currentMark(h) },
+  };
+  const holderSortDefaults = {
+    fund: 'asc',
+    snapshot: 'desc',
+    firstSeen: 'asc',
+    value: 'desc',
+    nav: 'desc',
+    balance: 'desc',
+    security: 'asc',
+    mark: 'desc',
+  };
+  const sortedHolders = sortRows(topHolders, holderSort, holderSortAccessors);
+  const setHolderSortKey = (key) => toggleSort(setHolderSort, key, holderSortDefaults);
+
+  const exportCurrentHolders = () => {
+    setExportError(null);
+    downloadCsv(
+      `${slug}-current-holders-${latestSnapshotDate || 'latest'}.csv`,
+      sortedHolders,
+      companyPositionCsvColumns(slug)
+    );
+  };
+
+  const exportAllPositions = async () => {
+    setExportError(null);
+    setExportingPositions(true);
+    try {
+      const rows = await fetchAllCompanyPositions(slug);
+      downloadCsv(`${slug}-all-nport-positions.csv`, rows, companyPositionCsvColumns(slug));
+    } catch (err) {
+      setExportError(err.message || String(err));
+    } finally {
+      setExportingPositions(false);
+    }
+  };
 
   return (
     <PageChrome breadcrumb={`company / ${slug}`}>
@@ -724,7 +919,27 @@ const CompanyPage = ({ slug }) => {
       </div>
 
       {/* Current holders table */}
-      <SectionCard title="Current holders" subtitle={`Latest available filing per fund/security through ${fmtDate(latestSnapshotDate)} — first seen is the earliest public N-PORT snapshot`}>
+      <SectionCard
+        title="Current holders"
+        subtitle={`Latest available filing per fund/security through ${fmtDate(latestSnapshotDate)} — first seen is the earliest public N-PORT snapshot`}
+        right={
+          <div className="flex flex-wrap justify-end gap-2">
+            <button type="button" onClick={exportCurrentHolders}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-gray-200 hover:bg-gray-50">
+              <IconDownload className="w-3.5 h-3.5" /> Current CSV
+            </button>
+            <button type="button" onClick={exportAllPositions} disabled={exportingPositions}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900 disabled:opacity-60">
+              <IconDownload className="w-3.5 h-3.5" /> {exportingPositions ? 'Exporting...' : 'All positions CSV'}
+            </button>
+          </div>
+        }
+      >
+        {exportError && (
+          <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700 ring-1 ring-rose-100">
+            Export failed: {exportError}
+          </div>
+        )}
         {topHolders.length === 0 ? (
           <p className="text-sm text-gray-500">No holders reported.</p>
         ) : (
@@ -732,18 +947,19 @@ const CompanyPage = ({ slug }) => {
             <table className="w-full text-sm">
               <thead className="text-[11px] uppercase tracking-wider text-gray-400 border-b border-gray-100">
                 <tr>
-                  <th className="text-left py-2 pr-3">Fund family</th>
-                  <th className="text-left pr-3">Portfolio snapshot</th>
-                  <th className="text-left pr-3">First seen</th>
-                  <th className="text-right pr-3">Reported value</th>
-                  <th className="text-right pr-3">% of fund NAV</th>
-                  <th className="text-right pr-3">Shares / units</th>
-                  <th className="text-left pr-3">Security</th>
+                  <SortableHeader label="Fund family" sortKey="fund" sort={holderSort} onSort={setHolderSortKey} className="py-2 pr-3" />
+                  <SortableHeader label="Portfolio snapshot" sortKey="snapshot" sort={holderSort} onSort={setHolderSortKey} className="pr-3" />
+                  <SortableHeader label="First seen" sortKey="firstSeen" sort={holderSort} onSort={setHolderSortKey} className="pr-3" />
+                  <SortableHeader label="Reported value" sortKey="value" sort={holderSort} onSort={setHolderSortKey} align="right" className="pr-3" />
+                  <SortableHeader label="% of NAV" sortKey="nav" sort={holderSort} onSort={setHolderSortKey} align="right" className="pr-3" />
+                  <SortableHeader label="Shares / units" sortKey="balance" sort={holderSort} onSort={setHolderSortKey} align="right" className="pr-3" />
+                  <SortableHeader label="Security" sortKey="security" sort={holderSort} onSort={setHolderSortKey} className="pr-3" />
+                  <SortableHeader label="Mark / unit" sortKey="mark" sort={holderSort} onSort={setHolderSortKey} align="right" className="pr-3" />
                   <th className="text-right">Links</th>
                 </tr>
               </thead>
               <tbody>
-                {topHolders.map((h, i) => {
+                {sortedHolders.map((h, i) => {
                   const key = `${h.accession_number || i}-${h.holding_id_internal || h.share_class || i}`;
                   const cik = stripCikLeadingZeros(h.registrant_cik);
                   const fundUrl = h.series_id
@@ -751,6 +967,7 @@ const CompanyPage = ({ slug }) => {
                     : `/fund/${cik}?company=${encodeURIComponent(slug)}${isMockMode() ? '&mock=1' : ''}`;
                   const filingUrl = secFilingUrl(h.registrant_cik, h.accession_number);
                   const isExpanded = !!expandedHoldings[key];
+                  const mark = currentMark(h);
                   return (
                     <React.Fragment key={key}>
                       <tr className="border-b border-gray-50 hover:bg-gray-50">
@@ -770,6 +987,7 @@ const CompanyPage = ({ slug }) => {
                           <div className="text-[11px] text-gray-500">{securityTypeLabel(h.asset_cat)}</div>
                           <NportFacts holding={h} />
                         </td>
+                        <td className="py-2.5 pr-3 text-right tabular-nums font-medium text-gray-900">{mark ? fmtUsdPerShare(mark) : '—'}</td>
                         <td className="py-2.5 text-right">
                           <div className="flex items-center justify-end gap-3">
                             {filingUrl && (
@@ -783,7 +1001,7 @@ const CompanyPage = ({ slug }) => {
                       </tr>
                       {isExpanded && (
                         <tr className="bg-slate-50/70 border-b border-gray-100">
-                          <td colSpan="8" className="px-4 py-3">
+                          <td colSpan="9" className="px-4 py-3">
                             <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
                               <Detail label="Raw security name" value={h.raw_issuer_name} />
                               <Detail label="Raw security title" value={h.raw_issuer_title} className="md:col-span-2" />
@@ -897,32 +1115,22 @@ const Detail = ({ label, value, mono, className = '' }) => (
   </div>
 );
 
-const FactPill = ({ label, value, tone = 'slate' }) => {
-  const tones = {
-    slate: 'bg-slate-50 text-slate-700 ring-slate-200',
-    amber: 'bg-amber-50 text-amber-800 ring-amber-200',
-    emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-  };
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 ring-1 ${tones[tone] || tones.slate}`}>
-      <span className="text-[9px] uppercase tracking-wider opacity-60">{label}</span>
-      <span className="font-semibold tabular-nums">{value || '—'}</span>
-    </span>
-  );
-};
+const FactPill = ({ label, value }) => (
+  <span className="inline-flex items-center gap-1 rounded-md bg-white px-1.5 py-0.5 text-slate-700 ring-1 ring-slate-200">
+    <span className="text-[9px] uppercase tracking-wider text-slate-400">{label}</span>
+    <span className="font-medium tabular-nums">{value || '—'}</span>
+  </span>
+);
 
 const NportFacts = ({ holding }) => {
-  const mark = currentMark(holding);
-  const restrictedTone = holding.is_restricted_security === true ? 'amber' : 'slate';
   return (
     <div className="mt-1.5 flex flex-wrap gap-1 text-[10px] leading-5">
-      <FactPill label="Restricted" value={yesNo(holding.is_restricted_security)} tone={restrictedTone} />
-      <FactPill label="FV" value={holding.fair_value_level ? `L${holding.fair_value_level}` : '—'} tone={holding.fair_value_level === 3 ? 'emerald' : 'slate'} />
+      <FactPill label="Restricted" value={yesNo(holding.is_restricted_security)} />
+      <FactPill label="FV" value={holding.fair_value_level ? `L${holding.fair_value_level}` : '—'} />
       <FactPill label="Asset" value={securityTypeLabel(holding.asset_cat)} />
       <FactPill label="Payoff" value={holding.payoff_profile || '—'} />
       <FactPill label="Units" value={unitLabel(holding.unit, holding.other_unit_desc)} />
       <FactPill label="Issuer" value={holding.issuer_type || '—'} />
-      <FactPill label={holding.unit === 'PA' ? 'Mark/principal' : 'Mark/share'} value={mark ? fmtUsdPerShare(mark) : '—'} />
     </div>
   );
 };
@@ -939,6 +1147,7 @@ const FundPage = ({ cik, seriesId }) => {
   const [loading, setLoading] = useStateN(true);
   const [error, setError] = useStateN(null);
   const [data, setData] = useStateN(null);
+  const [positionSort, setPositionSort] = useStateN({ key: 'value', dir: 'desc' });
 
   useEffectN(() => {
     let cancelled = false;
@@ -996,6 +1205,22 @@ const FundPage = ({ cik, seriesId }) => {
   const exposurePct = latestNav ? (privateExposureUsd / latestNav) * 100 : null;
   const pageTitle = series ? (series.series_name || seriesId) : (filer && filer.name) || `CIK ${cik}`;
   const registrantName = series ? series.registrant_name : (filer && filer.name);
+  const positionSortAccessors = {
+    company: { type: 'text', value: (p) => p.company_name || p.company_slug || '' },
+    security: { type: 'text', value: (p) => `${p.share_class || p.share_class_normalized || ''} ${securityTypeLabel(p.asset_cat)}` },
+    value: { type: 'number', value: (p) => p.value_usd ?? p.currency_value_usd },
+    nav: { type: 'number', value: (p) => p.pct_of_nav },
+    snapshot: { type: 'text', value: (p) => rowPeriodDate(p) || '' },
+  };
+  const positionSortDefaults = {
+    company: 'asc',
+    security: 'asc',
+    value: 'desc',
+    nav: 'desc',
+    snapshot: 'desc',
+  };
+  const sortedPositions = sortRows(positions, positionSort, positionSortAccessors);
+  const setPositionSortKey = (key) => toggleSort(setPositionSort, key, positionSortDefaults);
 
   return (
     <PageChrome breadcrumb={`fund / ${pageTitle}`}>
@@ -1122,16 +1347,16 @@ const FundPage = ({ cik, seriesId }) => {
             <table className="w-full text-sm">
               <thead className="text-[11px] uppercase tracking-wider text-gray-400 border-b border-gray-100">
                 <tr>
-                  <th className="text-left py-2 pr-3">Company</th>
-                  <th className="text-left pr-3">Security</th>
-                  <th className="text-right pr-3">Reported value</th>
-                  <th className="text-right pr-3">% of NAV</th>
-                  <th className="text-left pr-3">Snapshot</th>
+                  <SortableHeader label="Company" sortKey="company" sort={positionSort} onSort={setPositionSortKey} className="py-2 pr-3" />
+                  <SortableHeader label="Security" sortKey="security" sort={positionSort} onSort={setPositionSortKey} className="pr-3" />
+                  <SortableHeader label="Reported value" sortKey="value" sort={positionSort} onSort={setPositionSortKey} align="right" className="pr-3" />
+                  <SortableHeader label="% of NAV" sortKey="nav" sort={positionSort} onSort={setPositionSortKey} align="right" className="pr-3" />
+                  <SortableHeader label="Snapshot" sortKey="snapshot" sort={positionSort} onSort={setPositionSortKey} className="pr-3" />
                   <th className="text-right">Links</th>
                 </tr>
               </thead>
               <tbody>
-                {positions.map((p, i) => {
+                {sortedPositions.map((p, i) => {
                   const filingUrl = secFilingUrl(p.registrant_cik, p.accession_number);
                   return (
                     <tr key={`${p.accession_number || i}-${p.holding_id_internal || i}`} className="border-b border-gray-50 hover:bg-gray-50">
