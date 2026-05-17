@@ -11,7 +11,7 @@ Pipeline:
     4. Strip punctuation
     5. Collapse whitespace
     6. Recursively strip trailing legal suffixes (LLC, INC, PBC, CORP, CO, LP,
-       LTD, TRUST, FUND, HOLDINGS, HLDGS)
+       LTD, PLC, TRUST, FUND, HOLDINGS, HLDGS, and common non-US suffixes)
 
 Validated end-to-end against 91 real 2026 Q1 Anthropic rows (POC: 100% recall,
 0 false positives).
@@ -42,6 +42,12 @@ _PUNCT_RE: re.Pattern[str] = re.compile(r"[^A-Z0-9\s]+")
 
 _WHITESPACE_RE: re.Pattern[str] = re.compile(r"\s+")
 
+_LEGAL_ABBREVIATION_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bL\.?\s*L\.?\s*C\.?\b", re.IGNORECASE), " LLC "),
+    (re.compile(r"\bL\.?\s*P\.?\b", re.IGNORECASE), " LP "),
+    (re.compile(r"\bL\.?\s*L\.?\s*P\.?\b", re.IGNORECASE), " LLP "),
+)
+
 # Trailing legal suffixes — applied recursively (strip "Anthropic PBC Inc"
 # → "Anthropic PBC" → "Anthropic"). Anchored to the end of the string.
 _LEGAL_SUFFIXES: frozenset[str] = frozenset(
@@ -52,11 +58,31 @@ _LEGAL_SUFFIXES: frozenset[str] = frozenset(
         "CORP",
         "CO",
         "LP",
+        "LLP",
         "LTD",
+        "LIMITED",
+        "PLC",
         "TRUST",
         "FUND",
         "HOLDINGS",
         "HLDGS",
+        "PTY",
+        "PTE",
+        "GMBH",
+        "AG",
+        "SA",
+        "SAS",
+        "SRL",
+        "SPA",
+        "BV",
+        "NV",
+        "SE",
+        "AB",
+        "OY",
+        "AS",
+        "APS",
+        "KK",
+        "GK",
     }
 )
 
@@ -88,6 +114,11 @@ def normalize_issuer(name: str | None) -> str:
     # 1. Strip vendor noise (codes + known parenthetical annotations).
     for pat in _VENDOR_NOISE_PATTERNS:
         s = pat.sub(" ", s)
+
+    # Normalize dotted legal suffixes before punctuation stripping so
+    # "L.P." doesn't become two unrelated trailing tokens ("L", "P").
+    for pat, replacement in _LEGAL_ABBREVIATION_PATTERNS:
+        s = pat.sub(replacement, s)
 
     # 2. Strip any remaining parentheticals.
     s = _PARENTHETICAL_RE.sub(" ", s)

@@ -146,6 +146,9 @@ def test_normalize_issuer_name_strips_suffixes():
     assert normalize_issuer_name("Anthropic, PBC") == "ANTHROPIC"
     assert normalize_issuer_name("Databricks Inc.") == "DATABRICKS"
     assert normalize_issuer_name("Tiger Fund, L.P.") == "TIGER FUND"
+    assert normalize_issuer_name("Canva Australia Holdings Pty Ltd") == "CANVA AUSTRALIA"
+    assert normalize_issuer_name("Mistral AI SAS") == "MISTRAL AI"
+    assert normalize_issuer_name("Stripe Payments Europe, Ltd.") == "STRIPE PAYMENTS EUROPE"
     assert normalize_issuer_name(None) == ""
 
 

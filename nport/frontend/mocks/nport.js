@@ -26,6 +26,10 @@
       total_funding_usd: 19_500_000_000,
       total_disclosed_usd: 1_690_000_000,
       distinct_filers: 52,
+      nport_latest_value_usd: 1_690_000_000,
+      nport_latest_holder_count: 52,
+      nport_latest_period_date: '2025-12-31',
+      search_rank_score: 256.2,
       lifecycle_status: 'private'
     },
     openai: {
@@ -43,6 +47,10 @@
       total_funding_usd: 22_000_000_000,
       total_disclosed_usd: 814_400_000,
       distinct_filers: 36,
+      nport_latest_value_usd: 814_400_000,
+      nport_latest_holder_count: 36,
+      nport_latest_period_date: '2025-12-31',
+      search_rank_score: 232.7,
       lifecycle_status: 'private'
     },
     spacex: {
@@ -60,6 +68,10 @@
       total_funding_usd: 11_000_000_000,
       total_disclosed_usd: 20_160_000_000,
       distinct_filers: 43,
+      nport_latest_value_usd: 20_160_000_000,
+      nport_latest_holder_count: 43,
+      nport_latest_period_date: '2025-12-31',
+      search_rank_score: 296.9,
       lifecycle_status: 'private'
     }
   };
@@ -341,6 +353,9 @@
         { accession_number: '0001234567-25-001012', issuer_name: 'CEREBRAS SYSTEMS INC',      issuer_title: 'Series F-1 Preferred',  registrant_name: 'Fidelity Blue Chip Growth',  value_usd:  82_400_000 },
         { accession_number: '0001234567-25-001013', issuer_name: 'Cerebras Systems, Inc.',    issuer_title: 'Series F Preferred',    registrant_name: 'T. Rowe Global Tech',         value_usd:  47_900_000 },
         { accession_number: '0001234567-25-001014', issuer_name: 'CEREBRAS SYS',              issuer_title: 'Common Stock',          registrant_name: 'Coatue Innovation Fund',      value_usd:  29_100_000 }
+      ],
+      candidates: [
+        { company_slug: 'cerebras', display_name: 'Cerebras Systems', score: 92, reason: 'Exact compact-name match' }
       ]
     },
     {
@@ -351,6 +366,9 @@
       sample_rows: [
         { accession_number: '0001234567-25-002001', issuer_name: 'MISTRAL AI SAS',     issuer_title: 'Series B',  registrant_name: 'Fidelity Contrafund', value_usd: 42_100_000 },
         { accession_number: '0001234567-25-002002', issuer_name: 'Mistral AI',         issuer_title: 'Series B',  registrant_name: 'Coatue Innovation',   value_usd: 22_400_000 }
+      ],
+      candidates: [
+        { company_slug: 'mistral-ai', display_name: 'Mistral AI', score: 100, reason: 'Exact company-name match' }
       ]
     },
     {
@@ -392,6 +410,8 @@
     { slug: 'spacex',      display_name: 'SpaceX' },
     { slug: 'databricks',  display_name: 'Databricks' },
     { slug: 'canva',       display_name: 'Canva' },
+    { slug: 'cerebras',    display_name: 'Cerebras Systems' },
+    { slug: 'mistral-ai',  display_name: 'Mistral AI' },
     { slug: 'xai',         display_name: 'xAI' },
     { slug: 'stripe',      display_name: 'Stripe' },
     { slug: 'epicgames',   display_name: 'Epic Games' },

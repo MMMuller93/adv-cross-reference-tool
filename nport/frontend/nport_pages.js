@@ -68,6 +68,14 @@ async function fetchNport(url, options) {
   }
 }
 
+const nportAdminHeaders = () => {
+  const token = window.localStorage ? window.localStorage.getItem('nportAdminToken') : null;
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { 'x-admin-token': token } : {}),
+  };
+};
+
 // ---------------------------------------------------------------------------
 // Formatting helpers (kept local — app.js doesn't expose its helpers).
 // ---------------------------------------------------------------------------
@@ -414,7 +422,7 @@ const DashboardPage = () => {
     let cancelled = false;
     async function load() {
       setLoading(true); setError(null);
-      const r = await fetchNport('/api/nport/companies?pageSize=1000');
+      const r = await fetchNport('/api/nport/companies?pageSize=1000&includeStats=true');
       if (cancelled) return;
       if (!r.ok || !r.data) {
         setError(r.error || 'Failed to load companies');
@@ -429,6 +437,20 @@ const DashboardPage = () => {
   }, []);
 
   const q = query.trim().toLowerCase();
+  const rankCompanyForQuery = (c) => {
+    const base = Number(c.search_rank_score || 0);
+    if (!q) return base;
+    const name = String(companyDisplayName(c)).toLowerCase();
+    const slug = String(c.slug || '').toLowerCase();
+    const domain = String(c.primary_domain || '').toLowerCase();
+    let boost = 0;
+    if (name === q || slug === q) boost += 10000;
+    if (name.startsWith(q) || slug.startsWith(q)) boost += 5000;
+    if (domain.startsWith(q)) boost += 2000;
+    if (name.includes(q) || slug.includes(q) || domain.includes(q)) boost += 500;
+    return base + boost;
+  };
+
   const searchResults = companies
     .filter((c) => {
       if (!q) return true;
@@ -436,7 +458,7 @@ const DashboardPage = () => {
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(q));
     })
-    .sort((a, b) => companyDisplayName(a).localeCompare(companyDisplayName(b)))
+    .sort((a, b) => rankCompanyForQuery(b) - rankCompanyForQuery(a) || companyDisplayName(a).localeCompare(companyDisplayName(b)))
     .slice(0, 80);
   const focusSlugs = [
     'spacex',
@@ -454,7 +476,8 @@ const DashboardPage = () => {
   ];
   const focusCompanies = focusSlugs
     .map((slug) => companies.find((c) => c.slug === slug))
-    .filter(Boolean);
+    .filter(Boolean)
+    .sort((a, b) => Number(b.nport_latest_value_usd || 0) - Number(a.nport_latest_value_usd || 0));
 
   if (loading) {
     return <PageChrome breadcrumb="n-port"><Spinner label="Loading N-PORT companies..." /></PageChrome>;
@@ -504,9 +527,10 @@ const DashboardPage = () => {
               <div className="text-sm font-semibold text-gray-900">{companyDisplayName(c)}</div>
               <div className="text-xs text-gray-500 mt-1">{titleCaseSector(c.sector)}</div>
               <div className="mt-4 grid grid-cols-2 gap-3">
-                <Stat label="Valuation" value={fmtUsd(c.latest_known_valuation_usd)} />
-                <Stat label="Round" value={c.most_recent_round || '—'} />
+                <Stat label="N-PORT exposure" value={fmtUsd(c.nport_latest_value_usd)} />
+                <Stat label="Fund holders" value={fmtInt(c.nport_latest_holder_count)} />
               </div>
+              <div className="mt-3 text-[11px] text-gray-500">Latest snapshot {fmtDate(c.nport_latest_period_date)}</div>
             </a>
           ))}
           </div>
@@ -528,7 +552,9 @@ const DashboardPage = () => {
                 <tr>
                   <th className="text-left py-2 pr-3">Company</th>
                   <th className="text-left pr-3">Sector</th>
-                  <th className="text-left pr-3">Latest round</th>
+                  <th className="text-right pr-3">N-PORT exposure</th>
+                  <th className="text-right pr-3">Fund holders</th>
+                  <th className="text-left pr-3">Latest snapshot</th>
                   <th className="text-right pr-3">Known valuation</th>
                   <th className="text-right">Open</th>
                 </tr>
@@ -541,7 +567,9 @@ const DashboardPage = () => {
                       <div className="text-[11px] text-gray-500">{c.primary_domain || c.slug}</div>
                     </td>
                     <td className="py-2.5 pr-3 text-gray-700">{titleCaseSector(c.sector)}</td>
-                    <td className="py-2.5 pr-3 text-gray-700">{c.most_recent_round || '—'}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums font-semibold text-gray-900">{fmtUsd(c.nport_latest_value_usd)}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums text-gray-700">{fmtInt(c.nport_latest_holder_count)}</td>
+                    <td className="py-2.5 pr-3 text-gray-700">{fmtDate(c.nport_latest_period_date)}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums font-semibold text-gray-900">{fmtUsd(c.latest_known_valuation_usd)}</td>
                     <td className="py-2.5 text-right">
                       <a href={`/company/${c.slug}`} className="text-xs text-slate-600 hover:text-slate-800 inline-flex items-center gap-1">view company <IconExternal className="w-3 h-3" /></a>
@@ -1449,7 +1477,7 @@ const AdminUnresolvedPage = () => {
     let cancelled = false;
     async function load() {
       setLoading(true);
-      const r = await fetchNport('/api/nport/admin/unresolved');
+      const r = await fetchNport('/api/nport/admin/unresolved', { headers: nportAdminHeaders() });
       if (cancelled) return;
       if (!r.ok || !r.data) { setError(r.error || 'Failed to load triage queue'); setLoading(false); return; }
       setGroups(r.data.unresolved || []);
@@ -1466,8 +1494,8 @@ const AdminUnresolvedPage = () => {
     if (!isMockMode()) {
       await fetchNport('/api/nport/admin/aliases', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ normalized_name: group.normalized_name, company_slug: slug, pattern_type: 'exact_normalized' })
+        headers: nportAdminHeaders(),
+        body: JSON.stringify({ rawName: group.normalized_name, canonicalSlug: slug, patternType: 'exact_normalized' })
       });
     }
   };
@@ -1480,8 +1508,8 @@ const AdminUnresolvedPage = () => {
     if (!isMockMode()) {
       await fetchNport('/api/nport/admin/aliases', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ normalized_name: group.normalized_name, new_company_name: cleanName, pattern_type: 'exact_normalized' })
+        headers: nportAdminHeaders(),
+        body: JSON.stringify({ rawName: group.normalized_name, newCompanyName: cleanName, patternType: 'exact_normalized' })
       });
     }
   };
@@ -1491,7 +1519,7 @@ const AdminUnresolvedPage = () => {
     if (!isMockMode()) {
       await fetchNport('/api/nport/admin/aliases', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: nportAdminHeaders(),
         body: JSON.stringify({ normalized_name: group.normalized_name, mark_as: reason })
       });
     }
@@ -1564,11 +1592,32 @@ const AdminUnresolvedPage = () => {
                   </table>
                 </div>
 
+                {g.candidates && g.candidates.length > 0 && (
+                  <div className="px-6 py-3 border-b border-gray-100 bg-slate-50/60">
+                    <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Suggested matches</div>
+                    <div className="flex flex-wrap gap-2">
+                      {g.candidates.map((candidate) => (
+                        <button
+                          key={candidate.company_slug}
+                          onClick={() => handleMatch(g, candidate.company_slug)}
+                          className="text-left rounded-lg bg-white ring-1 ring-gray-200 px-3 py-2 hover:ring-slate-400 hover:bg-slate-50 transition">
+                          <div className="text-xs font-semibold text-gray-900">{candidate.display_name}</div>
+                          <div className="text-[10px] text-gray-500">
+                            score {candidate.score} · {candidate.reason}
+                            {candidate.matched_pattern ? ` · ${candidate.matched_pattern}` : ''}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Actions */}
                 {!decision && (
                   <TriageActions
                     group={g}
                     directory={directory}
+                    candidates={g.candidates || []}
                     onMatch={(slug) => handleMatch(g, slug)}
                     onCreate={(name) => handleCreate(g, name)}
                     onJunk={(reason) => handleJunk(g, reason)}
@@ -1583,15 +1632,26 @@ const AdminUnresolvedPage = () => {
   );
 };
 
-const TriageActions = ({ group, directory, onMatch, onCreate, onJunk }) => {
+const TriageActions = ({ group, directory, candidates, onMatch, onCreate, onJunk }) => {
   const [mode, setMode] = useStateN('idle'); // 'idle' | 'matching' | 'creating'
   const [search, setSearch] = useStateN('');
   const [newName, setNewName] = useStateN('');
 
   const filtered = useMemoN(() => {
+    if (!search && candidates && candidates.length > 0) {
+      return candidates.map((candidate) => ({
+        slug: candidate.company_slug,
+        display_name: candidate.display_name,
+        sector: candidate.sector,
+        primary_domain: candidate.primary_domain,
+        candidate_reason: `${candidate.score} · ${candidate.reason}`,
+      }));
+    }
     if (!search) return directory.slice(0, 6);
     const q = search.toLowerCase();
-    return directory.filter(c => c.display_name.toLowerCase().includes(q) || c.slug.includes(q)).slice(0, 8);
+    return directory
+      .filter(c => String(c.display_name || '').toLowerCase().includes(q) || String(c.slug || '').includes(q))
+      .slice(0, 8);
   }, [directory, search]);
 
   if (mode === 'matching') {
@@ -1613,7 +1673,7 @@ const TriageActions = ({ group, directory, onMatch, onCreate, onJunk }) => {
                 onClick={() => onMatch(c.slug)}
                 className="w-full text-left px-3 py-2 rounded-lg bg-white ring-1 ring-gray-200 hover:ring-slate-400 hover:bg-slate-50 transition-colors">
                 <div className="text-sm font-medium text-gray-900">{c.display_name}</div>
-                <div className="text-[10px] text-gray-500 font-mono">{c.slug}</div>
+                <div className="text-[10px] text-gray-500 font-mono">{c.candidate_reason || c.slug}</div>
               </button>
             </li>
           ))}

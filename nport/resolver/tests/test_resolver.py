@@ -185,6 +185,20 @@ def test_mwam_multiword_capture() -> None:
     assert underlier == "Space Exploration Tech"
 
 
+def test_spv_exposure_multiword_capture() -> None:
+    underlier, pattern_name = unwrap_spv("SPV EXPOSURE TO Space Exploration Technologies LLC")
+    assert pattern_name == "spv_exposure"
+    assert underlier == "Space Exploration Technologies"
+
+
+def test_g_squared_multiword_capture() -> None:
+    underlier, pattern_name = unwrap_spv(
+        "G Squared Special Situations Fund, LLC - Series H-1 (invested in Discord Holdings, Inc.)"
+    )
+    assert pattern_name == "spv_invested_in"
+    assert underlier == "Discord Holdings"
+
+
 # -- False-positive substring traps from §3.1 ---------------------------------
 
 FALSE_POSITIVE_CASES: list[tuple[str, str]] = [
@@ -243,6 +257,11 @@ def test_sanctioned_sberbank(resolver: Resolver) -> None:
         ),
         ("Anthropic, Inc.", "ANTHROPIC"),
         ("Space Exploration Technologies Corp.", "SPACE EXPLORATION TECHNOLOGIES"),
+        ("Canva Australia Holdings Pty Ltd", "CANVA AUSTRALIA"),
+        ("Mistral AI SAS", "MISTRAL AI"),
+        ("Revolut Group Holdings Ltd.", "REVOLUT GROUP"),
+        ("Stripe Payments Europe, Ltd.", "STRIPE PAYMENTS EUROPE"),
+        ("Example Vehicle L.P.", "EXAMPLE VEHICLE"),
         (None, ""),
         ("", ""),
     ],

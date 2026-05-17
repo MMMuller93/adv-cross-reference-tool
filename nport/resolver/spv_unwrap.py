@@ -45,7 +45,7 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # "AESTAS LLC dba OPENAI LLC EV UNITS Class A"
     (
         "spv_aestas",
-        re.compile(r"AESTAS LLC dba (\w+)", re.IGNORECASE),
+        re.compile(r"AESTAS LLC dba (.+?)(?:\s+EV\b|$)", re.IGNORECASE),
     ),
     # "MWAM VC SpaceX-II, LLC" — Morgan Stanley co-invest wrappers.
     # POC fix: use non-greedy `.+?` up to dash/comma/" LLC" instead of `\w+`
@@ -57,13 +57,13 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # "SPV EXPOSURE TO SPACEX LLC"
     (
         "spv_exposure",
-        re.compile(r"^SPV EXPOSURE TO (\w+)", re.IGNORECASE),
+        re.compile(r"^SPV EXPOSURE TO (.+?)(?:\s+LLC\b|,|-|$)", re.IGNORECASE),
     ),
     # "G Squared Special Situations Fund, LLC - Series H-1 (invested in Brex, Inc.)"
     # Fallback when the parenthetical form above doesn't fire (e.g. malformed parens).
     (
         "spv_g_squared",
-        re.compile(r"^G Squared.*?invested in (\w+)", re.IGNORECASE),
+        re.compile(r"^G Squared.*?invested in (.+?)(?:,|\)|$)", re.IGNORECASE),
     ),
 )
 

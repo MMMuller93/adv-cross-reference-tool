@@ -50,6 +50,54 @@ router.deps = deps;
 const READ_PAGE_DEFAULT = 100;
 const READ_PAGE_MAX = 1000;
 const BASE_TABLE_READ_PAGE_SIZE = 1000;
+const COMPANY_STATS_MAX_ROWS = 100000;
+const TRIAGE_CANDIDATE_LIMIT = 5;
+
+const TRIAGE_VENDOR_NOISE = [
+  /\(PHYSICAL\)/gi,
+  /\(NOT LISTED OR TRADING\)/gi,
+  /\bCVT\s+PFD\b/gi,
+  /\bPP\b/gi,
+  /\bPC\b/gi,
+];
+
+const TRIAGE_LEGAL_SUFFIXES = new Set([
+  'LLC',
+  'INC',
+  'PBC',
+  'CORP',
+  'CO',
+  'LP',
+  'LLP',
+  'LTD',
+  'PLC',
+  'TRUST',
+  'FUND',
+  'HOLDINGS',
+  'HLDGS',
+  'PTY',
+  'PTE',
+  'GMBH',
+  'AG',
+  'SA',
+  'SAS',
+  'SRL',
+  'SPA',
+  'BV',
+  'NV',
+  'SE',
+  'AB',
+  'OY',
+  'AS',
+  'APS',
+  'KK',
+  'GK',
+]);
+
+let companyStatsCache = {
+  loadedAt: 0,
+  value: null,
+};
 
 function configGuard(res) {
   if (!deps.isConfigured()) {
@@ -191,6 +239,167 @@ function toNumber(value) {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeIssuerForTriage(value) {
+  if (!value) return '';
+  let text = String(value).toUpperCase();
+  for (const pattern of TRIAGE_VENDOR_NOISE) {
+    text = text.replace(pattern, ' ');
+  }
+  text = text
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^A-Z0-9\s]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  while (text) {
+    const parts = text.split(' ');
+    const last = parts[parts.length - 1];
+    if (!TRIAGE_LEGAL_SUFFIXES.has(last)) break;
+    parts.pop();
+    text = parts.join(' ');
+  }
+  return text;
+}
+
+function compactName(value) {
+  return normalizeIssuerForTriage(value).replace(/[^A-Z0-9]/g, '');
+}
+
+function tokenSet(value) {
+  return new Set(
+    normalizeIssuerForTriage(value)
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token && token.length > 1)
+  );
+}
+
+function jaccardScore(a, b) {
+  const left = tokenSet(a);
+  const right = tokenSet(b);
+  if (left.size === 0 || right.size === 0) return 0;
+  let intersection = 0;
+  for (const token of left) {
+    if (right.has(token)) intersection += 1;
+  }
+  const union = new Set([...left, ...right]).size;
+  return union > 0 ? intersection / union : 0;
+}
+
+function slugifyCompanyName(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function companySearchScore(company) {
+  const valuation = toNumber(company.latest_known_valuation_usd) || 0;
+  const disclosed = toNumber(company.nport_latest_value_usd) || 0;
+  const holders = toNumber(company.nport_latest_holder_count) || 0;
+  const valuationScore = valuation > 0 ? Math.log10(valuation + 1) * 7 : 0;
+  const disclosedScore = disclosed > 0 ? Math.log10(disclosed + 1) * 10 : 0;
+  return Number((valuationScore + disclosedScore + holders * 2).toFixed(4));
+}
+
+function decorateCompaniesForSearch(companies, statsBySlug = new Map()) {
+  return (companies || []).map((company) => {
+    const stats = statsBySlug.get(company.slug) || {};
+    const decorated = {
+      ...company,
+      nport_latest_period_date: stats.latest_period_date || null,
+      nport_latest_value_usd: stats.latest_value_usd || 0,
+      nport_latest_holder_count: stats.latest_holder_count || 0,
+      nport_position_count: stats.position_count || 0,
+      nport_period_count: stats.period_count || 0,
+    };
+    decorated.search_rank_score = companySearchScore(decorated);
+    return decorated;
+  });
+}
+
+async function fetchCompanyStatsFromPositionsMv(deps, { maxRows = COMPANY_STATS_MAX_ROWS } = {}) {
+  const now = Date.now();
+  if (
+    companyStatsCache.value &&
+    now - companyStatsCache.loadedAt < 5 * 60 * 1000
+  ) {
+    return companyStatsCache.value;
+  }
+
+  const bySlugPeriod = new Map();
+  let lastHoldingId = 0;
+  let scanned = 0;
+
+  while (scanned < maxRows) {
+    const pageSize = Math.min(BASE_TABLE_READ_PAGE_SIZE, maxRows - scanned);
+    let query = deps.nportClient
+      .from('nport_company_positions_mv')
+      .select('holding_id_internal, company_slug, report_period_date, report_period_end, registrant_cik, currency_value_usd')
+      .order('holding_id_internal', { ascending: true })
+      .limit(pageSize);
+    if (lastHoldingId > 0) query = query.gt('holding_id_internal', lastHoldingId);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    const page = data || [];
+    for (const row of page) {
+      const slug = row.company_slug;
+      const period = positionPeriod(row);
+      if (!slug || !period) continue;
+      const key = `${slug}|${period}`;
+      const bucket = bySlugPeriod.get(key) || {
+        slug,
+        period,
+        total_value: 0,
+        holders: new Set(),
+        position_count: 0,
+      };
+      bucket.total_value += toNumber(row.currency_value_usd) || 0;
+      if (row.registrant_cik) bucket.holders.add(String(row.registrant_cik));
+      bucket.position_count += 1;
+      bySlugPeriod.set(key, bucket);
+    }
+    scanned += page.length;
+    if (page.length < pageSize) break;
+    const nextHoldingId = Number(page[page.length - 1].holding_id_internal);
+    if (!Number.isFinite(nextHoldingId) || nextHoldingId <= lastHoldingId) break;
+    lastHoldingId = nextHoldingId;
+  }
+
+  const statsBySlug = new Map();
+  for (const bucket of bySlugPeriod.values()) {
+    const current = statsBySlug.get(bucket.slug);
+    if (!current || bucket.period > current.latest_period_date) {
+      statsBySlug.set(bucket.slug, {
+        latest_period_date: bucket.period,
+        latest_value_usd: bucket.total_value,
+        latest_holder_count: bucket.holders.size,
+        position_count: bucket.position_count,
+        period_count: 1,
+      });
+    } else if (bucket.period === current.latest_period_date) {
+      current.latest_value_usd += bucket.total_value;
+      current.latest_holder_count += bucket.holders.size;
+      current.position_count += bucket.position_count;
+    }
+  }
+
+  const periodsSeen = new Map();
+  for (const bucket of bySlugPeriod.values()) {
+    const set = periodsSeen.get(bucket.slug) || new Set();
+    set.add(bucket.period);
+    periodsSeen.set(bucket.slug, set);
+  }
+  for (const [slug, set] of periodsSeen.entries()) {
+    const stats = statsBySlug.get(slug);
+    if (stats) stats.period_count = set.size;
+  }
+
+  companyStatsCache = { loadedAt: now, value: statsBySlug };
+  return statsBySlug;
 }
 
 function positionPeriod(row) {
@@ -684,7 +893,7 @@ async function fetchFundPositionsFromBase(deps, variants, seriesId, { maxRows = 
 router.get('/companies', async (req, res) => {
   if (!configGuard(res)) return;
   try {
-    const { sector, lifecycleStatus, hasRecentMarkup } = req.query;
+    const { sector, lifecycleStatus, hasRecentMarkup, includeStats } = req.query;
 
     if (
       hasRecentMarkup !== undefined &&
@@ -708,6 +917,14 @@ router.get('/companies', async (req, res) => {
     if (error) throw error;
 
     let companies = data || [];
+    if (includeStats === 'true' || includeStats === '1') {
+      const statsBySlug = await fetchCompanyStatsFromPositionsMv(deps);
+      companies = decorateCompaniesForSearch(companies, statsBySlug).sort((a, b) => {
+        const scoreDelta = (toNumber(b.search_rank_score) || 0) - (toNumber(a.search_rank_score) || 0);
+        if (scoreDelta !== 0) return scoreDelta;
+        return String(a.display_name || a.slug).localeCompare(String(b.display_name || b.slug));
+      });
+    }
 
     // hasRecentMarkup filter applied in JS — derived from position_deltas
     // because private_companies has no `has_recent_markup` column.
@@ -761,6 +978,140 @@ async function fetchHasRecentMarkupBySlug(deps, slugs) {
     if (slug) out.set(slug, true);
   }
   return out;
+}
+
+async function fetchTriageDirectory(deps) {
+  const [{ data: companies, error: companyErr }, { data: aliases, error: aliasErr }] =
+    await Promise.all([
+      deps.nportClient
+        .from('private_companies')
+        .select('id, slug, display_name, sector, primary_domain, latest_known_valuation_usd'),
+      deps.nportClient
+        .from('private_company_aliases')
+        .select('company_id, pattern_type, pattern, source, confidence'),
+    ]);
+  if (companyErr) throw companyErr;
+  if (aliasErr) throw aliasErr;
+
+  const byId = new Map((companies || []).map((company) => [company.id, company]));
+  const aliasRows = (aliases || [])
+    .map((alias) => ({
+      ...alias,
+      company: byId.get(alias.company_id) || null,
+      normalized_pattern: normalizeIssuerForTriage(alias.pattern),
+      compact_pattern: compactName(alias.pattern),
+    }))
+    .filter((alias) => alias.company);
+  return {
+    companies: companies || [],
+    aliases: aliasRows,
+  };
+}
+
+function candidateForCompany(groupName, company) {
+  const normalizedDisplay = normalizeIssuerForTriage(company.display_name || company.slug);
+  const normalizedGroup = normalizeIssuerForTriage(groupName);
+  if (!normalizedDisplay || !normalizedGroup) return null;
+  if (normalizedDisplay === normalizedGroup) {
+    return { score: 100, reason: 'Exact company-name match', source_type: 'company_name' };
+  }
+  const groupCompact = compactName(groupName);
+  const displayCompact = compactName(company.display_name || company.slug);
+  if (groupCompact && groupCompact === displayCompact) {
+    return { score: 92, reason: 'Exact compact-name match', source_type: 'company_name' };
+  }
+  if (
+    normalizedGroup.length >= 8 &&
+    (normalizedGroup.startsWith(`${normalizedDisplay} `) || normalizedDisplay.startsWith(`${normalizedGroup} `))
+  ) {
+    return { score: 84, reason: 'Prefix match on company name', source_type: 'company_name' };
+  }
+  const overlap = jaccardScore(groupName, company.display_name || company.slug);
+  if (overlap >= 0.5) {
+    return {
+      score: Math.round(50 + overlap * 30),
+      reason: `Token overlap ${(overlap * 100).toFixed(0)}%`,
+      source_type: 'company_name',
+    };
+  }
+  return null;
+}
+
+function candidateForAlias(groupName, alias) {
+  const normalizedGroup = normalizeIssuerForTriage(groupName);
+  const normalizedAlias = alias.normalized_pattern;
+  if (!normalizedGroup || !normalizedAlias) return null;
+  if (normalizedGroup === normalizedAlias) {
+    return {
+      score: alias.pattern_type === 'exact_normalized' ? 98 : 90,
+      reason: `Exact ${alias.pattern_type || 'alias'} match`,
+      source_type: 'alias',
+      matched_pattern: alias.pattern,
+      alias_source: alias.source || null,
+    };
+  }
+  if (
+    normalizedGroup.length >= 8 &&
+    normalizedAlias.length >= 8 &&
+    (normalizedGroup.startsWith(`${normalizedAlias} `) || normalizedAlias.startsWith(`${normalizedGroup} `))
+  ) {
+    return {
+      score: 86,
+      reason: `Prefix ${alias.pattern_type || 'alias'} match`,
+      source_type: 'alias',
+      matched_pattern: alias.pattern,
+      alias_source: alias.source || null,
+    };
+  }
+  if (compactName(groupName) && compactName(groupName) === alias.compact_pattern) {
+    return {
+      score: 83,
+      reason: 'Compact alias match',
+      source_type: 'alias',
+      matched_pattern: alias.pattern,
+      alias_source: alias.source || null,
+    };
+  }
+  return null;
+}
+
+function buildTriageCandidates(groupName, directory) {
+  const candidatesBySlug = new Map();
+  for (const company of directory.companies || []) {
+    const candidate = candidateForCompany(groupName, company);
+    if (!candidate) continue;
+    candidatesBySlug.set(company.slug, {
+      company_slug: company.slug,
+      display_name: company.display_name,
+      sector: company.sector,
+      primary_domain: company.primary_domain,
+      ...candidate,
+    });
+  }
+  for (const alias of directory.aliases || []) {
+    const candidate = candidateForAlias(groupName, alias);
+    if (!candidate || !alias.company) continue;
+    const existing = candidatesBySlug.get(alias.company.slug);
+    if (!existing || candidate.score > existing.score) {
+      candidatesBySlug.set(alias.company.slug, {
+        company_slug: alias.company.slug,
+        display_name: alias.company.display_name,
+        sector: alias.company.sector,
+        primary_domain: alias.company.primary_domain,
+        ...candidate,
+      });
+    }
+  }
+  return Array.from(candidatesBySlug.values())
+    .sort((a, b) => b.score - a.score || a.display_name.localeCompare(b.display_name))
+    .slice(0, TRIAGE_CANDIDATE_LIMIT);
+}
+
+function suggestedTriageAction(groupName, candidates) {
+  const normalized = normalizeIssuerForTriage(groupName);
+  if (/SPV|EXPOSURE|ECONOMIC EXPOSURE|INVESTED IN/.test(normalized)) return 'review_spv';
+  if ((candidates || [])[0] && candidates[0].score >= 90) return 'match_candidate';
+  return 'manual_review';
 }
 
 /**
@@ -1308,7 +1659,7 @@ router.get('/admin/unresolved', async (req, res) => {
     const { data, error } = await deps.nportClient
       .from('nport_holdings')
       .select(
-        'id, issuer_name, issuer_title, issuer_lei, issuer_cusip, asset_cat, resolution_source, source_bulk_quarter, ingested_at',
+        'id, accession_number, issuer_name, issuer_title, issuer_lei, issuer_cusip, balance, currency_value_usd, asset_cat, exposure_type, resolution_source, resolution_confidence, source_bulk_quarter, ingested_at',
         { count: 'exact' }
       )
       .or('resolution_source.is.null,resolution_source.eq.unresolved')
@@ -1317,11 +1668,85 @@ router.get('/admin/unresolved', async (req, res) => {
 
     if (error) throw error;
 
+    const filings = await fetchRowsByIn(
+      deps.nportClient,
+      'nport_filings',
+      'accession_number, cik, registrant_name, series_id, series_name, report_period_date',
+      'accession_number',
+      (data || []).map((row) => row.accession_number)
+    );
+    const filingByAccession = new Map((filings || []).map((row) => [row.accession_number, row]));
+    const directory = await fetchTriageDirectory(deps);
+    const groupsByName = new Map();
+    for (const row of data || []) {
+      const normalizedName = normalizeIssuerForTriage(row.issuer_name || row.issuer_title);
+      if (!normalizedName) continue;
+      const filing = filingByAccession.get(row.accession_number) || {};
+      const group = groupsByName.get(normalizedName) || {
+        normalized_name: normalizedName,
+        raw_names: new Set(),
+        filer_ciks: new Set(),
+        accession_numbers: new Set(),
+        total_value_usd: 0,
+        total_balance: 0,
+        row_count: 0,
+        sample_rows: [],
+      };
+      if (row.issuer_name) group.raw_names.add(row.issuer_name);
+      if (filing.cik) group.filer_ciks.add(String(filing.cik));
+      if (row.accession_number) group.accession_numbers.add(row.accession_number);
+      group.total_value_usd += toNumber(row.currency_value_usd) || 0;
+      group.total_balance += toNumber(row.balance) || 0;
+      group.row_count += 1;
+      if (group.sample_rows.length < 5) {
+        group.sample_rows.push({
+          id: row.id,
+          accession_number: row.accession_number,
+          issuer_name: row.issuer_name,
+          issuer_title: row.issuer_title,
+          registrant_name: filing.registrant_name || '—',
+          registrant_cik: filing.cik || null,
+          series_name: filing.series_name || null,
+          series_id: filing.series_id || null,
+          report_period_date: filing.report_period_date || null,
+          value_usd: row.currency_value_usd,
+          asset_cat: row.asset_cat,
+          exposure_type: row.exposure_type,
+          source_bulk_quarter: row.source_bulk_quarter,
+        });
+      }
+      groupsByName.set(normalizedName, group);
+    }
+
+    const unresolved = Array.from(groupsByName.values())
+      .map((group) => {
+        const candidates = buildTriageCandidates(group.normalized_name, directory);
+        return {
+          normalized_name: group.normalized_name,
+          raw_names: Array.from(group.raw_names).slice(0, 8),
+          filer_count: group.filer_ciks.size || group.accession_numbers.size,
+          accession_count: group.accession_numbers.size,
+          row_count: group.row_count,
+          total_value_usd: group.total_value_usd,
+          total_balance: group.total_balance,
+          sample_rows: group.sample_rows,
+          candidates,
+          suggested_action: suggestedTriageAction(group.normalized_name, candidates),
+        };
+      })
+      .sort((a, b) => (toNumber(b.total_value_usd) || 0) - (toNumber(a.total_value_usd) || 0));
+
     return res.json({
       total: (data && data.length) || 0,
       page,
       pageSize,
-      unresolved: data || [],
+      unresolved,
+      company_directory: (directory.companies || []).map((company) => ({
+        slug: company.slug,
+        display_name: company.display_name,
+        sector: company.sector,
+        primary_domain: company.primary_domain,
+      })),
     });
   } catch (err) {
     return serverError(res, err);
@@ -1340,11 +1765,46 @@ router.post('/admin/aliases', async (req, res) => {
   if (!configGuard(res)) return;
   if (!adminGuard(req, res)) return;
   try {
-    const { rawName, canonicalSlug, source, notes, patternType } = req.body || {};
-    if (!rawName || typeof rawName !== 'string') {
+    const {
+      rawName,
+      canonicalSlug,
+      normalized_name: normalizedName,
+      company_slug: companySlug,
+      newCompanyName,
+      new_company_name: newCompanyNameSnake,
+      mark_as: markAs,
+      source,
+      notes,
+      patternType,
+      pattern_type: patternTypeSnake,
+    } = req.body || {};
+    if (markAs) {
+      const rawPattern = rawName || normalizedName;
+      if (!rawPattern || typeof rawPattern !== 'string') {
+        return badRequest(res, 'rawName (string) required', 'MISSING_RAW_NAME');
+      }
+      if (markAs === 'sanctioned') {
+        const { data, error } = await deps.nportClient
+          .from('sanctioned_securities')
+          .insert({ pattern: rawPattern.trim().toUpperCase(), reason: 'admin_triage' })
+          .select()
+          .maybeSingle();
+        if (error) throw error;
+        return res.status(201).json({ action: 'sanctioned', row: data });
+      }
+      return res.status(202).json({
+        action: markAs,
+        persisted: false,
+        note: 'This triage action is recorded only in the UI until a durable junk/SPV review table is added.',
+      });
+    }
+    const aliasRawName = rawName || normalizedName;
+    const createName = newCompanyName || newCompanyNameSnake;
+    const aliasCanonicalSlug = canonicalSlug || companySlug || slugifyCompanyName(createName);
+    if (!aliasRawName || typeof aliasRawName !== 'string') {
       return badRequest(res, 'rawName (string) required', 'MISSING_RAW_NAME');
     }
-    if (!canonicalSlug || typeof canonicalSlug !== 'string') {
+    if (!aliasCanonicalSlug || typeof aliasCanonicalSlug !== 'string') {
       return badRequest(
         res,
         'canonicalSlug (string) required',
@@ -1353,24 +1813,41 @@ router.post('/admin/aliases', async (req, res) => {
     }
 
     // Resolve the slug to a company id.
-    const { data: company, error: cErr } = await deps.nportClient
-      .from('private_companies')
-      .select('id')
-      .eq('slug', canonicalSlug)
-      .maybeSingle();
-    if (cErr) throw cErr;
+    let company = null;
+    if (createName) {
+      const { data: created, error: createErr } = await deps.nportClient
+        .from('private_companies')
+        .insert({
+          slug: aliasCanonicalSlug,
+          display_name: String(createName).trim(),
+          seed_source: 'manual',
+          lifecycle_status: 'private',
+        })
+        .select('id')
+        .maybeSingle();
+      if (createErr) throw createErr;
+      company = created;
+    } else {
+      const { data: existing, error: cErr } = await deps.nportClient
+        .from('private_companies')
+        .select('id')
+        .eq('slug', aliasCanonicalSlug)
+        .maybeSingle();
+      if (cErr) throw cErr;
+      company = existing;
+    }
     if (!company) {
       return notFound(
         res,
-        `Unknown canonical slug: ${canonicalSlug}`,
+        `Unknown canonical slug: ${aliasCanonicalSlug}`,
         'UNKNOWN_SLUG'
       );
     }
 
     const row = {
       company_id: company.id,
-      pattern_type: patternType || 'exact_normalized',
-      pattern: rawName.trim().toUpperCase(),
+      pattern_type: patternType || patternTypeSnake || 'exact_normalized',
+      pattern: aliasRawName.trim().toUpperCase(),
       source: source || 'curator',
       notes: notes || null,
     };
@@ -1386,8 +1863,8 @@ router.post('/admin/aliases', async (req, res) => {
     return res.status(201).json({
       alias: {
         ...(data || row),
-        canonical_slug: canonicalSlug,
-        raw_name: rawName,
+        canonical_slug: aliasCanonicalSlug,
+        raw_name: aliasRawName,
       },
     });
   } catch (err) {

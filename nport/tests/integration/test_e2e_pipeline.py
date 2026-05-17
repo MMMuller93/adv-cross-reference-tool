@@ -723,7 +723,7 @@ def test_e2e_anthropic_holders_nonempty(api_base_url: str) -> None:
 
 
 def test_e2e_admin_unresolved_returns_rows(api_base_url: str) -> None:
-    """Admin/unresolved must surface the rows we couldn't resolve."""
+    """Admin/unresolved must surface grouped rows we couldn't resolve."""
     status, body = _get(
         api_base_url + "/api/nport/admin/unresolved?pageSize=100",
         headers={"x-admin-token": "test-admin-token"},
@@ -732,5 +732,6 @@ def test_e2e_admin_unresolved_returns_rows(api_base_url: str) -> None:
     unresolved = body.get("unresolved") or []
     # We pushed in 7+ unresolved rows (4 public + 3 private-no-alias);
     # require at least 3 by name to make the assertion robust.
-    names = {r.get("issuer_name") for r in unresolved}
-    assert "Apple Inc." in names or "ACME ROBOTICS HOLDINGS" in names, names
+    names = {r.get("normalized_name") for r in unresolved}
+    assert "APPLE" in names or "ACME ROBOTICS" in names, names
+    assert all("sample_rows" in row for row in unresolved)

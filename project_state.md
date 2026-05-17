@@ -23,7 +23,7 @@
 ## Active Task
 **Currently Working On**: N-PORT live ingestion in isolated `nport/` subtree
 **Feature ID**: N-PORT private-company holdings database
-**Status**: Bulk + daily live ingestion loaded through 2026-05-14; materialized view refreshed; Anthropic holder adviser/contact enrichment smoke-tested
+**Status**: Bulk + daily live ingestion loaded through 2026-05-14; materialized view refreshed; Anthropic holder adviser/contact enrichment smoke-tested; dashboard search/admin triage improvements verified in isolated tree
 
 ### N-PORT Follow-Up Backlog (Keep Visible)
 
@@ -45,6 +45,20 @@
 - Hardest/slower enrichment is N-CSR purchase/acquisition dates; N-PORT does not contain purchase date or purchase price
 - Best parallel setup: N-CEN + CRD QA, N-1A PM extraction, N-CSR acquisition enrichment, deltas/UI polish, plus reviewer/witness agents
 - Product decisions still open: ambiguous adviser UI (note vs candidate list), default latest-only vs history-forward pages, standalone N-PORT dashboard vs main PFR integration
+
+### Recent Completion (Session May 17, 2026)
+
+✅ **N-PORT dashboard search and admin triage refinement**
+- Restored the isolated worktree at `.claude/worktrees/nport-buildout-claude` after the prior `/private/tmp` path was gone
+- Borrowed low-risk Position/Plural ideas without copying its ingestion matcher wholesale: exposure-ranked company search, business-signal ranking, candidate match explanations, and broader international legal suffix handling
+- Added `/api/nport/companies?includeStats=true` enrichment from `nport_company_positions_mv` with short-lived API cache; frontend search now ranks by query fit plus N-PORT exposure, holder count, and valuation
+- Repaired `/api/nport/admin/unresolved` to return grouped issuer-name triage records with sample rows, candidate company matches, score/reason/source details, and company directory
+- Fixed admin frontend to send the admin token header from localStorage key `nportAdminToken` for admin GET/POST calls
+- Kept admin candidate matches review-only; no automatic live alias resolution changes were made
+- Expanded resolver and scraper alias-cache normalization for common non-US legal suffixes such as SAS, GmbH, BV, NV, Pty/Pte, AB, Oy, and KK/GK
+- Expanded SPV unwrap regexes for multi-word `SPV EXPOSURE TO ...`, `AESTAS LLC dba ...`, and G Squared invested-in strings
+- Verification: `nport/api npm test` → 39 passed; `.venv/bin/python -m pytest nport -q` → 178 passed; mock-browser smoke passed for homepage search and admin suggested-match display
+- Note: live `.env` was not present in this restored worktree, so live Supabase preflight was not rerun in this pass
 
 ### Recent Completion (Session May 15, 2026)
 

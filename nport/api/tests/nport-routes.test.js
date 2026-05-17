@@ -393,6 +393,17 @@ test('GET /companies — 200 happy path', async () => {
   assert.equal(res.body.pageSize, 10);
 });
 
+test('GET /companies — includeStats adds N-PORT ranking fields', async () => {
+  installMocks();
+  const res = await request(baseUrl, 'GET', '/api/nport/companies?page=1&pageSize=10&includeStats=true');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.companies[0].slug, 'anthropic');
+  assert.equal(res.body.companies[0].nport_latest_value_usd, 187000000);
+  assert.equal(res.body.companies[0].nport_latest_holder_count, 1);
+  assert.equal(res.body.companies[0].nport_latest_period_date, '2025-12-31');
+  assert.ok(res.body.companies[0].search_rank_score > 0);
+});
+
 test('GET /companies — 400 on invalid hasRecentMarkup', async () => {
   installMocks();
   const res = await request(
@@ -926,7 +937,10 @@ test('GET /admin/unresolved — 200 list', async () => {
   );
   assert.equal(res.status, 200);
   assert.ok(Array.isArray(res.body.unresolved));
-  assert.equal(res.body.unresolved[0].issuer_name, 'Anthropic PBC');
+  assert.equal(res.body.unresolved[0].normalized_name, 'ANTHROPIC');
+  assert.equal(res.body.unresolved[0].sample_rows[0].issuer_name, 'Anthropic PBC');
+  assert.equal(res.body.unresolved[0].candidates[0].company_slug, 'anthropic');
+  assert.equal(res.body.unresolved[0].candidates[0].reason, 'Exact company-name match');
 });
 
 test('POST /admin/aliases — 201 on valid body', async () => {
@@ -944,6 +958,24 @@ test('POST /admin/aliases — 201 on valid body', async () => {
   );
   assert.equal(res.status, 201);
   assert.equal(res.body.alias.canonical_slug, 'anthropic');
+});
+
+test('POST /admin/aliases — accepts frontend normalized_name/company_slug payload', async () => {
+  installMocks();
+  const res = await request(
+    baseUrl,
+    'POST',
+    '/api/nport/admin/aliases',
+    {
+      normalized_name: 'ANTHROPIC',
+      company_slug: 'anthropic',
+      pattern_type: 'exact_normalized',
+    },
+    ADMIN_HEADERS
+  );
+  assert.equal(res.status, 201);
+  assert.equal(res.body.alias.canonical_slug, 'anthropic');
+  assert.equal(res.body.alias.raw_name, 'ANTHROPIC');
 });
 
 test('POST /admin/aliases — 403 without admin token', async () => {

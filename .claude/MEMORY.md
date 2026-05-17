@@ -25,6 +25,9 @@
 - Don't use cheap models (Haiku) for complex tasks
 - Pagination: Use keyset (`.gt('id', lastId)`) not OFFSET for large tables (>50k rows)
 - Supabase batch limits: 1000 for reads, 500 for inserts
+- N-PORT live Supabase project is `pfr-nport` / ref `figvonwrlcpveyceengf`; keep secrets only in ignored `.env`, never in memory or tracked handoff files
+- N-PORT restored isolated worktree is `/Users/Miles/projects/PrivateFundsRadar/.claude/worktrees/nport-buildout-claude`; the old `/private/tmp/nport-buildout-claude` path was ephemeral and disappeared
+- N-PORT frontend admin token is read from browser localStorage key `nportAdminToken`; admin API routes require `x-admin-token`
 
 ### Process Failures (User Frustration Points)
 - **Context Loss**: User has repeatedly given info that gets forgotten - CAPTURE EVERYTHING IN THIS FILE
