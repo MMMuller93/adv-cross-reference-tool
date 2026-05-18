@@ -160,6 +160,31 @@ NEGATIVE_PATTERNS_BY_COMPANY: dict[str, list[str]] = {
 }
 
 
+import re
+
+# "X, a Series of Y, LLC" and "X a series of Y LLC" both appear in real
+# Form D entitynames. Capture the master name (Y). Case-insensitive.
+_SERIES_OF_PATTERN = re.compile(
+    r"\ba\s+series\s+of\s+(.+?)(?:,?\s*(?:LLC|LP|L\.P\.?|Ltd\.?))?\s*$",
+    re.IGNORECASE,
+)
+
+
+def parse_series_master(entityname: Optional[str]) -> Optional[str]:
+    """Extract the parent series-master from an entityname when the filing
+    follows the 'X, a Series of Y LLC' pattern. Returns a normalized form
+    via _normalize_master_for_match so it matches the same way enriched_managers
+    keys are normalized.
+    """
+    if not entityname:
+        return None
+    match = _SERIES_OF_PATTERN.search(entityname)
+    if not match:
+        return None
+    raw_master = match.group(1).strip().rstrip(",").strip()
+    return _normalize_master_for_match(raw_master)
+
+
 def fetch_formd_via_cross_reference(formd, aliases: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Form D filings hit via aliases (entityname ILIKE) + optionally linked
     to an adviser CRD via cross_reference_matches.
@@ -228,7 +253,91 @@ def fetch_formd_via_cross_reference(formd, aliases: list[dict[str, Any]]) -> lis
         filing["_resolution_method"] = (
             "cross_reference_match" if filing["_resolved_crd"] else "entityname_alias"
         )
+        filing["_series_master"] = parse_series_master(filing.get("entityname"))
+
+    # 4. Series-master propagation (within-pool): when one filing in a
+    # 'a Series of X LLC' family is bridged via cross_reference_matches,
+    # propagate the CRD to sibling filings (same series master) that weren't.
+    master_to_crd: dict[str, str] = {}
+    for filing in matched:
+        master = filing.get("_series_master")
+        crd = filing.get("_resolved_crd")
+        if master and crd and master not in master_to_crd:
+            master_to_crd[master] = str(crd)
+
+    propagated_within = 0
+    for filing in matched:
+        if filing.get("_resolved_crd"):
+            continue
+        master = filing.get("_series_master")
+        if master and master in master_to_crd:
+            filing["_resolved_crd"] = master_to_crd[master]
+            filing["_resolution_method"] = "series_master_parse"
+            propagated_within += 1
+    if propagated_within:
+        print(f"    propagated {propagated_within} via within-pool series_master")
+
+    # 5. Series-master lookup against enriched_managers — for masters that
+    # weren't bridged by anyone in our pool, see if the Form D enrichment
+    # pipeline has already enriched that master and linked it to a CRD.
+    enriched_map = fetch_enriched_manager_links(formd)
+    propagated_enriched = 0
+    for filing in matched:
+        if filing.get("_resolved_crd"):
+            continue
+        master = filing.get("_series_master")
+        if master and master in enriched_map:
+            filing["_resolved_crd"] = enriched_map[master]
+            filing["_resolution_method"] = "series_master_parse"
+            propagated_enriched += 1
+    if propagated_enriched:
+        print(f"    propagated {propagated_enriched} via enriched_managers lookup")
+
     return matched
+
+
+def _normalize_master_for_match(value: Optional[str]) -> Optional[str]:
+    """Apply the same normalization to both sides of a series-master match
+    so they can be compared. Uppercase, strip legal suffixes, collapse
+    whitespace."""
+    if not value:
+        return None
+    text = value.upper().strip()
+    text = re.sub(r",?\s*(LLC|LP|L\.P\.?|LTD\.?|INC\.?|CORP\.?)\s*$", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text or None
+
+
+def fetch_enriched_manager_links(formd) -> dict[str, str]:
+    """Return {normalized_series_master_name: linked_crd} from the
+    enriched_managers table. ~151 entries today; small enough to load fully.
+    """
+    master_to_crd: dict[str, str] = {}
+    last_id = ""
+    while True:
+        response = (
+            formd.table("enriched_managers")
+            .select("id,series_master_llc,linked_crd")
+            .not_.is_("series_master_llc", "null")
+            .not_.is_("linked_crd", "null")
+            .gt("id", last_id)
+            .order("id")
+            .limit(1000)
+        )
+        result = response.execute()
+        batch = result.data or []
+        if not batch:
+            break
+        for row in batch:
+            master = _normalize_master_for_match(row.get("series_master_llc"))
+            crd = row.get("linked_crd")
+            if master and crd:
+                # First write wins (avoid overwriting with later duplicates)
+                master_to_crd.setdefault(master, str(crd))
+            last_id = row["id"]
+        if len(batch) < 1000:
+            break
+    return master_to_crd
 
 
 def fetch_direct_issuer_formd(formd, company_ciks: list[str]) -> list[dict[str, Any]]:
