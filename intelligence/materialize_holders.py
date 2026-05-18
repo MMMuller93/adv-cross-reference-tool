@@ -103,7 +103,7 @@ def fetch_nport_positions(nport, company_slug: str) -> list[dict[str, Any]]:
             .select(
                 "holding_id_internal,registrant_cik,series_id,raw_issuer_title,"
                 "raw_issuer_name,currency_value_usd,pct_of_nav,"
-                "report_period_end,accession_number"
+                "report_period_date,report_period_end,accession_number"
             )
             .eq("company_slug", company_slug)
             .gt("holding_id_internal", last_id)
@@ -366,7 +366,10 @@ def upsert_nport_positions(nport, positions: list[dict[str, Any]], company_slug:
             "issuer_title": p.get("raw_issuer_title") or p.get("raw_issuer_name"),
             "value_usd": p.get("currency_value_usd"),
             "pct_net_assets": p.get("pct_of_nav"),
-            "as_of_date": p.get("report_period_end"),
+            # Holding as-of date is report_period_date (the actual snapshot
+            # date the fund reports), NOT report_period_end (fiscal period
+            # end, which can be in the future for funds with Nov/Dec FYE).
+            "as_of_date": p.get("report_period_date") or p.get("report_period_end"),
             "accession_number": p.get("accession_number"),
         }
         for p in positions
@@ -561,30 +564,36 @@ def materialize_company(
     print(f"    intel_formd_direct_issuer_offering: {direct_written}")
 
     # Build adviser-resolution links
-    # For N-PORT positions, look up by (registrant_cik, series_id) then fallback (cik, None)
-    # Read back position_ids
+    # For N-PORT positions, look up by (registrant_cik, series_id) then fallback (cik, None).
+    # A single fund (series) can hold the tracked company in multiple share classes,
+    # producing multiple positions with the same (cik, series_id). All of those
+    # positions get the same adviser resolution — we don't collapse them.
     response = (
         nport.table("intel_nport_position")
         .select("position_id,registrant_cik,series_id")
         .eq("company_slug", company_slug)
         .execute()
     )
-    nport_id_by_key = {
-        (str(row["registrant_cik"]), row.get("series_id")): row["position_id"]
-        for row in (response.data or [])
-    }
+    nport_ids_by_key: dict[tuple[str, Optional[str]], list[int]] = defaultdict(list)
+    for row in (response.data or []):
+        key = (str(row["registrant_cik"]), row.get("series_id"))
+        nport_ids_by_key[key].append(row["position_id"])
 
     resolution_rows: list[dict[str, Any]] = []
-    for (cik, series_id), position_id in nport_id_by_key.items():
-        # Prefer series-level match
+    for (cik, series_id), position_ids in nport_ids_by_key.items():
+        # Prefer series-level match, fall back to registrant-level cache
         res = resolutions_map.get((cik, series_id)) or resolutions_map.get((cik, None))
         if res and res["crd"] in adv_crds:
-            resolution_rows.append({
-                "source_table": "intel_nport_position",
-                "source_id": position_id,
-                "crd": res["crd"],
-                "method": res["method"],
-            })
+            # Write a resolution for EVERY position with this (cik, series_id),
+            # not just one. Same fund can hold multiple share classes of the
+            # tracked company.
+            for position_id in position_ids:
+                resolution_rows.append({
+                    "source_table": "intel_nport_position",
+                    "source_id": position_id,
+                    "crd": res["crd"],
+                    "method": res["method"],
+                })
 
     # For pooled-vehicle offerings, use the resolved CRD from cross_reference_matches
     for filing in pooled_filings:
