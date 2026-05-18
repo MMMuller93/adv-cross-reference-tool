@@ -17,6 +17,7 @@
 
 ### Data & Schema
 - **NEVER use OFFSET pagination** for large tables — use keyset `.gt('id', lastId)`
+- **PostgREST silently caps responses at 1000 rows by default.** Hit this 3x in one session on the intel pipeline. Any `.select()` that COULD return more than 1000 rows must keyset-paginate, even if the table is "small" — that includes intra-pipeline readbacks like `intel_nport_position?company_slug=X`. If you don't, the rows past 1000 silently disappear and downstream operations skip them. Symptom: data looks correct in counts but a downstream join produces inexplicably low matches.
 - **DO NOT use MCP Supabase tools for production databases** — MCP connects to legacy `cmhzafgyixdcnpvkldkg`, not ADV/Form D/N-PORT
 - **DO NOT strip business descriptors** (capital, ventures, fund, partners, etc.) in name normalization — only strip legal suffixes (LLC/LP/Inc/Ltd)
 - **DO NOT truncate LLM prompts** — quality degrades
