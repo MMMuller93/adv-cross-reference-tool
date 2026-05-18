@@ -168,6 +168,41 @@ const median = (values) => {
   return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
 };
 
+const seriesLetterRank = (letters) => {
+  const value = String(letters || '').toUpperCase();
+  if (!/^[A-Z]+$/.test(value)) return 999;
+  return Array.from(value).reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0);
+};
+
+const securityClassSortValue = (label) => {
+  const text = String(label || '').trim();
+  const normalized = text.toUpperCase();
+  if (!normalized || /^(UNSPECIFIED|UNKNOWN|N\/A|NA|-|—)$/.test(normalized)) return 100000;
+  if (/\b(COMMON|ORDINARY)\b/.test(normalized)) return -100;
+
+  const match = normalized.match(/\b(SERIES|SER|CLASS|CL)\s+([A-Z]+)(?:[-\s]?(\d+))?/);
+  if (match) {
+    const prefix = match[1];
+    const roundRank = seriesLetterRank(match[2]);
+    const suffixRank = match[3] ? Number(match[3]) / 100 : 0;
+    const prefixOffset = /^(CLASS|CL)$/.test(prefix) ? 0.2 : 0;
+    return roundRank * 10 + suffixRank + prefixOffset;
+  }
+
+  return 90000;
+};
+
+const compareSecurityClassesNatural = (a, b) => {
+  const aLabel = typeof a === 'string' ? a : a.share_class;
+  const bLabel = typeof b === 'string' ? b : b.share_class;
+  const delta = securityClassSortValue(aLabel) - securityClassSortValue(bLabel);
+  if (delta !== 0) return delta;
+  return String(aLabel || '').localeCompare(String(bLabel || ''), undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  });
+};
+
 const secFilingUrl = (cik, accession) => {
   if (!cik || !accession) return null;
   const cikTrimmed = String(cik).replace(/^0+/, '') || '0';
@@ -785,11 +820,15 @@ const CompanyPage = ({ slug }) => {
       median_per_share: median(row.prices),
       holders: row.holders,
       total_balance: row.total_balance,
-    })).sort((a, b) => b.holders - a.holders),
+    })).sort(compareSecurityClassesNatural),
   };
-  const latestMarks = main.latest_marks && main.latest_marks.classes && main.latest_marks.classes.length > 0
+  const latestMarksSource = main.latest_marks && main.latest_marks.classes && main.latest_marks.classes.length > 0
     ? main.latest_marks
     : computedLatestMarks;
+  const latestMarks = {
+    ...latestMarksSource,
+    classes: [...(latestMarksSource.classes || [])].sort(compareSecurityClassesNatural),
+  };
   const markups = (markupsPayload && markupsPayload.markups) || main.markups || [];
   const history = (markupsPayload && markupsPayload.history) || [];
   const tsPoints = ((timeseries && (timeseries.points || timeseries.series)) || []).map((p) => ({
