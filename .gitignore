@@ -11,3 +11,9 @@ features.json
 init.sh
 FUTURE_FEATURES.md
 fly.toml
+
+# Fund Holders Intel — generated artifacts
+intelligence/out/
+.venv/
+.env.*
+!.env.example
