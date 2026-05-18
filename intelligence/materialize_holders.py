@@ -724,6 +724,8 @@ def materialize_company(
                 })
 
     # For pooled-vehicle offerings, use the resolved CRD from cross_reference_matches
+    # OR from series_master_parse propagation. The method label tells the
+    # downstream consumer which path produced this resolution.
     for filing in pooled_filings:
         accession = filing["accessionnumber"]
         crd = filing.get("_resolved_crd")
@@ -733,10 +735,35 @@ def materialize_company(
                 "source_table": "intel_formd_pooled_vehicle_offering",
                 "source_id": offering_id,
                 "crd": str(crd),
-                "method": "cross_reference_match",
+                # Use the actual resolution method, not a hardcoded one.
+                # _resolution_method is set per-filing earlier in
+                # fetch_formd_via_cross_reference:
+                #   - 'cross_reference_match' if directly bridged via xref
+                #   - 'series_master_parse' if propagated from a sibling
+                #   - 'entityname_alias' would have no _resolved_crd
+                "method": filing.get("_resolution_method") or "cross_reference_match",
             })
 
     print(f"  building adviser resolutions: {len(resolution_rows)} (only CRDs in ADV)")
+    # Idempotency cleanup: delete any pre-existing resolutions for this
+    # company's evidence rows. Without this, a previous materialization that
+    # used a different method label (e.g., the old bug where propagated rows
+    # were tagged 'cross_reference_match') would leave stale rows behind, and
+    # the v_intel_company_holders view would return duplicates.
+    company_position_ids = [pid for ids in nport_ids_by_key.values() for pid in ids]
+    company_offering_ids = list(pooled_result["offering_id_by_accession"].values())
+    if company_position_ids:
+        for chunk_start in range(0, len(company_position_ids), 100):
+            chunk = company_position_ids[chunk_start : chunk_start + 100]
+            nport.table("intel_adviser_resolution").delete().eq(
+                "source_table", "intel_nport_position"
+            ).in_("source_id", chunk).execute()
+    if company_offering_ids:
+        for chunk_start in range(0, len(company_offering_ids), 100):
+            chunk = company_offering_ids[chunk_start : chunk_start + 100]
+            nport.table("intel_adviser_resolution").delete().eq(
+                "source_table", "intel_formd_pooled_vehicle_offering"
+            ).in_("source_id", chunk).execute()
     resolutions_written = upsert_adviser_resolutions(nport, resolution_rows)
     print(f"    intel_adviser_resolution: {resolutions_written}")
 
