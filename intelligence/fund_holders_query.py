@@ -72,6 +72,15 @@ def create_adv_client():
     return create_client(url, key)
 
 
+def create_formd_client():
+    url = os.environ.get("SUPABASE_URL_FORMD") or "https://ltdalxkhbbhmkimmogyq.supabase.co"
+    key = os.environ.get("SUPABASE_ANON_KEY_FORMD") or os.environ.get("FORMD_SUPABASE_ANON_KEY")
+    if not key:
+        return None  # enriched_managers join is optional
+    from supabase import create_client  # type: ignore
+    return create_client(url, key)
+
+
 def _paginate_holders(nport, company_slug: str, source_type: str) -> list[dict[str, Any]]:
     """Keyset-paginate one source_type bucket of v_intel_company_holders."""
     rows: list[dict[str, Any]] = []
@@ -117,7 +126,12 @@ def fetch_adviser_details(adv, crds: list[str]) -> dict[str, dict[str, Any]]:
         return details
     select_cols = (
         "crd,adviser_name,total_aum,phone_number,primary_website,other_websites,"
-        "cco_name,cco_email,signatory_name,signatory_title,form_adv_url"
+        "cco_name,cco_email,signatory_name,signatory_title,form_adv_url,"
+        # Owner / control-person data — the firm's principals
+        "owner_full_legal_name,owner_title_or_status,ownership_amount,"
+        "control_person_name,direct_or_indirect_owner,"
+        # Alternative regulatory-contact path (low coverage but useful when present)
+        "regulatory_contact_name,regulatory_contact_email,regulatory_contact_title"
     )
     unique_crds = list({str(c).strip() for c in crds if c})
     for chunk_start in range(0, len(unique_crds), 100):
@@ -131,6 +145,38 @@ def fetch_adviser_details(adv, crds: list[str]) -> dict[str, dict[str, Any]]:
         for row in response.data or []:
             details[str(row["crd"])] = row
     return details
+
+
+def fetch_enriched_manager_extras(formd, crds: list[str]) -> dict[str, dict[str, Any]]:
+    """Pull the small set of extra contact-path fields from enriched_managers
+    (Form D DB) for any adviser CRDs that have web-enriched records.
+
+    Coverage is sparse (~3.4k records globally, most without linked_crd
+    populated) but where data exists it includes LinkedIn URL, team_members,
+    and a verified primary_contact_email — very useful for outreach.
+    """
+    extras: dict[str, dict[str, Any]] = {}
+    if formd is None or not crds:
+        return extras
+    unique_crds = list({str(c).strip() for c in crds if c})
+    select_cols = (
+        "linked_crd,website_url,linkedin_company_url,team_members,"
+        "primary_contact_email,twitter_handle"
+    )
+    for chunk_start in range(0, len(unique_crds), 100):
+        chunk = unique_crds[chunk_start : chunk_start + 100]
+        response = (
+            formd.table("enriched_managers")
+            .select(select_cols)
+            .in_("linked_crd", chunk)
+            .execute()
+        )
+        for row in response.data or []:
+            crd = str(row.get("linked_crd") or "")
+            if crd:
+                # Keep first hit per CRD — coverage is tiny so collisions are rare
+                extras.setdefault(crd, row)
+    return extras
 
 
 def resolve_canonical_website(adviser_row: Optional[dict[str, Any]]) -> Optional[str]:
@@ -156,15 +202,41 @@ def resolve_canonical_website(adviser_row: Optional[dict[str, Any]]) -> Optional
     )
 
 
+def _team_members_to_text(value: Any) -> Optional[str]:
+    """team_members in enriched_managers is JSONB (list of person dicts).
+    Flatten to a readable semicolon-delimited string for CSV use."""
+    if not value:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for member in value:
+            if isinstance(member, dict):
+                name = member.get("name") or ""
+                role = member.get("role") or member.get("title") or ""
+                if name:
+                    parts.append(f"{name} ({role})" if role else name)
+                elif role:
+                    parts.append(role)
+            elif isinstance(member, str):
+                parts.append(member)
+        return "; ".join(parts) if parts else None
+    return str(value)
+
+
 def build_csv_rows(
     holders: list[dict[str, Any]],
     adviser_details: dict[str, dict[str, Any]],
+    enriched_extras: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """One CSV row per holder evidence, joined to adviser firm details."""
+    """One CSV row per holder evidence, joined to adviser firm details +
+    enriched_managers extras (LinkedIn, team_members) when available."""
     rows: list[dict[str, Any]] = []
     for h in holders:
         crd = h.get("adviser_crd")
         adv_row = adviser_details.get(str(crd)) if crd else None
+        extras = enriched_extras.get(str(crd)) if crd else None
         canonical_site = resolve_canonical_website(adv_row) if adv_row else None
         rows.append({
             "company_slug": h["company_slug"],
@@ -184,6 +256,20 @@ def build_csv_rows(
             "adviser_cco_name": adv_row.get("cco_name") if adv_row else None,
             "adviser_cco_email": adv_row.get("cco_email") if adv_row else None,
             "adviser_signatory_name": adv_row.get("signatory_name") if adv_row else None,
+            "adviser_signatory_title": adv_row.get("signatory_title") if adv_row else None,
+            # Firm principals / owners — the actual decision-makers
+            "owner_full_legal_name": adv_row.get("owner_full_legal_name") if adv_row else None,
+            "owner_title_or_status": adv_row.get("owner_title_or_status") if adv_row else None,
+            "ownership_amount": adv_row.get("ownership_amount") if adv_row else None,
+            "control_person_name": adv_row.get("control_person_name") if adv_row else None,
+            # Alternative regulatory contact (low coverage, but useful)
+            "regulatory_contact_name": adv_row.get("regulatory_contact_name") if adv_row else None,
+            "regulatory_contact_email": adv_row.get("regulatory_contact_email") if adv_row else None,
+            # Web-enriched extras (sparse — only for CRDs in enriched_managers)
+            "linkedin_company_url": (extras or {}).get("linkedin_company_url"),
+            "team_members": _team_members_to_text((extras or {}).get("team_members")),
+            "alt_contact_email": (extras or {}).get("primary_contact_email"),
+            "twitter_handle": (extras or {}).get("twitter_handle"),
             "adviser_form_adv_url": adv_row.get("form_adv_url") if adv_row else None,
         })
     return rows
@@ -207,6 +293,17 @@ CSV_COLUMNS = [
     "adviser_cco_name",
     "adviser_cco_email",
     "adviser_signatory_name",
+    "adviser_signatory_title",
+    "owner_full_legal_name",
+    "owner_title_or_status",
+    "ownership_amount",
+    "control_person_name",
+    "regulatory_contact_name",
+    "regulatory_contact_email",
+    "linkedin_company_url",
+    "team_members",
+    "alt_contact_email",
+    "twitter_handle",
     "adviser_form_adv_url",
 ]
 
@@ -238,6 +335,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     nport = create_nport_client()
     adv = create_adv_client()
+    formd = create_formd_client()  # may be None — enriched_managers join is optional
 
     print(f"Fetching holder evidence for {args.company}...")
     holders = fetch_holders(nport, args.company)
@@ -257,12 +355,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"    Form D pooled vehicles:     {formd_count}")
     print(f"    Adviser resolved:           {resolved}/{len(holders)}")
 
-    print("Fetching adviser firm details...")
+    print("Fetching adviser firm details (advisers_enriched)...")
     crds = [h["adviser_crd"] for h in holders if h.get("adviser_crd")]
     adviser_details = fetch_adviser_details(adv, crds)
     print(f"  {len(adviser_details)} adviser firms found in advisers_enriched")
 
-    csv_rows = build_csv_rows(holders, adviser_details)
+    print("Fetching enriched_managers extras (LinkedIn, team_members, etc.) ...")
+    enriched_extras = fetch_enriched_manager_extras(formd, crds)
+    print(f"  {len(enriched_extras)} firms with web-enriched extras")
+
+    csv_rows = build_csv_rows(holders, adviser_details, enriched_extras)
 
     from datetime import datetime, timezone
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d")
