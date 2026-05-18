@@ -801,6 +801,23 @@ def materialize_company(
 
     # WRITES
     print("\n  Writing intel_* tables...")
+
+    # Stale-row pruning. Codex flagged this: when the matching rules change
+    # (e.g., we now route direct-issuers out of pooled bucket, or discard
+    # alias-cap hits), upsert-only leaves old polluted rows in place. The
+    # view v_intel_company_holders then still returns them, and the manifest
+    # counts diverge from what's actually in the table. Fix: delete all rows
+    # for this company BEFORE upserting fresh ones. Idempotent rebuild.
+    #
+    # intel_adviser_resolution gets cleaned up later via its own per-source_id
+    # delete loop (that step already existed).
+    for table in (
+        "intel_nport_position",
+        "intel_formd_pooled_vehicle_offering",
+        "intel_formd_direct_issuer_offering",
+    ):
+        nport.table(table).delete().eq("company_slug", company_slug).execute()
+
     nport_written = upsert_nport_positions(nport, positions, company_slug)
     print(f"    intel_nport_position: {nport_written}")
     pooled_result = upsert_pooled_vehicle_offerings(nport, pooled_filings, company_slug)
@@ -899,11 +916,18 @@ def materialize_company(
     resolutions_written = upsert_adviser_resolutions(nport, resolution_rows)
     print(f"    intel_adviser_resolution: {resolutions_written}")
 
+    # Count DISTINCT advisers (not resolution rows) for publication-gate use.
+    # Codex flagged: a company with 2 Form D rows attributed to the same firm
+    # is "1 distinct adviser" — not 2 — so the >=2 threshold should be on
+    # unique CRDs.
+    distinct_advisers = len({row["crd"] for row in resolution_rows if row.get("crd")})
+
     return {
         "positions": nport_written,
         "pooled": pooled_result["rows"],
         "direct": direct_written,
         "resolutions": resolutions_written,
+        "distinct_advisers": distinct_advisers,
         "suspicious_aliases": suspicious_aliases,
     }
 

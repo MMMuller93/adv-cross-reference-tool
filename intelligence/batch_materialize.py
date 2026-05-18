@@ -69,6 +69,7 @@ MANIFEST_COLUMNS = [
     "formd_pooled",
     "formd_direct_issuer",
     "resolutions",
+    "distinct_advisers",
     "resolution_rate",
     "suspicious_alias_count",
     "wall_clock_seconds",
@@ -174,11 +175,15 @@ def evaluate_publishable(
     nport_n = result.get("positions") or 0
     pooled_n = result.get("pooled") or 0
     res_n = result.get("resolutions") or 0
+    distinct_advisers = result.get("distinct_advisers") or 0
     total = nport_n + pooled_n
 
     if total == 0:
         return False, "no_evidence"
-    if total < MIN_EVIDENCE_FOR_PUBLISH and res_n < MIN_RESOLVED_FOR_PUBLISH:
+    # Use DISTINCT advisers, not resolution rows, for the "min advisers"
+    # threshold — Codex flagged this. A company with 2 Form D rows both
+    # attributed to the same firm has only 1 distinct adviser.
+    if total < MIN_EVIDENCE_FOR_PUBLISH and distinct_advisers < MIN_RESOLVED_FOR_PUBLISH:
         return False, "thin_evidence"
     if total > 0 and (res_n / total) < LOW_RESOLUTION_THRESHOLD:
         return False, "low_resolution"
@@ -265,6 +270,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                     "formd_pooled": 0,
                     "formd_direct_issuer": 0,
                     "resolutions": 0,
+                    "distinct_advisers": 0,
                     "resolution_rate": 0,
                     "suspicious_alias_count": 0,
                     "wall_clock_seconds": round(elapsed, 1),
@@ -293,6 +299,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                     "formd_pooled": pooled_n,
                     "formd_direct_issuer": direct_n,
                     "resolutions": res_n,
+                    "distinct_advisers": result.get("distinct_advisers") or 0,
                     "resolution_rate": round(rate, 3),
                     "suspicious_alias_count": len(susp),
                     "wall_clock_seconds": round(elapsed, 1),
@@ -314,6 +321,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "formd_pooled": 0,
                 "formd_direct_issuer": 0,
                 "resolutions": 0,
+                "distinct_advisers": 0,
                 "resolution_rate": 0,
                 "suspicious_alias_count": 0,
                 "wall_clock_seconds": round(elapsed, 1),
