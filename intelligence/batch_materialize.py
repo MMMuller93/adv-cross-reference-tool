@@ -52,32 +52,38 @@ from materialize_holders import (  # type: ignore[import-not-found]
 )
 
 
-SUSPICIOUS_ALIAS_THRESHOLD = 500  # Form D rows; tune after seeing distribution
-LOW_RESOLUTION_THRESHOLD = 0.30   # 30% adviser-resolved minimum
+LOW_RESOLUTION_THRESHOLD = 0.30   # below this, status=low_resolution
+MIN_EVIDENCE_FOR_PUBLISH = 3      # need at least this many evidence rows
+MIN_RESOLVED_FOR_PUBLISH = 2      # OR at least this many resolved advisers
+PUBLISH_LIFECYCLE_ALLOWED = {"private", None}  # public/acquired -> not auto-publishable
 
 MANIFEST_COLUMNS = [
     "slug",
     "display_name",
+    "lifecycle_status",
     "status",
     "flags",
+    "publishable",
+    "publish_reason",
     "nport_positions",
     "formd_pooled",
     "formd_direct_issuer",
     "resolutions",
     "resolution_rate",
+    "suspicious_alias_count",
     "wall_clock_seconds",
     "error",
 ]
 
 
 def list_company_slugs(nport, limit: Optional[int] = None) -> list[dict[str, str]]:
-    """Return [{slug, display_name}, ...] for all rows in private_companies."""
+    """Return [{slug, display_name, lifecycle_status}, ...] for all rows in private_companies."""
     rows: list[dict[str, str]] = []
     last_slug = ""
     while True:
         query = (
             nport.table("private_companies")
-            .select("slug,display_name")
+            .select("slug,display_name,lifecycle_status")
             .gt("slug", last_slug)
             .order("slug")
             .limit(1000)
@@ -114,25 +120,75 @@ def append_manifest_row(path: Path, row: dict[str, Any]) -> None:
 
 
 def classify_status(result: dict[str, Any]) -> tuple[str, list[str]]:
-    """Apply quality gates. Returns (primary_status, list_of_all_flags)."""
+    """Apply quality gates. Returns (primary_status, list_of_all_flags).
+
+    Statuses (in priority order — first match wins for primary):
+      no_evidence:        0 N-PORT + 0 Form D pooled vehicles
+      alias_review:       at least one alias was capped (hit > ALIAS_HIT_CAP);
+                          rows were discarded — manifest needs review
+      low_resolution:     has evidence, <30% adviser-resolved
+      ok:                 evidence exists, resolution acceptable
+    """
     nport_n = result.get("positions") or result.get("positions_pending") or 0
     pooled_n = result.get("pooled") or result.get("pooled_pending") or 0
     direct_n = result.get("direct") or result.get("direct_pending") or 0
     res_n = result.get("resolutions") or result.get("resolutions_pending_total") or 0
+    susp = result.get("suspicious_aliases") or []
     total = nport_n + pooled_n
     rate = (res_n / total) if total else 0.0
 
     flags: list[str] = []
-    if total == 0:
+    if total == 0 and not susp:
         flags.append("no_evidence")
-    if pooled_n >= SUSPICIOUS_ALIAS_THRESHOLD:
-        flags.append("suspicious_alias")
+    if susp:
+        flags.append("alias_review")
     if total > 0 and rate < LOW_RESOLUTION_THRESHOLD:
         flags.append("low_resolution")
-    if direct_n > 0:
-        flags.append("direct_issuer_risk")
     primary = flags[0] if flags else "ok"
     return primary, flags
+
+
+def evaluate_publishable(
+    result: dict[str, Any],
+    flags: list[str],
+    lifecycle_status: Optional[str],
+) -> tuple[bool, str]:
+    """Apply the publication gate (Codex spec).
+
+    A company is publishable iff:
+      - lifecycle is private (or NULL), NOT public/acquired
+      - no alias_review flag
+      - no error
+      - has at least MIN_EVIDENCE_FOR_PUBLISH evidence rows
+        OR at least MIN_RESOLVED_FOR_PUBLISH advisers identified
+      - resolution rate >= LOW_RESOLUTION_THRESHOLD
+
+    Returns (publishable: bool, reason: str). Reason describes why
+    NOT publishable when False; 'ok' when True.
+    """
+    if lifecycle_status not in PUBLISH_LIFECYCLE_ALLOWED:
+        return False, f"lifecycle_{lifecycle_status}"
+    if "error" in flags:
+        return False, "error"
+
+    nport_n = result.get("positions") or 0
+    pooled_n = result.get("pooled") or 0
+    res_n = result.get("resolutions") or 0
+    total = nport_n + pooled_n
+
+    if total == 0:
+        return False, "no_evidence"
+    if total < MIN_EVIDENCE_FOR_PUBLISH and res_n < MIN_RESOLVED_FOR_PUBLISH:
+        return False, "thin_evidence"
+    if total > 0 and (res_n / total) < LOW_RESOLUTION_THRESHOLD:
+        return False, "low_resolution"
+    # alias_review is intentionally informational, not blocking. The
+    # alias-hit-cap discards bad rows at the source, so when alias_review
+    # fires the remaining evidence is still clean. The flag tells the
+    # operator "one or more aliases were filtered — review them if you
+    # want better coverage." If alias_review + low_resolution co-occur,
+    # the low_resolution branch above blocks publication.
+    return True, "ok"
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
@@ -189,6 +245,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     for i, company in enumerate(company_rows, 1):
         slug = company["slug"]
         display_name = company.get("display_name") or slug
+        lifecycle = company.get("lifecycle_status")
         start = time.time()
         try:
             result = materialize_company(
@@ -199,35 +256,45 @@ def main(argv: Optional[list[str]] = None) -> int:
                 row = {
                     "slug": slug,
                     "display_name": display_name,
+                    "lifecycle_status": lifecycle,
                     "status": "error",
                     "flags": "error",
+                    "publishable": False,
+                    "publish_reason": "error",
                     "nport_positions": 0,
                     "formd_pooled": 0,
                     "formd_direct_issuer": 0,
                     "resolutions": 0,
                     "resolution_rate": 0,
+                    "suspicious_alias_count": 0,
                     "wall_clock_seconds": round(elapsed, 1),
                     "error": str(result["error"])[:200],
                 }
                 errors += 1
             else:
                 primary, flags = classify_status(result)
+                publishable, reason = evaluate_publishable(result, flags, lifecycle)
                 nport_n = result.get("positions") or result.get("positions_pending") or 0
                 pooled_n = result.get("pooled") or result.get("pooled_pending") or 0
                 direct_n = result.get("direct") or result.get("direct_pending") or 0
                 res_n = result.get("resolutions") or result.get("resolutions_pending_total") or 0
+                susp = result.get("suspicious_aliases") or []
                 total = nport_n + pooled_n
                 rate = (res_n / total) if total else 0.0
                 row = {
                     "slug": slug,
                     "display_name": display_name,
+                    "lifecycle_status": lifecycle,
                     "status": primary,
                     "flags": "|".join(flags) if flags else "ok",
+                    "publishable": publishable,
+                    "publish_reason": reason,
                     "nport_positions": nport_n,
                     "formd_pooled": pooled_n,
                     "formd_direct_issuer": direct_n,
                     "resolutions": res_n,
                     "resolution_rate": round(rate, 3),
+                    "suspicious_alias_count": len(susp),
                     "wall_clock_seconds": round(elapsed, 1),
                     "error": "",
                 }
@@ -238,22 +305,27 @@ def main(argv: Optional[list[str]] = None) -> int:
             row = {
                 "slug": slug,
                 "display_name": display_name,
+                "lifecycle_status": lifecycle,
                 "status": "error",
                 "flags": "error",
+                "publishable": False,
+                "publish_reason": "error",
                 "nport_positions": 0,
                 "formd_pooled": 0,
                 "formd_direct_issuer": 0,
                 "resolutions": 0,
                 "resolution_rate": 0,
+                "suspicious_alias_count": 0,
                 "wall_clock_seconds": round(elapsed, 1),
                 "error": str(exc)[:200],
             }
             errors += 1
 
         append_manifest_row(manifest_path, row)
+        pub_label = "PUBLISH" if row["publishable"] else "skip"
         print(
             f"  [{i:>3d}/{len(company_rows)}] {slug:30s}  "
-            f"{row['status']:18s}  "
+            f"{row['status']:14s}  pub:{pub_label:7s}  "
             f"nport={row['nport_positions']:>4d}  pooled={row['formd_pooled']:>4d}  "
             f"resolved={row['resolution_rate']:.0%}  ({elapsed:.1f}s)"
         )

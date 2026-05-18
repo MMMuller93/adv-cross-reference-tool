@@ -119,24 +119,31 @@ def fetch_nport_positions(nport, company_slug: str) -> list[dict[str, Any]]:
     return rows
 
 
+MIN_ALIAS_LENGTH = 5  # Aliases shorter than this risk false-positive explosions.
+
+# A small allowlist of well-known short tickers/abbreviations that are
+# unambiguous enough to use as aliases despite being under MIN_ALIAS_LENGTH.
+# Empty by default in V1 — add per request after manual review.
+SHORT_ALIAS_ALLOWLIST: set[str] = set()
+
+
 def fetch_company_aliases(nport, company_id: str) -> list[dict[str, Any]]:
     """Curated alias list for a company (used for Form D entityname matching).
 
-    Pattern-type semantics (only the types suitable for Form D filer-name
-    matching are returned):
+    Returns only patterns suitable for Form D filer-name matching:
       - exact_normalized: the pattern is a normalized company name token;
-        we match anywhere in the filer name via substring ILIKE.
-      - prefix: same handling as exact_normalized for V1 (substring ILIKE).
-        Future: tighten to true prefix matching ('pattern%') if we see
-        false positives caused by middle-of-name matches.
+        we use word-boundary regex matching (~* '\\m{alias}\\M').
+      - prefix: anchored prefix matching (~* '\\m{alias}') so the alias
+        must start a word in the entityname.
 
-    Excluded:
-      - regex: designed for N-PORT issuer-text matching ('economic
-        exposure to OpenAI'), not Form D filer names. Treating them as
-        substring patterns would search for the literal regex syntax in
-        Form D entitynames — zero useful matches, just noise.
-      - vendor_code: for N-PORT vendor-code matching (CUSIP-like
-        codes), not Form D.
+    Hygiene rules applied here (from Codex review of the diagnostic batch):
+      - Patterns shorter than MIN_ALIAS_LENGTH are dropped unless allow-
+        listed. Generic 3-4 char slugs ('ada', 'mpl', 'fab') caused
+        false-positive explosions on the 843-company diagnostic run.
+      - regex pattern_type is excluded — those are for N-PORT issuer-text
+        matching, not Form D filer names.
+      - vendor_code pattern_type is excluded — those are CUSIP-like codes
+        for N-PORT vendor matching.
     """
     response = (
         nport.table("private_company_aliases")
@@ -145,7 +152,50 @@ def fetch_company_aliases(nport, company_id: str) -> list[dict[str, Any]]:
         .in_("pattern_type", ["exact_normalized", "prefix"])
         .execute()
     )
-    return response.data or []
+    raw = response.data or []
+    safe: list[dict[str, Any]] = []
+    for row in raw:
+        pattern = (row.get("pattern") or "").strip()
+        if not pattern:
+            continue
+        if len(pattern) < MIN_ALIAS_LENGTH and pattern.lower() not in SHORT_ALIAS_ALLOWLIST:
+            continue
+        safe.append(row)
+    return safe
+
+
+def _company_display_tokens(company_meta: dict[str, Any]) -> set[str]:
+    """Build a set of normalized tokens that identify the company ITSELF
+    (so we can route direct-issuer Form D rows away from the holder bucket).
+
+    Includes the display_name plus any 'legal_entities' names. Each name is
+    uppercased, suffix-stripped, and whitespace-collapsed.
+    """
+    tokens: set[str] = set()
+    display = company_meta.get("display_name")
+    if display:
+        norm = _normalize_master_for_match(display)
+        if norm:
+            tokens.add(norm)
+    for entity in company_meta.get("legal_entities") or []:
+        if isinstance(entity, dict):
+            name = entity.get("name")
+            if name:
+                norm = _normalize_master_for_match(name)
+                if norm:
+                    tokens.add(norm)
+    return tokens
+
+
+def _filer_is_direct_issuer(filer_entityname: Optional[str], company_tokens: set[str]) -> bool:
+    """Return True iff the Form D filer IS the tracked company itself
+    (not a pooled vehicle that merely names the company)."""
+    if not filer_entityname or not company_tokens:
+        return False
+    norm = _normalize_master_for_match(filer_entityname)
+    if not norm:
+        return False
+    return norm in company_tokens
 
 
 # Negative-exclusion patterns from POC2 (curated). When Form D entityname
@@ -196,27 +246,64 @@ def parse_series_master(entityname: Optional[str]) -> Optional[str]:
     return _normalize_master_for_match(raw_master)
 
 
-def fetch_formd_via_cross_reference(formd, aliases: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Form D filings hit via aliases (entityname ILIKE) + optionally linked
-    to an adviser CRD via cross_reference_matches.
+def fetch_formd_via_cross_reference(formd, aliases: list[dict[str, Any]]) -> dict[str, Any]:
+    """Form D filings hit via aliases + optionally linked to an adviser CRD
+    via cross_reference_matches.
 
-    Returns filings annotated with `_resolved_crd` and `_resolution_method`.
-    Rows without a cross_reference_matches link still get returned (with
+    Returns:
+      {
+        "filings":             list of matched form_d_filings rows,
+                                annotated with _resolved_crd and
+                                _resolution_method,
+        "suspicious_aliases":  list of aliases whose hit count exceeded
+                                ALIAS_HIT_CAP and were therefore SKIPPED,
+                                each item: {alias, pattern_type, hits}
+      }
+
+    Rows without a cross_reference_matches link are still returned (with
     `_resolved_crd=None`); they're V1 holder evidence without adviser
     attribution.
     """
-    # Use positive patterns suitable for entityname substring matching.
     candidates = [a["pattern"] for a in aliases if a.get("pattern")]
     if not candidates:
-        return []
+        return {"filings": [], "suspicious_aliases": []}
 
-    # 1. Find form_d_filings rows whose entityname matches any alias (ILIKE)
+    # 1. Find form_d_filings rows whose entityname matches any alias.
+    # Use word-boundary regex matching (PostgREST ~* operator), NOT raw
+    # substring ILIKE — substring matching produces false-positive
+    # explosions on common-word aliases (e.g., 'Square' matches
+    # 'Squarespace', 'Mews' matches 'Hammews', 'Box' matches 'Boxer').
+    #
+    # \m and \M are Postgres word-boundary anchors (case-insensitive ~*).
+    # For pattern_type='prefix' we anchor only at the start; for
+    # exact_normalized we anchor at both ends so the alias must appear
+    # as a standalone word/token.
+    #
+    # Per-alias hard cap: if a single alias matches more than
+    # ALIAS_HIT_CAP rows it almost certainly isn't specific enough to be
+    # trusted. We discard those rows entirely and flag the alias for
+    # manual review (returned via _alias_review_flag).
+    ALIAS_HIT_CAP = 100
     matched: list[dict[str, Any]] = []
     seen_accessions: set[str] = set()
-    for alias in candidates:
-        # Use ILIKE pattern with % wildcards for substring match
-        like_pattern = f"%{alias}%"
+    suspicious_aliases: list[dict[str, Any]] = []
+
+    for alias_row in aliases:
+        alias = alias_row.get("pattern", "").strip()
+        if not alias:
+            continue
+        # Escape regex metacharacters in the alias literal
+        alias_escaped = re.escape(alias)
+        if alias_row.get("pattern_type") == "prefix":
+            # Anchored prefix: word-start, then literal alias (may extend)
+            regex_pattern = f"\\m{alias_escaped}"
+        else:
+            # exact_normalized: full word-boundary on both sides
+            regex_pattern = f"\\m{alias_escaped}\\M"
+
+        alias_hits: list[dict[str, Any]] = []
         last_id = 0
+        capped = False
         while True:
             query = (
                 formd.table("form_d_filings")
@@ -224,25 +311,42 @@ def fetch_formd_via_cross_reference(formd, aliases: list[dict[str, Any]]) -> lis
                     "id,accessionnumber,entityname,cik,series_master_llc,"
                     "filing_date,totalofferingamount"
                 )
-                .ilike("entityname", like_pattern)
+                .filter("entityname", "imatch", regex_pattern)
                 .gt("id", last_id)
                 .order("id")
                 .limit(1000)
             )
             response = query.execute()
             batch = response.data or []
-            for row in batch:
-                acc = row["accessionnumber"]
-                if acc and acc not in seen_accessions:
-                    seen_accessions.add(acc)
-                    matched.append(row)
+            alias_hits.extend(batch)
             if len(batch) < 1000:
                 break
             last_id = int(batch[-1]["id"])
+            if len(alias_hits) > ALIAS_HIT_CAP * 5:
+                # Safety break — keep going only enough to confirm "too many"
+                capped = True
+                break
+
+        # Per-alias hit-cap check
+        if len(alias_hits) > ALIAS_HIT_CAP or capped:
+            suspicious_aliases.append({
+                "alias": alias,
+                "pattern_type": alias_row.get("pattern_type"),
+                "hits": len(alias_hits),
+            })
+            # Skip ingesting any of this alias's hits — likely a false-positive
+            # explosion. Flagged for manual review in the manifest.
+            continue
+
+        for row in alias_hits:
+            acc = row["accessionnumber"]
+            if acc and acc not in seen_accessions:
+                seen_accessions.add(acc)
+                matched.append(row)
 
     # 2. Cross-reference: which of these are bridged to a CRD?
     if not matched:
-        return []
+        return {"filings": [], "suspicious_aliases": suspicious_aliases}
     accession_set = list(seen_accessions)
     xref_map: dict[str, str] = {}  # accession -> adviser_entity_crd
     # Chunk to stay under PostgREST URL limits
@@ -304,7 +408,7 @@ def fetch_formd_via_cross_reference(formd, aliases: list[dict[str, Any]]) -> lis
     if propagated_enriched:
         print(f"    propagated {propagated_enriched} via enriched_managers lookup")
 
-    return matched
+    return {"filings": matched, "suspicious_aliases": suspicious_aliases}
 
 
 def _normalize_master_for_match(value: Optional[str]) -> Optional[str]:
@@ -634,33 +738,49 @@ def materialize_company(
     positions = fetch_nport_positions(nport, company_slug)
     print(f"    {len(positions)} positions found")
 
-    # 2. Form D pooled-vehicle offerings (via aliases + xref)
+    # 2. Form D filings hit via aliases (pooled vehicles AND any direct-issuer
+    # rows that snuck through via alias matching — we route those out below).
     company_id = company_meta["id"]
+    company_tokens = _company_display_tokens(company_meta)
     print("  fetching company aliases...")
     aliases = fetch_company_aliases(nport, company_id)
-    print(f"    {len(aliases)} positive alias patterns")
+    print(f"    {len(aliases)} positive alias patterns (post hygiene filter)")
     print("  fetching Form D pooled-vehicle filings...")
-    pooled_filings = fetch_formd_via_cross_reference(formd, aliases)
-    print(f"    {len(pooled_filings)} pooled-vehicle filings (pre-exclusion)")
-    # Apply hardcoded negative-exclusion patterns from POC2 curation
+    formd_result = fetch_formd_via_cross_reference(formd, aliases)
+    all_matched = formd_result["filings"]
+    suspicious_aliases = formd_result["suspicious_aliases"]
+    if suspicious_aliases:
+        print(f"    {len(suspicious_aliases)} alias(es) hit the cap, SKIPPED:")
+        for sa in suspicious_aliases:
+            print(f"      - {sa['alias']!r} ({sa['pattern_type']}): {sa['hits']}+ hits")
+    print(f"    {len(all_matched)} alias matches (pre-routing)")
+
+    # 2a. Apply hardcoded negative-exclusion patterns
     negatives = NEGATIVE_PATTERNS_BY_COMPANY.get(company_slug, [])
     if negatives:
         filtered = [
-            f for f in pooled_filings
+            f for f in all_matched
             if not any(neg in (f.get("entityname") or "").lower() for neg in negatives)
         ]
-        excluded = len(pooled_filings) - len(filtered)
+        excluded = len(all_matched) - len(filtered)
         if excluded:
-            print(f"    excluded {excluded} via negative patterns: {negatives}")
-        pooled_filings = filtered
+            print(f"    excluded {excluded} via negative patterns")
+        all_matched = filtered
 
-    # 3. Form D direct-issuer (kept for audit, never surfaced as holder)
-    # V1: skipped. POC2 verified there are zero direct-issuer Form D rows for
-    # the gold-set companies (e.g., Anthropic PBC CIK 1839804 returns 0 rows
-    # in our Form D DB). The intel_formd_direct_issuer_offering table exists
-    # as future-proofing but is not populated by V1.
+    # 2b. Route direct-issuer filings (filer entityname IS the tracked
+    # company itself) AWAY from the holder bucket. Codex review found these
+    # leaking into pooled-vehicle output (e.g., 'Stripe, Inc.' showing as
+    # a holder of Stripe). Direct-issuer rows go to the audit table but
+    # never to the holder view.
+    pooled_filings: list[dict[str, Any]] = []
     direct_filings: list[dict[str, Any]] = []
-    print("  direct-issuer step: skipped for V1 (no rows expected per POC2)")
+    for filing in all_matched:
+        if _filer_is_direct_issuer(filing.get("entityname"), company_tokens):
+            direct_filings.append(filing)
+        else:
+            pooled_filings.append(filing)
+    print(f"    {len(pooled_filings)} pooled-vehicle (holder evidence)")
+    print(f"    {len(direct_filings)} direct-issuer (NOT a holder, audit only)")
 
     # 4. N-PORT adviser resolution map
     print("  building N-PORT adviser resolution map...")
@@ -676,6 +796,7 @@ def materialize_company(
             "pooled_pending": len(pooled_filings),
             "direct_pending": len(direct_filings),
             "resolutions_pending_total": len(resolutions_map),
+            "suspicious_aliases": suspicious_aliases,
         }
 
     # WRITES
@@ -783,6 +904,7 @@ def materialize_company(
         "pooled": pooled_result["rows"],
         "direct": direct_written,
         "resolutions": resolutions_written,
+        "suspicious_aliases": suspicious_aliases,
     }
 
 
