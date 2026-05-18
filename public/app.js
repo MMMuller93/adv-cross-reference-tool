@@ -170,7 +170,7 @@ const getStateFromURL = () => {
     nmEndDate: params.get('nmEnd') || new Date().toISOString().split('T')[0],
     nmFundType: params.get('nmType') || '',
     nmState: params.get('nmState') || '',
-    nmHasAdv: params.get('nmHasAdv') || '',
+    nmHasAdv: params.get('nmHasAdv') || 'no',
     // Individual entity view (supports both old query param and new SEO path)
     adviser: seoPath?.type === 'adviser' ? seoPath.id : (params.get('adviser') || ''),
     fund: seoPath?.type === 'fund' ? seoPath.id : '',
@@ -204,7 +204,7 @@ const updateURL = (state) => {
     if (state.nmEndDate && state.nmEndDate !== defaultEnd) params.set('nmEnd', state.nmEndDate);
     if (state.nmFundType) params.set('nmType', state.nmFundType);
     if (state.nmState) params.set('nmState', state.nmState);
-    if (state.nmHasAdv) params.set('nmHasAdv', state.nmHasAdv);
+    if (state.nmHasAdv && state.nmHasAdv !== 'no') params.set('nmHasAdv', state.nmHasAdv);
   }
 
   // Individual entity view (adviser CRD)
@@ -4870,15 +4870,15 @@ function App() {
                           onChange={(e) => setNmHasAdv(e.target.value)}
                           className="px-3 py-2 text-[12px] bg-white border border-gray-200 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer"
                         >
-                          <option value="">All Registrations</option>
-                          <option value="yes">Has Form ADV</option>
                           <option value="no">No Form ADV</option>
+                          <option value="">All recent Form D managers</option>
+                          <option value="yes">Only registered (has ADV)</option>
                         </select>
                         {/* Result Count */}
                         <div className="ml-auto flex items-center gap-2">
-                          {(nmFundType || nmState || nmHasAdv) && (
+                          {(nmFundType || nmState || nmHasAdv !== 'no') && (
                             <button
-                              onClick={() => { setNmFundType(''); setNmState(''); setNmHasAdv(''); }}
+                              onClick={() => { setNmFundType(''); setNmState(''); setNmHasAdv('no'); }}
                               className="px-2 py-1 text-[10px] font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
                             >
                               Clear Filters
