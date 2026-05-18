@@ -122,16 +122,27 @@ def fetch_nport_positions(nport, company_slug: str) -> list[dict[str, Any]]:
 def fetch_company_aliases(nport, company_id: str) -> list[dict[str, Any]]:
     """Curated alias list for a company (used for Form D entityname matching).
 
-    The schema stores patterns under company_id (UUID), with `pattern` and
-    `pattern_type` columns. We use only the patterns suitable for Form D
-    entityname substring matching — vendor_code patterns are for N-PORT
-    issuer matching (not Form D filer names) so we exclude them.
+    Pattern-type semantics (only the types suitable for Form D filer-name
+    matching are returned):
+      - exact_normalized: the pattern is a normalized company name token;
+        we match anywhere in the filer name via substring ILIKE.
+      - prefix: same handling as exact_normalized for V1 (substring ILIKE).
+        Future: tighten to true prefix matching ('pattern%') if we see
+        false positives caused by middle-of-name matches.
+
+    Excluded:
+      - regex: designed for N-PORT issuer-text matching ('economic
+        exposure to OpenAI'), not Form D filer names. Treating them as
+        substring patterns would search for the literal regex syntax in
+        Form D entitynames — zero useful matches, just noise.
+      - vendor_code: for N-PORT vendor-code matching (CUSIP-like
+        codes), not Form D.
     """
     response = (
         nport.table("private_company_aliases")
         .select("pattern,pattern_type,exposure_type")
         .eq("company_id", company_id)
-        .in_("pattern_type", ["exact_normalized", "prefix", "regex"])
+        .in_("pattern_type", ["exact_normalized", "prefix"])
         .execute()
     )
     return response.data or []
