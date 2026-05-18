@@ -1,0 +1,108 @@
+name: Fund Holders Intel — Refresh Pipeline
+
+# Refreshes the fund-holders intel pipeline end-to-end:
+#   1. backfill_live.py: scrape latest N-CEN filings from SEC EDGAR
+#      for any registrants whose adv_crd cache is stale or missing.
+#   2. reconcile_live.py: validate CRDs against advisers_enriched and
+#      update nport_registrants.adv_crd.
+#   3. batch_materialize.py --resume: re-materialize intel_* tables
+#      for every seeded company, writing the manifest CSV.
+#
+# To enable scheduled runs:
+#   1. Uncomment the `schedule:` block below.
+#   2. Add the following secrets to the repo
+#      (Settings -> Secrets and variables -> Actions):
+#        SUPABASE_URL_NPORT
+#        SUPABASE_SERVICE_KEY_NPORT
+#        SUPABASE_URL_ADV         (optional, defaults baked into script)
+#        SUPABASE_ANON_KEY_ADV
+#        SUPABASE_URL_FORMD       (optional)
+#        SUPABASE_ANON_KEY_FORMD
+#   3. Commit and push. The workflow will fire on the schedule and on
+#      manual workflow_dispatch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_backfill:
+        description: "Skip N-CEN backfill step (reconcile + materialize only)"
+        required: false
+        type: boolean
+        default: false
+      single_company:
+        description: "Materialize only this company slug (debug)"
+        required: false
+        type: string
+
+  # Uncomment to enable nightly refresh.
+  # SEC EDGAR's daily index updates ~6am UTC; we run at 7am UTC to
+  # pick up new filings posted overnight.
+  # schedule:
+  #   - cron: "0 7 * * *"
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240  # 4-hour hard cap; typical run is 1-2h
+
+    env:
+      SUPABASE_URL_NPORT:       ${{ secrets.SUPABASE_URL_NPORT }}
+      SUPABASE_SERVICE_KEY_NPORT: ${{ secrets.SUPABASE_SERVICE_KEY_NPORT }}
+      SUPABASE_URL_ADV:         ${{ secrets.SUPABASE_URL_ADV }}
+      SUPABASE_ANON_KEY_ADV:    ${{ secrets.SUPABASE_ANON_KEY_ADV }}
+      SUPABASE_URL_FORMD:       ${{ secrets.SUPABASE_URL_FORMD }}
+      SUPABASE_ANON_KEY_FORMD:  ${{ secrets.SUPABASE_ANON_KEY_FORMD }}
+      SEC_USER_AGENT:           "PrivateFundsRadar Miles mmmuller93@gmail.com"
+
+    steps:
+      - name: Check out fund-holders-intel
+        uses: actions/checkout@v4
+        with:
+          ref: fund-holders-intel
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install --quiet requests supabase lxml
+
+      - name: Check out nport-buildout-claude into a sibling directory
+        uses: actions/checkout@v4
+        with:
+          ref: nport-buildout-claude
+          path: ../nport-buildout-claude
+
+      - name: N-CEN backfill (skips already-resolved CIKs)
+        if: ${{ !inputs.skip_backfill }}
+        working-directory: ../nport-buildout-claude
+        run: |
+          python -m nport.enrichment.ncen_ingest.backfill_live --execute --checkpoint-every 100
+
+      - name: Reconcile registrant adviser cache
+        working-directory: ../nport-buildout-claude
+        run: |
+          python -m nport.enrichment.ncen_ingest.reconcile_live --execute
+
+      - name: Materialize holder evidence for every seeded company
+        run: |
+          if [ -n "${{ inputs.single_company }}" ]; then
+            python -m intelligence.batch_materialize \
+              --execute --resume \
+              --slug "${{ inputs.single_company }}" \
+              --manifest intelligence/out/batch_manifest.csv
+          else
+            python -m intelligence.batch_materialize \
+              --execute --resume \
+              --manifest intelligence/out/batch_manifest.csv
+          fi
+
+      - name: Upload manifest as artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: intel-batch-manifest-${{ github.run_id }}
+          path: intelligence/out/batch_manifest.csv
+          retention-days: 30
