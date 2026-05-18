@@ -404,6 +404,115 @@ test('GET /companies — includeStats adds N-PORT ranking fields', async () => {
   assert.ok(res.body.companies[0].search_rank_score > 0);
 });
 
+test('GET /companies — includeStats ranks before pagination', async () => {
+  const lowExposure = {
+    id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    slug: 'aardvark',
+    display_name: 'Aardvark',
+    lifecycle_status: 'private',
+  };
+  const highExposure = {
+    id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+    slug: 'spacex',
+    display_name: 'SpaceX',
+    lifecycle_status: 'private',
+  };
+  installMocks({
+    nportRouter: (table) => {
+      if (table === 'private_companies') {
+        return { data: [lowExposure, highExposure], error: null, count: 2 };
+      }
+      if (table === 'nport_company_positions_mv') {
+        return {
+          data: [
+            {
+              holding_id_internal: 1,
+              company_slug: 'aardvark',
+              report_period_date: '2026-02-28',
+              registrant_cik: '1',
+              currency_value_usd: 10,
+            },
+            {
+              holding_id_internal: 2,
+              company_slug: 'spacex',
+              report_period_date: '2026-02-28',
+              registrant_cik: '2',
+              currency_value_usd: 1000000000,
+            },
+          ],
+          error: null,
+          count: 2,
+        };
+      }
+      return defaultNportRouter(table);
+    },
+  });
+
+  const res = await request(
+    baseUrl,
+    'GET',
+    '/api/nport/companies?page=1&pageSize=1&includeStats=true'
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.body.total, 2);
+  assert.equal(res.body.companies.length, 1);
+  assert.equal(res.body.companies[0].slug, 'spacex');
+  assert.equal(res.body.companies[0].nport_latest_value_usd, 1000000000);
+});
+
+test('GET /companies — includeStats downranks stale N-PORT exposure', async () => {
+  const staleExposure = {
+    id: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+    slug: 'stale-public',
+    display_name: 'Stale Public',
+    lifecycle_status: 'public',
+  };
+  const recentExposure = {
+    id: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+    slug: 'recent-private',
+    display_name: 'Recent Private',
+    lifecycle_status: 'private',
+  };
+  installMocks({
+    nportRouter: (table) => {
+      if (table === 'private_companies') {
+        return { data: [recentExposure, staleExposure], error: null, count: 2 };
+      }
+      if (table === 'nport_company_positions_mv') {
+        return {
+          data: [
+            {
+              holding_id_internal: 1,
+              company_slug: 'stale-public',
+              report_period_date: '2021-03-31',
+              registrant_cik: '1',
+              currency_value_usd: 10000000000,
+            },
+            {
+              holding_id_internal: 2,
+              company_slug: 'recent-private',
+              report_period_date: '2026-02-28',
+              registrant_cik: '2',
+              currency_value_usd: 1000000000,
+            },
+          ],
+          error: null,
+          count: 2,
+        };
+      }
+      return defaultNportRouter(table);
+    },
+  });
+
+  const res = await request(
+    baseUrl,
+    'GET',
+    '/api/nport/companies?page=1&pageSize=1&includeStats=true'
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.body.companies[0].slug, 'recent-private');
+});
+
 test('GET /companies — 400 on invalid hasRecentMarkup', async () => {
   installMocks();
   const res = await request(

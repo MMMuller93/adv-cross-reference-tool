@@ -50,6 +50,8 @@ router.deps = deps;
 const READ_PAGE_DEFAULT = 100;
 const READ_PAGE_MAX = 1000;
 const BASE_TABLE_READ_PAGE_SIZE = 1000;
+const COMPANY_DIRECTORY_PAGE_SIZE = 1000;
+const COMPANY_DIRECTORY_MAX_ROWS = 5000;
 const COMPANY_STATS_MAX_ROWS = 100000;
 const TRIAGE_CANDIDATE_LIMIT = 5;
 
@@ -97,6 +99,7 @@ const TRIAGE_LEGAL_SUFFIXES = new Set([
 let companyStatsCache = {
   loadedAt: 0,
   value: null,
+  client: null,
 };
 
 function configGuard(res) {
@@ -241,6 +244,24 @@ function toNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function monthsSincePeriod(periodDate) {
+  if (!periodDate) return null;
+  const parsed = new Date(`${periodDate}T00:00:00Z`);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  const now = new Date();
+  return (now.getUTCFullYear() - parsed.getUTCFullYear()) * 12 +
+    (now.getUTCMonth() - parsed.getUTCMonth());
+}
+
+function nportRecencyWeight(periodDate) {
+  const monthsOld = monthsSincePeriod(periodDate);
+  if (monthsOld === null) return 0.35;
+  if (monthsOld <= 9) return 1;
+  if (monthsOld <= 18) return 0.7;
+  if (monthsOld <= 30) return 0.35;
+  return 0.1;
+}
+
 function normalizeIssuerForTriage(value) {
   if (!value) return '';
   let text = String(value).toUpperCase();
@@ -301,7 +322,8 @@ function companySearchScore(company) {
   const holders = toNumber(company.nport_latest_holder_count) || 0;
   const valuationScore = valuation > 0 ? Math.log10(valuation + 1) * 7 : 0;
   const disclosedScore = disclosed > 0 ? Math.log10(disclosed + 1) * 10 : 0;
-  return Number((valuationScore + disclosedScore + holders * 2).toFixed(4));
+  const recencyWeight = nportRecencyWeight(company.nport_latest_period_date);
+  return Number((valuationScore + (disclosedScore + holders * 2) * recencyWeight).toFixed(4));
 }
 
 function decorateCompaniesForSearch(companies, statsBySlug = new Map()) {
@@ -320,10 +342,41 @@ function decorateCompaniesForSearch(companies, statsBySlug = new Map()) {
   });
 }
 
+async function fetchCompanyDirectoryRows(deps, { sector, lifecycleStatus } = {}) {
+  const companies = [];
+  let offset = 0;
+  let total = 0;
+
+  while (companies.length < COMPANY_DIRECTORY_MAX_ROWS) {
+    let q = deps.nportClient
+      .from('private_companies')
+      .select('*', { count: 'exact' });
+
+    if (sector) q = q.eq('sector', sector);
+    if (lifecycleStatus) q = q.eq('lifecycle_status', lifecycleStatus);
+
+    q = q
+      .order('display_name', { ascending: true })
+      .range(offset, offset + COMPANY_DIRECTORY_PAGE_SIZE - 1);
+
+    const { data, error, count } = await q;
+    if (error) throw error;
+    const page = data || [];
+    if (typeof count === 'number') total = count;
+    companies.push(...page);
+    if (page.length < COMPANY_DIRECTORY_PAGE_SIZE) break;
+    offset += COMPANY_DIRECTORY_PAGE_SIZE;
+    if (total && offset >= total) break;
+  }
+
+  return { companies, total: total || companies.length };
+}
+
 async function fetchCompanyStatsFromPositionsMv(deps, { maxRows = COMPANY_STATS_MAX_ROWS } = {}) {
   const now = Date.now();
   if (
     companyStatsCache.value &&
+    companyStatsCache.client === deps.nportClient &&
     now - companyStatsCache.loadedAt < 5 * 60 * 1000
   ) {
     return companyStatsCache.value;
@@ -398,7 +451,7 @@ async function fetchCompanyStatsFromPositionsMv(deps, { maxRows = COMPANY_STATS_
     if (stats) stats.period_count = set.size;
   }
 
-  companyStatsCache = { loadedAt: now, value: statsBySlug };
+  companyStatsCache = { loadedAt: now, value: statsBySlug, client: deps.nportClient };
   return statsBySlug;
 }
 
@@ -894,6 +947,7 @@ router.get('/companies', async (req, res) => {
   if (!configGuard(res)) return;
   try {
     const { sector, lifecycleStatus, hasRecentMarkup, includeStats } = req.query;
+    const shouldIncludeStats = includeStats === 'true' || includeStats === '1';
 
     if (
       hasRecentMarkup !== undefined &&
@@ -903,6 +957,36 @@ router.get('/companies', async (req, res) => {
     }
 
     const { page, pageSize, offset } = parsePagination(req);
+
+    if (shouldIncludeStats || hasRecentMarkup !== undefined) {
+      const directory = await fetchCompanyDirectoryRows(deps, { sector, lifecycleStatus });
+      let companies = directory.companies || [];
+
+      if (shouldIncludeStats) {
+        const statsBySlug = await fetchCompanyStatsFromPositionsMv(deps);
+        companies = decorateCompaniesForSearch(companies, statsBySlug).sort((a, b) => {
+          const scoreDelta = (toNumber(b.search_rank_score) || 0) - (toNumber(a.search_rank_score) || 0);
+          if (scoreDelta !== 0) return scoreDelta;
+          return String(a.display_name || a.slug).localeCompare(String(b.display_name || b.slug));
+        });
+      }
+
+      if (hasRecentMarkup === 'true' || hasRecentMarkup === 'false') {
+        const slugs = companies.map((c) => c.slug).filter(Boolean);
+        const slugToHasMarkup = await fetchHasRecentMarkupBySlug(deps, slugs);
+        companies = companies.filter((c) => {
+          const flag = slugToHasMarkup.get(c.slug) || false;
+          return hasRecentMarkup === 'true' ? flag : !flag;
+        });
+      }
+
+      return res.json({
+        total: companies.length,
+        page,
+        pageSize,
+        companies: companies.slice(offset, offset + pageSize),
+      });
+    }
 
     let q = deps.nportClient
       .from('private_companies')
@@ -916,32 +1000,11 @@ router.get('/companies', async (req, res) => {
     const { data, error, count } = await q;
     if (error) throw error;
 
-    let companies = data || [];
-    if (includeStats === 'true' || includeStats === '1') {
-      const statsBySlug = await fetchCompanyStatsFromPositionsMv(deps);
-      companies = decorateCompaniesForSearch(companies, statsBySlug).sort((a, b) => {
-        const scoreDelta = (toNumber(b.search_rank_score) || 0) - (toNumber(a.search_rank_score) || 0);
-        if (scoreDelta !== 0) return scoreDelta;
-        return String(a.display_name || a.slug).localeCompare(String(b.display_name || b.slug));
-      });
-    }
-
-    // hasRecentMarkup filter applied in JS — derived from position_deltas
-    // because private_companies has no `has_recent_markup` column.
-    if (hasRecentMarkup === 'true' || hasRecentMarkup === 'false') {
-      const slugs = companies.map((c) => c.slug).filter(Boolean);
-      const slugToHasMarkup = await fetchHasRecentMarkupBySlug(deps, slugs);
-      companies = companies.filter((c) => {
-        const flag = slugToHasMarkup.get(c.slug) || false;
-        return hasRecentMarkup === 'true' ? flag : !flag;
-      });
-    }
-
     return res.json({
       total: count || 0,
       page,
       pageSize,
-      companies,
+      companies: data || [],
     });
   } catch (err) {
     return serverError(res, err);

@@ -4,13 +4,13 @@
     "description": "Compliance detection system for Form D/ADV cross-reference analysis",
     "port": 3009,
     "created_at": "2025-11",
-    "last_updated": "2026-05-17"
+    "last_updated": "2026-05-18"
   },
   "session_state": {
     "current_session": 11,
     "last_working_commit": "05456fa",
     "environment_verified": true,
-    "notes": "N-PORT isolated live ingestion loaded through 2026Q1 bulk plus Q2-to-date daily catch-up on 2026-05-14. Materialized view refreshed. Full available N-CEN adviser backfill verified on 2026-05-17: 1572 N-CEN records, 15494 adviser-link rows, 1389 registrants linked to ADV CRD, 0 reconcile updates pending. Search/admin triage refinement verified in isolated nport-buildout-claude tree on 2026-05-17."
+    "notes": "N-PORT isolated live ingestion loaded through 2026Q1 bulk plus Q2-to-date daily catch-up on 2026-05-14. Materialized view refreshed. Full available N-CEN adviser backfill verified on 2026-05-17: 1572 N-CEN records, 15494 adviser-link rows, 1389 registrants linked to ADV CRD, 0 reconcile updates pending. Search/admin triage refinement verified in isolated nport-buildout-claude tree on 2026-05-17. Homepage company ranking fixed on 2026-05-18 to rank the full seeded directory before pagination and downrank stale N-PORT snapshots."
   },
   "features": [
     {
@@ -20,6 +20,8 @@
       "acceptance_criteria": [
         "Company search uses N-PORT exposure and holder-count stats when available",
         "Homepage high-signal cards surface disclosed exposure, holder count, and latest snapshot date",
+        "Stats-ranked directory ranks the full seeded universe before pagination",
+        "Stale historical N-PORT snapshots are downranked against current private-company exposure",
         "Admin unresolved queue groups raw holdings by normalized issuer name",
         "Admin triage shows candidate company matches with score and reason",
         "Resolver and scraper alias-cache normalization handle common non-US legal suffixes",
@@ -28,8 +30,8 @@
       "priority": 1,
       "status": "done",
       "passes": true,
-      "tested_at": "2026-05-17",
-      "notes": "Implemented in isolated nport/ subtree. Verified with 39 Node API tests, 178 Python tests including Postgres-backed integration, and Browser mock smoke for homepage search plus admin suggested matches. Live Supabase preflight reran on 2026-05-17 after wiring preflight_live.py to the canonical .env.nport handoff."
+      "tested_at": "2026-05-18",
+      "notes": "Implemented in isolated nport/ subtree. Follow-up fixed stats-ranked pagination and stale-snapshot ranking. Verified with 41 Node API tests, 27 scraper tests, live API smoke showing SpaceX/Anthropic/Stripe at the top, and Browser dashboard smoke. Live Supabase preflight reran on 2026-05-17 after wiring preflight_live.py to the canonical .env.nport handoff."
     },
     {
       "id": "nport-003",
