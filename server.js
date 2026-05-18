@@ -1435,19 +1435,36 @@ app.get('/api/funds/new-managers', async (req, res) => {
       // Check enriched_managers lookup
       const enrichedData = enrichedManagersMap[manager.series_master_llc.toLowerCase()];
       if (enrichedData) {
-        enrichedManager.enrichment_data = {
-          website: enrichedData.website_url || enrichedData.website,
-          fund_type: enrichedData.fund_type,
-          investment_stage: enrichedData.investment_stage,
-          linkedin: enrichedData.linkedin_company_url || enrichedData.linkedin_url,
-          twitter: enrichedData.twitter_handle,
-          email: enrichedData.primary_contact_email,
-          is_published: enrichedData.is_published,
-          confidence: enrichedData.confidence_score,
-          team_members: enrichedData.team_members || [],
-          portfolio_companies: enrichedData.portfolio_companies || [],
-          enrichment_status: enrichedData.enrichment_status
-        };
+        // Anchor-gated publish: only ship enrichment fields when we can verify the company identity.
+        // Anchor = (website_url OR linkedin_company_url is non-null) AND status is 'auto_enriched'.
+        // Without an anchor every enrichment field is suppressed — the row falls back to Form D info only.
+        const hasAnchor = (enrichedData.website_url || enrichedData.linkedin_company_url) &&
+                          enrichedData.enrichment_status === 'auto_enriched';
+
+        if (hasAnchor) {
+          enrichedManager.enrichment_data = {
+            website: enrichedData.website_url || enrichedData.website,
+            fund_type: enrichedData.fund_type,
+            investment_stage: enrichedData.investment_stage,
+            linkedin: enrichedData.linkedin_company_url || enrichedData.linkedin_url,
+            twitter: enrichedData.twitter_handle,
+            email: enrichedData.primary_contact_email,
+            is_published: enrichedData.is_published,
+            confidence: enrichedData.confidence_score,
+            team_members: enrichedData.team_members || [],
+            portfolio_companies: enrichedData.portfolio_companies || [],
+            enrichment_status: enrichedData.enrichment_status
+          };
+        } else {
+          // Suppressed by anchor gate — surface only status metadata, no identity fields.
+          enrichedManager.enrichment_data = {
+            enrichment_status: enrichedData.enrichment_status,
+            suppressed: true,
+            suppressed_reason: (enrichedData.website_url || enrichedData.linkedin_company_url)
+              ? 'enrichment_status_not_verified'
+              : 'no_company_anchor'
+          };
+        }
       }
 
       // Check advisers lookup
@@ -1471,18 +1488,25 @@ app.get('/api/funds/new-managers', async (req, res) => {
       const extMatch = lookupInvestor(parsedName) || lookupInvestor(manager.series_master_llc);
       if (extMatch) {
         const ed = enrichedManager.enrichment_data || {};
+        const isSuppressed = ed.suppressed === true;
         enrichedManager.enrichment_data = {
           ...ed,
-          website: ed.website || extMatch.website_url,
-          linkedin: ed.linkedin || extMatch.linkedin_url,
-          twitter: ed.twitter || extMatch.twitter_url,
-          email: ed.email || extMatch.primary_contact_email,
+          // Identity fields (website/linkedin/twitter/email) are only merged from external DB
+          // when the enriched_managers row passed the anchor gate. If suppressed, we skip these
+          // to avoid surfacing unverified identity data from an alternative source.
+          ...(isSuppressed ? {} : {
+            website: ed.website || extMatch.website_url,
+            linkedin: ed.linkedin || extMatch.linkedin_url,
+            twitter: ed.twitter || extMatch.twitter_url,
+            email: ed.email || extMatch.primary_contact_email,
+          }),
+          // Neutral supplemental fields are always safe to surface regardless of gate status.
           fund_type: ed.fund_type || extMatch.investor_type,
           investment_stage: ed.investment_stage || extMatch.investment_stage,
           investment_sectors: ed.investment_sectors || extMatch.investment_sectors,
           check_size_min: extMatch.check_size_min_usd,
           check_size_max: extMatch.check_size_max_usd,
-          contact_name: extMatch.contact_name,
+          contact_name: isSuppressed ? undefined : extMatch.contact_name,
           description: extMatch.description,
           founded_year: extMatch.founded_year,
           hq_location: extMatch.hq_location,
