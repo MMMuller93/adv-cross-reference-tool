@@ -37,16 +37,29 @@ class PreflightError(RuntimeError):
     """Raised when live preflight checks fail."""
 
 
-def load_dotenv(root: Path = PROJECT_ROOT) -> None:
-    env_path = root / ".env"
-    if not env_path.exists():
+def _read_env_file(path: Path) -> None:
+    if not path.exists():
         return
-    for line in env_path.read_text().splitlines():
+    for line in path.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+def load_dotenv(root: Path = PROJECT_ROOT) -> None:
+    """Load env from this worktree and the main PFR N-PORT env file.
+
+    The isolated worktree intentionally does not keep service-role secrets in
+    its own directory. The durable local secret handoff lives at the main
+    PrivateFundsRadar repo root as .env.nport.
+    """
+    _read_env_file(root / ".env")
+    pfr_root = root
+    while pfr_root.parent != pfr_root and pfr_root.name != "PrivateFundsRadar":
+        pfr_root = pfr_root.parent
+    _read_env_file(pfr_root / ".env.nport")
 
 
 def create_supabase_client():

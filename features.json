@@ -29,7 +29,7 @@
       "status": "done",
       "passes": true,
       "tested_at": "2026-05-17",
-      "notes": "Implemented in isolated nport/ subtree. Verified with 39 Node API tests, 178 Python tests including Postgres-backed integration, and Browser mock smoke for homepage search plus admin suggested matches. Live Supabase preflight not rerun because the restored worktree has no local .env secrets."
+      "notes": "Implemented in isolated nport/ subtree. Verified with 39 Node API tests, 178 Python tests including Postgres-backed integration, and Browser mock smoke for homepage search plus admin suggested matches. Live Supabase preflight reran on 2026-05-17 after wiring preflight_live.py to the canonical .env.nport handoff."
     },
     {
       "id": "nport-003",
@@ -318,7 +318,6 @@
     "Load N-CSR acquisition cost/date enrichment for major holders",
     "Load N-1A portfolio manager extraction for priority fund families",
     "Compute position deltas and surface coordinated repricing events",
-    "Rehydrate local .env in the restored isolated worktree before live Supabase preflight or live admin triage",
     "Commit and push the isolated N-PORT branch when ready",
     "Set production env vars before any main-app mount: SUPABASE_URL_NPORT, SUPABASE_SERVICE_KEY_NPORT, NPORT_ADMIN_TOKEN, ADV_SUPABASE_ANON_KEY, FORMD_SUPABASE_ANON_KEY",
     "Merge the intentional one-line N-PORT mount into the main PFR app only when ready for production review",

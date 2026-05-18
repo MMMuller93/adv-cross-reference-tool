@@ -58,7 +58,7 @@
 - Expanded resolver and scraper alias-cache normalization for common non-US legal suffixes such as SAS, GmbH, BV, NV, Pty/Pte, AB, Oy, and KK/GK
 - Expanded SPV unwrap regexes for multi-word `SPV EXPOSURE TO ...`, `AESTAS LLC dba ...`, and G Squared invested-in strings
 - Verification: `nport/api npm test` → 39 passed; `.venv/bin/python -m pytest nport -q` → 178 passed; mock-browser smoke passed for homepage search and admin suggested-match display
-- Note: live `.env` was not present in this restored worktree, so live Supabase preflight was not rerun in this pass
+- Live Supabase preflight has since been rerun successfully after wiring `preflight_live.py` to the canonical `/Users/Miles/projects/PrivateFundsRadar/.env.nport` handoff; latest read-only preflight counts are recorded below
 
 ✅ **Full available N-CEN adviser backfill verification**
 - Confirmed Claude/Codex commit `a6bfd52` split N-CEN into scrape (`backfill_live.py`) and reconcile (`reconcile_live.py`) phases with validation/safety guards
@@ -67,6 +67,10 @@
 - Reconcile buckets: `resolved_single=1389`, `cleared_multi_adviser=97`, `cleared_not_in_adv=10`
 - Checked the 17 N-PORT registrants with no N-CEN summary row against EDGAR in dry-run mode; all 17 returned `skipped_no_ncen`, with `0` planned summary rows, `0` planned link rows, and `0` failures
 - Verification: `.venv/bin/python -m pytest nport/enrichment/ncen_ingest/tests -q` → 21 passed
+
+✅ **Live Supabase preflight rehydrated**
+- `preflight_live.py` now loads the worktree `.env` plus the main PFR `.env.nport` file, so restored isolated worktrees can run live preflight without copying secrets into the worktree
+- Verification: `.venv/bin/python -m nport.scraper.preflight_live` → `private_companies=843`, `nport_holdings=315872`, `nport_filings=57407`, `nport_company_positions_mv=52453`, `fund_ncen_records=1572`, `fund_ncen_adviser_links=15494`
 
 ### Recent Completion (Session May 15, 2026)
 
