@@ -58,7 +58,11 @@ function isValidLinkedInMatch(firmName, profileTitle) {
  * @returns {Promise<Evidence[]>}
  */
 async function findCompanyCandidates(identity) {
-  const name = identity.adviser_name || identity.matched_variant || '';
+  const name = identity.adviser_name
+    || identity.matched_variant
+    || (Array.isArray(identity.variants_tried) && identity.variants_tried[0])
+    || identity.input_name
+    || '';
   if (!name) return [];
 
   const capturedAt = new Date().toISOString();
@@ -93,7 +97,11 @@ async function findCompanyCandidates(identity) {
  * @returns {Promise<Evidence[]>}
  */
 async function findTeamCandidates(identity) {
-  const name = identity.adviser_name || identity.matched_variant || '';
+  const name = identity.adviser_name
+    || identity.matched_variant
+    || (Array.isArray(identity.variants_tried) && identity.variants_tried[0])
+    || identity.input_name
+    || '';
   if (!name) return [];
 
   const capturedAt = new Date().toISOString();

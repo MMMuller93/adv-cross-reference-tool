@@ -18,7 +18,8 @@ require('dotenv').config({ path: path.resolve(__dirname, '../../../.env') });
 const { createClient } = require('@supabase/supabase-js');
 
 const FORMD_URL = process.env.FORMD_URL || 'https://ltdalxkhbbhmkimmogyq.supabase.co';
-const FORMD_KEY = process.env.FORMD_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0ZGFseGtoYmJobWtpbW1vZ3lxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1OTg3NTMsImV4cCI6MjA3NTE3NDc1M30.TS9uNMRqPKcthHCSMKAcFfhFEP-7Q6XbDHQNujBDOtc';
+const FORMD_KEY = process.env.FORMD_SERVICE_KEY;
+if (!FORMD_KEY) throw new Error('Missing required env var: FORMD_SERVICE_KEY');
 
 const formdDb = createClient(FORMD_URL, FORMD_KEY);
 
@@ -39,6 +40,40 @@ function deriveEnrichmentStatus(decisions) {
   }
   if (statuses.includes('candidate')) return 'candidates_only';
   return 'no_data';
+}
+
+/**
+ * Map v3-style status to the legacy enrichment_status values that server.js
+ * and the existing CHECK constraint expect.
+ *
+ * Legacy values: auto_enriched | needs_manual_review | no_data_found | manually_verified
+ *
+ * Mapping:
+ *   - Any website or linkedin field is verified → auto_enriched (passes the server.js firebreak)
+ *   - Some field verified but no website/linkedin anchor → needs_manual_review
+ *   - Nothing verified → no_data_found
+ */
+function deriveLegacyEnrichmentStatus(decisions) {
+  const websiteDecision = decisions['website_url'];
+  const linkedInDecision = decisions['linkedin_company_url'];
+
+  const websiteVerified = websiteDecision?.status === 'verified';
+  const linkedInVerified = linkedInDecision?.status === 'verified';
+
+  if (websiteVerified || linkedInVerified) {
+    return 'auto_enriched';
+  }
+
+  // Check if any other field is verified
+  const anyVerified = Object.values(decisions)
+    .flat()
+    .some(d => d && d.status === 'verified');
+
+  if (anyVerified) {
+    return 'needs_manual_review';
+  }
+
+  return 'no_data_found';
 }
 
 /**
@@ -199,7 +234,8 @@ async function save(seriesMasterLlc, decisions, identity, opts = {}) {
     primary_contact_email: legacyEmail,
     team_members: legacyTeam.length > 0 ? legacyTeam : [],
     // Status + metadata
-    enrichment_status: enrichmentStatus,
+    enrichment_status: deriveLegacyEnrichmentStatus(decisions),
+    v3_status: enrichmentStatus,
     confidence_score: confidenceScore,
     enrichment_source: 'automated_v3',
     enrichment_date: now,

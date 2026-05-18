@@ -65,16 +65,37 @@ function decide(allEvidence, identity, websiteDecision, linkedInDecision) {
     if (seenNames.has(nameKey)) continue;
     seenNames.add(nameKey);
 
-    // Rule 1: found on verified website
-    if (ev.anchor === 'found_on_verified_website') {
-      decisions.push({
-        status: 'verified',
-        value: member,
-        anchors: ['found_on_verified_website'],
-        evidence: [{ source: ev.source, field: ev.field, captured_at: ev.captured_at }],
-        decided_at: capturedAt,
-        reason: 'on_verified_website',
-      });
+    // Rule 1: found on website fetch (anchor = found_on_candidate_website).
+    // Status depends on whether the website itself was independently verified.
+    if (ev.anchor === 'found_on_candidate_website') {
+      if (hasVerifiedWebsite) {
+        decisions.push({
+          status: 'verified',
+          value: member,
+          anchors: ['found_on_verified_website'],
+          evidence: [{ source: ev.source, field: ev.field, captured_at: ev.captured_at }],
+          decided_at: capturedAt,
+          reason: 'on_verified_website',
+        });
+      } else if (websiteDecision && websiteDecision.status === 'candidate') {
+        decisions.push({
+          status: 'candidate',
+          value: member,
+          anchors: [],
+          evidence: [{ source: ev.source, field: ev.field, captured_at: ev.captured_at }],
+          decided_at: capturedAt,
+          reason: 'on_candidate_website_only',
+        });
+      } else {
+        decisions.push({
+          status: 'rejected',
+          value: member,
+          anchors: [],
+          evidence: [{ source: ev.source, field: ev.field, captured_at: ev.captured_at }],
+          decided_at: capturedAt,
+          reason: 'website_not_verified',
+        });
+      }
       continue;
     }
 

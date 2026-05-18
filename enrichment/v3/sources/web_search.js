@@ -259,7 +259,11 @@ function extractLinkedInCandidates(results, capturedAt) {
  */
 async function findWebsiteCandidates(identity) {
   const capturedAt = new Date().toISOString();
-  const name = identity.adviser_name || identity.matched_variant || '';
+  const name = identity.adviser_name
+    || identity.matched_variant
+    || (Array.isArray(identity.variants_tried) && identity.variants_tried[0])
+    || identity.input_name
+    || '';
   if (!name) return [];
 
   const queries = [
@@ -287,7 +291,11 @@ async function findWebsiteCandidates(identity) {
  */
 async function findLinkedInCandidates(identity) {
   const capturedAt = new Date().toISOString();
-  const name = identity.adviser_name || identity.matched_variant || '';
+  const name = identity.adviser_name
+    || identity.matched_variant
+    || (Array.isArray(identity.variants_tried) && identity.variants_tried[0])
+    || identity.input_name
+    || '';
   if (!name) return [];
 
   const query = `site:linkedin.com/company "${name}"`;

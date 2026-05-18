@@ -16,13 +16,15 @@ const { ensureLoaded, lookupInvestor } = require('../external_investor_lookup');
 
 // ADV database client
 const ADV_URL = process.env.ADV_URL || 'https://ezuqwwffjgfzymqxsctq.supabase.co';
-const ADV_KEY = process.env.ADV_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6dXF3d2ZmamdmenltcXhzY3RxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MzMyNjQ0MCwiZXhwIjoyMDc4OTAyNDQwfQ.Rq2lPQ1Uy_zTAPuY7VmEHA0I802vvEV9mm-br3M8aKM';
+const ADV_KEY = process.env.ADV_SERVICE_KEY;
+if (!ADV_KEY) throw new Error('Missing required env var: ADV_SERVICE_KEY');
 
 const advDb = createClient(ADV_URL, ADV_KEY);
 
 // Form D client (needed to load external investor reference)
 const FORMD_URL = process.env.FORMD_URL || 'https://ltdalxkhbbhmkimmogyq.supabase.co';
-const FORMD_KEY = process.env.FORMD_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0ZGFseGtoYmJobWtpbW1vZ3lxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1OTg3NTMsImV4cCI6MjA3NTE3NDc1M30.TS9uNMRqPKcthHCSMKAcFfhFEP-7Q6XbDHQNujBDOtc';
+const FORMD_KEY = process.env.FORMD_SERVICE_KEY;
+if (!FORMD_KEY) throw new Error('Missing required env var: FORMD_SERVICE_KEY');
 
 const formdDb = createClient(FORMD_URL, FORMD_KEY);
 
@@ -192,6 +194,7 @@ async function resolveIdentity(rawName, opts = {}) {
     primary_website: null,
     anchor: null,
     variants_tried: variants,
+    input_name: rawName,
   };
 }
 

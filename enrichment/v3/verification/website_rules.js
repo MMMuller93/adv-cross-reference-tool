@@ -93,15 +93,10 @@ function decide(allEvidence, identity) {
       anchors.push(`sec_adv_crd:${identity.crd || 'unknown'}`);
     }
 
-    // Rule 3: another evidence item confirms LinkedIn website → matches this domain
-    const linkedInWithWebsite = allEvidence.find(e =>
-      e.type === 'linkedin_company_url' && e.anchor === 'website_links_to_linkedin'
-    );
-    if (linkedInWithWebsite) {
-      // The linkedin was found on this website — that confirms the website itself
-      anchors.push('website_links_to_linkedin');
-      supporting.push(linkedInWithWebsite);
-    }
+    // Rule 3 (removed): website_links_to_linkedin is NOT a website anchor.
+    // A LinkedIn URL found on a candidate website does not independently verify
+    // that website — this was a circular dependency. The website can only be
+    // verified by: (a) SEC ADV CRD match, (b) external DB (future).
 
     // Rule 4: external DB provided this URL
     if (ev.source && ev.source.startsWith('external_db:')) {

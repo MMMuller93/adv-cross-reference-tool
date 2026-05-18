@@ -39,16 +39,30 @@ function decide(allEvidence, identity, websiteDecision) {
   const capturedAt = new Date().toISOString();
   const tokens = distinctiveTokens(identity.adviser_name || identity.matched_variant || '');
 
-  // Prefer evidence that already has an anchor (found on website HTML)
+  // Prefer evidence that already has an anchor (found on website HTML).
+  // Only treat as verified if the website itself is ALREADY independently verified —
+  // otherwise this is a circular dependency (website "verifies" LinkedIn which
+  // "verifies" website). websiteDecision is always passed by the orchestrator.
   const anchored = linkedInEvidence.find(e => e.anchor === 'website_links_to_linkedin');
   if (anchored) {
+    if (websiteDecision && websiteDecision.status === 'verified') {
+      return {
+        status: 'verified',
+        value: anchored.value,
+        anchors: ['website_links_to_linkedin'],
+        evidence: [{ source: anchored.source, field: anchored.field, captured_at: anchored.captured_at }],
+        decided_at: capturedAt,
+        reason: 'found_on_verified_website',
+      };
+    }
+    // Website not independently verified — demote to candidate to break the cycle
     return {
-      status: 'verified',
+      status: 'candidate',
       value: anchored.value,
-      anchors: ['website_links_to_linkedin'],
+      anchors: [],
       evidence: [{ source: anchored.source, field: anchored.field, captured_at: anchored.captured_at }],
       decided_at: capturedAt,
-      reason: 'found_on_verified_website',
+      reason: 'website_links_to_linkedin_but_website_not_verified',
     };
   }
 

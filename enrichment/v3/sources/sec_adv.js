@@ -13,7 +13,8 @@ require('dotenv').config({ path: path.resolve(__dirname, '../../../.env') });
 const { createClient } = require('@supabase/supabase-js');
 
 const ADV_URL = process.env.ADV_URL || 'https://ezuqwwffjgfzymqxsctq.supabase.co';
-const ADV_KEY = process.env.ADV_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6dXF3d2ZmamdmenltcXhzY3RxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MzMyNjQ0MCwiZXhwIjoyMDc4OTAyNDQwfQ.Rq2lPQ1Uy_zTAPuY7VmEHA0I802vvEV9mm-br3M8aKM';
+const ADV_KEY = process.env.ADV_SERVICE_KEY;
+if (!ADV_KEY) throw new Error('Missing required env var: ADV_SERVICE_KEY');
 
 const advDb = createClient(ADV_URL, ADV_KEY);
 

@@ -196,4 +196,14 @@ async function enrichManager(name, opts = {}) {
   return buildPublicViewFromDecisions(decisions, enrichmentStatus, verifiedAnchor);
 }
 
-module.exports = { enrichManager };
+/**
+ * v2-compat shim: enrich_recent.js and backfill_enrichment.js destructure
+ * saveEnrichment from whichever engine is loaded. In v3 the save happens
+ * inside enrichManager (via evidence_store), so this is a no-op.
+ */
+async function saveEnrichment(/* result */) {
+  // v3 persists during enrichManager; this exists only for v2-compat call-sites.
+  return { compat: 'v3_already_persisted' };
+}
+
+module.exports = { enrichManager, saveEnrichment };

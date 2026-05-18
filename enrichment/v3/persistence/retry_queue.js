@@ -15,7 +15,8 @@ require('dotenv').config({ path: path.resolve(__dirname, '../../../.env') });
 const { createClient } = require('@supabase/supabase-js');
 
 const FORMD_URL = process.env.FORMD_URL || 'https://ltdalxkhbbhmkimmogyq.supabase.co';
-const FORMD_KEY = process.env.FORMD_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0ZGFseGtoYmJobWtpbW1vZ3lxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1OTg3NTMsImV4cCI6MjA3NTE3NDc1M30.TS9uNMRqPKcthHCSMKAcFfhFEP-7Q6XbDHQNujBDOtc';
+const FORMD_KEY = process.env.FORMD_SERVICE_KEY;
+if (!FORMD_KEY) throw new Error('Missing required env var: FORMD_SERVICE_KEY');
 
 const formdDb = createClient(FORMD_URL, FORMD_KEY);
 
@@ -52,7 +53,10 @@ async function scheduleRetry(seriesMasterLlc, currentStatus, retryCount = 0) {
   try {
     const { error } = await formdDb
       .from('enriched_managers')
-      .update({ next_retry_at: nextAt })
+      .update({
+        next_retry_at: nextAt,
+        retry_count: retryCount + 1,
+      })
       .eq('series_master_llc', seriesMasterLlc);
 
     if (error) {
@@ -67,7 +71,9 @@ async function scheduleRetry(seriesMasterLlc, currentStatus, retryCount = 0) {
 
 /**
  * Fetch managers due for retry (next_retry_at <= now).
- * Uses keyset pagination.
+ *
+ * Uses next_retry_at timestamp-keyset pagination because enriched_managers.id
+ * is a UUID — integer keyset (.gt('id', 0)) does not work on UUID columns.
  *
  * @param {number} limit - Max managers to return
  * @returns {Promise<object[]>} Array of enriched_managers rows
@@ -75,18 +81,23 @@ async function scheduleRetry(seriesMasterLlc, currentStatus, retryCount = 0) {
 async function getDueForRetry(limit = 200) {
   const now = new Date().toISOString();
   const results = [];
-  let lastId = 0;
+  let lastTimestamp = null;
 
   while (results.length < limit) {
     const batchSize = Math.min(100, limit - results.length);
-    const { data, error } = await formdDb
+    let q = formdDb
       .from('enriched_managers')
-      .select('id, series_master_llc, enrichment_status, field_evidence, candidates, last_retry_at, next_retry_at')
+      .select('id, series_master_llc, enrichment_status, field_evidence, candidates, last_retry_at, next_retry_at, retry_count')
       .not('next_retry_at', 'is', null)
       .lte('next_retry_at', now)
-      .gt('id', lastId)
-      .order('id', { ascending: true })
+      .order('next_retry_at', { ascending: true })
       .limit(batchSize);
+
+    if (lastTimestamp) {
+      q = q.gt('next_retry_at', lastTimestamp);
+    }
+
+    const { data, error } = await q;
 
     if (error) {
       console.error('[retry_queue] getDueForRetry error:', error.message);
@@ -95,7 +106,7 @@ async function getDueForRetry(limit = 200) {
     if (!data || data.length === 0) break;
 
     results.push(...data);
-    lastId = data[data.length - 1].id;
+    lastTimestamp = data[data.length - 1].next_retry_at;
     if (data.length < batchSize) break;
   }
 
@@ -103,19 +114,14 @@ async function getDueForRetry(limit = 200) {
 }
 
 /**
- * Count how many retries have been run for a manager.
- * Derived from last_retry_at vs enrichment_date (approximation).
- * A proper implementation would track retry_count in a column.
+ * Return the retry count for a manager row.
+ * Uses the retry_count column if present (added in migration); falls back
+ * to 0 so existing rows without the column still work.
  */
 function estimateRetryCount(row) {
-  // If we had a retry_count column, we'd use it. For now, estimate from dates.
-  // This is a best-effort approximation until the column is added in a future migration.
-  if (!row.last_retry_at || !row.next_retry_at) return 0;
-  const lastMs = new Date(row.last_retry_at).getTime();
-  const nextMs = new Date(row.next_retry_at).getTime();
-  const diffDays = (nextMs - lastMs) / (1000 * 60 * 60 * 24);
-  const idx = RETRY_SCHEDULE_DAYS.findIndex(d => Math.abs(d - diffDays) < 2);
-  return idx >= 0 ? idx : 0;
+  if (typeof row.retry_count === 'number') return row.retry_count;
+  // Legacy fallback for rows without the retry_count column
+  return 0;
 }
 
 module.exports = { scheduleRetry, getDueForRetry, nextRetryDate, estimateRetryCount };

@@ -34,3 +34,20 @@ COMMENT ON COLUMN enriched_managers.next_retry_at IS
 
 COMMENT ON COLUMN enriched_managers.verified_anchor IS
   'Which anchor(s) verified the identity: sec_adv_crd | website_self | linkedin_self';
+
+-- v3_status: rich internal status from enrichment v3 pipeline.
+-- Does NOT modify the existing CHECK constraint on enrichment_status,
+-- which continues to use legacy values (auto_enriched, needs_manual_review, etc.)
+ALTER TABLE enriched_managers
+  ADD COLUMN IF NOT EXISTS v3_status TEXT;
+
+COMMENT ON COLUMN enriched_managers.v3_status IS
+  'v3-pipeline status: verified | partial | candidates_only | no_data. Internal use only.';
+
+-- retry_count: number of retry attempts completed for this manager.
+-- Replaces the approximation that was derived from date arithmetic.
+ALTER TABLE enriched_managers
+  ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0;
+
+COMMENT ON COLUMN enriched_managers.retry_count IS
+  'How many auto-retry enrichment attempts have run for this manager.';
