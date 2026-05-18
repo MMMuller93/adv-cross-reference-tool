@@ -572,11 +572,22 @@ const DashboardPage = () => {
         </section>
       )}
 
-      <SectionCard title={q ? 'Search results' : 'Company search'} subtitle={q ? `${fmtInt(searchResults.length)} shown` : 'Directory hidden by default to keep the page usable'}>
+      <SectionCard title={q ? 'Search results' : 'Company search'} subtitle={q ? `${fmtInt(searchResults.length)} shown` : `${fmtInt(companies.length)} seeded companies available`}>
         {!q ? (
           <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-5 py-8 text-center">
-            <p className="text-sm font-medium text-gray-900">Start typing to search the private-company universe.</p>
-            <p className="text-xs text-gray-500 mt-1">This avoids a long alphabetical directory and keeps the homepage focused on discovery.</p>
+            <p className="text-sm font-medium text-gray-900">Search by company, sector, domain, or alias.</p>
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              {['SpaceX', 'OpenAI', 'Databricks', 'Stripe'].map((term) => (
+                <button
+                  key={term}
+                  type="button"
+                  onClick={() => setQuery(term)}
+                  className="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-gray-300 hover:text-gray-900"
+                >
+                  {term}
+                </button>
+              ))}
+            </div>
           </div>
         ) : searchResults.length === 0 ? (
           <p className="text-sm text-gray-500">No companies match this search.</p>
