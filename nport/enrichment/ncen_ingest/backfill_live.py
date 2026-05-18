@@ -128,6 +128,61 @@ def latest_ncen_metadata(payload: dict[str, Any]) -> Optional[dict[str, Any]]:
     return None
 
 
+_RETRY_DELAYS = (2, 4, 8, 16)  # seconds; exponential backoff
+_RETRY_AFTER_MAX = 60  # seconds; cap honoring of large Retry-After values
+
+
+def _fetch_with_retry(
+    session: requests.Session,
+    url: str,
+    *,
+    headers: dict[str, str],
+    timeout: int,
+    max_retries: int = 4,
+) -> requests.Response:
+    """GET with exponential backoff on 429, 5xx (including 503), and connection errors.
+
+    On 429, honors Retry-After header but CAPS it at _RETRY_AFTER_MAX (60s) to
+    prevent a hostile or malformed header from freezing the run. After max_retries,
+    returns the final Response (caller should raise_for_status or check explicitly).
+    """
+    response: Optional[requests.Response] = None
+    for attempt in range(max_retries + 1):
+        try:
+            response = session.get(url, headers=headers, timeout=timeout)
+        except (requests.ConnectionError, requests.Timeout):
+            if attempt >= max_retries:
+                raise
+            time.sleep(_RETRY_DELAYS[attempt])
+            continue
+        if response.status_code == 429:
+            if attempt >= max_retries:
+                return response  # caller will raise_for_status
+            retry_after_raw = response.headers.get("Retry-After")
+            if retry_after_raw and retry_after_raw.isdigit():
+                # Honor Retry-After but cap to prevent hour-long sleeps on
+                # malformed/hostile headers (witness audit MEDIUM finding).
+                sleep_for = min(
+                    max(int(retry_after_raw), _RETRY_DELAYS[attempt]),
+                    _RETRY_AFTER_MAX,
+                )
+            else:
+                sleep_for = _RETRY_DELAYS[attempt]
+            print(f"  429 from SEC at {url[:80]} — retrying in {sleep_for}s (attempt {attempt + 1}/{max_retries})")
+            time.sleep(sleep_for)
+            continue
+        if response.status_code >= 500:
+            if attempt >= max_retries:
+                return response
+            print(f"  {response.status_code} from SEC at {url[:80]} — retrying in {_RETRY_DELAYS[attempt]}s")
+            time.sleep(_RETRY_DELAYS[attempt])
+            continue
+        return response
+    # Should be unreachable, but mypy needs the explicit return
+    assert response is not None
+    return response
+
+
 def fetch_latest_ncen(
     cik: str,
     *,
@@ -137,7 +192,8 @@ def fetch_latest_ncen(
 ) -> Optional[tuple[dict[str, Any], NCenFiling, str]]:
     padded = cik10(cik)
     time.sleep(sleep_seconds)
-    submissions = session.get(
+    submissions = _fetch_with_retry(
+        session,
         EDGAR_SUBMISSIONS_URL.format(cik10=padded),
         headers=headers,
         timeout=30,
@@ -156,7 +212,7 @@ def fetch_latest_ncen(
         acc_no_dashes=str(accession).replace("-", ""),
     )
     time.sleep(sleep_seconds)
-    doc = session.get(url, headers=headers, timeout=90)
+    doc = _fetch_with_retry(session, url, headers=headers, timeout=90)
     doc.raise_for_status()
     return metadata, parse_ncen_xml(doc.content), url
 
@@ -384,51 +440,12 @@ def upsert_batches(client, table: str, rows: list[dict[str, Any]], on_conflict: 
     return total
 
 
-def update_registrant_adv_links(
-    client,
-    summary_rows: list[dict[str, Any]],
-    link_rows: list[dict[str, Any]],
-) -> int:
-    updated = 0
-    primary_crds_by_cik: dict[str, set[str]] = {}
-    for row in link_rows:
-        if row.get("adviser_role") != "investment_adviser":
-            continue
-        cik = row.get("registrant_cik")
-        crd = row.get("adviser_crd_normalized")
-        if cik and crd:
-            primary_crds_by_cik.setdefault(str(cik), set()).add(str(crd))
-
-    latest_by_cik: dict[str, dict[str, Any]] = {}
-    for row in summary_rows:
-        crd = row.get("investment_adviser_crd")
-        cik = row.get("registrant_cik")
-        if not crd or not cik:
-            continue
-        # nport_registrants is registrant-level, not series-level. Only write
-        # a summary CRD when the N-CEN filing has one unique primary adviser
-        # across its series. Multi-adviser registrants must be joined through
-        # fund_ncen_adviser_links by CIK + series_id.
-        if len(primary_crds_by_cik.get(str(cik), set())) != 1:
-            continue
-        existing = latest_by_cik.get(cik)
-        if not existing or str(row.get("filing_date") or "") > str(existing.get("filing_date") or ""):
-            latest_by_cik[cik] = row
-    for row in latest_by_cik.values():
-        response = (
-            client.table("nport_registrants")
-            .update(
-                {
-                    "adv_crd": row["investment_adviser_crd"],
-                    "adv_crd_match_confidence": 100,
-                    "adv_crd_match_method": "ncen_xref",
-                }
-            )
-            .in_("cik", cik_variants(row["registrant_cik"]))
-            .execute()
-        )
-        updated += len(response.data or [])
-    return updated
+# NOTE: The registrant-level adviser cache (`nport_registrants.adv_crd`) is
+# resolved by the companion script `reconcile_live.py`, NOT here. This script
+# is now pure ingest: it scrapes SEC EDGAR and writes raw N-CEN records and
+# series-level adviser links. Resolution + validation + writes to the
+# registrant cache happen in the reconciliation phase, where they can be
+# re-run independently of the (slow) scrape.
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
@@ -444,7 +461,28 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         "--backup-path",
         default=f"/tmp/nport_ncen_registrants_backup_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json",
     )
+    parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=100,
+        help="In --execute mode, flush accumulated rows to Supabase every N CIKs (default 100, 0 disables checkpointing)",
+    )
     return parser.parse_args(argv)
+
+
+def _flush_batch(
+    client,
+    summary_rows: list[dict[str, Any]],
+    link_rows: list[dict[str, Any]],
+) -> None:
+    """Upsert accumulated raw N-CEN records + series-level adviser links.
+
+    No registrant-level adv_crd writes here — that's reconcile_live.py's job.
+    """
+    if summary_rows:
+        upsert_batches(client, "fund_ncen_records", summary_rows, "accession_number")
+    if link_rows:
+        upsert_batches(client, "fund_ncen_adviser_links", link_rows, "link_key")
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -470,12 +508,43 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not ciks:
         return 0
 
+    # Backup upfront when executing — protects against mid-run crashes that would
+    # otherwise leave the DB in a partial state after the first checkpoint flush.
+    if args.execute:
+        backup_count = backup_registrants(client, ciks, Path(args.backup_path))
+        print(f"Backed up {backup_count} registrant rows to {args.backup_path}")
+
     headers = {"User-Agent": args.user_agent}
     session = requests.Session()
     summary_rows: list[dict[str, Any]] = []
     link_rows: list[dict[str, Any]] = []
     failures: list[dict[str, str]] = []
     skipped_no_ncen = 0
+    flushes = 0
+    fetched_total = 0  # total summary rows produced (across all flushes)
+    links_total = 0    # total link rows produced (across all flushes)
+
+    def _maybe_checkpoint(at_index: int, *, force: bool = False) -> None:
+        nonlocal summary_rows, link_rows, flushes
+        if not args.execute:
+            return
+        if not (summary_rows or link_rows):
+            return
+        if not force:
+            if not args.checkpoint_every:
+                return
+            if at_index % args.checkpoint_every != 0:
+                return
+        _flush_batch(client, summary_rows, link_rows)
+        flushes += 1
+        label = "Final flush" if force else f"Checkpoint #{flushes}"
+        print(
+            f"  {label} at CIK {at_index}: flushed {len(summary_rows)} summaries, "
+            f"{len(link_rows)} links"
+        )
+        summary_rows = []
+        link_rows = []
+
     for index, cik in enumerate(ciks, 1):
         try:
             fetched = fetch_latest_ncen(
@@ -486,23 +555,35 @@ def main(argv: Optional[list[str]] = None) -> int:
             )
             if fetched is None:
                 skipped_no_ncen += 1
-                continue
-            metadata, filing, source_url = fetched
-            summary_rows.append(shape_summary_row(cik, metadata, filing))
-            link_rows.extend(shape_link_rows(cik, metadata, filing, source_url))
+            else:
+                metadata, filing, source_url = fetched
+                new_links = shape_link_rows(cik, metadata, filing, source_url)
+                summary_rows.append(shape_summary_row(cik, metadata, filing))
+                link_rows.extend(new_links)
+                fetched_total += 1
+                links_total += len(new_links)
         except Exception as exc:  # noqa: BLE001 - preserve per-CIK failures
             failures.append({"cik": str(cik), "error": str(exc)})
+
         if index % 25 == 0:
             print(f"Fetched {index}/{len(ciks)} CIKs...")
 
+        # Checkpoint flush every N CIKs (only in --execute mode)
+        _maybe_checkpoint(index)
+
+    # Pre-summary print (rows pending in current buffer + cumulative)
     print(
-        "Planned rows:",
+        "Run summary:",
         json.dumps(
             {
-                "summary_rows": len(summary_rows),
-                "link_rows": len(link_rows),
+                "ciks_processed": len(ciks),
+                "summary_rows_pending": len(summary_rows),
+                "link_rows_pending": len(link_rows),
+                "summary_rows_total": fetched_total,
+                "link_rows_total": links_total,
                 "skipped_no_ncen": skipped_no_ncen,
                 "failures": len(failures),
+                "flushes_so_far": flushes,
             },
             sort_keys=True,
         ),
@@ -510,35 +591,46 @@ def main(argv: Optional[list[str]] = None) -> int:
     if failures[:5]:
         print("Sample failures:", json.dumps(failures[:5], indent=2))
     if summary_rows[:2]:
-        print("Sample summary:", json.dumps(summary_rows[:2], indent=2, default=str))
+        print("Sample pending summary:", json.dumps(summary_rows[:2], indent=2, default=str))
     if link_rows[:3]:
-        print("Sample links:", json.dumps(link_rows[:3], indent=2, default=str))
+        print("Sample pending links:", json.dumps(link_rows[:3], indent=2, default=str))
+
+    # Failure-rate guard: if more than 5% of CIKs failed, the run did not
+    # succeed even if it completed. This prevents "exit 0 with hundreds of
+    # silent failures" (Codex bug A).
+    failure_rate = (len(failures) / len(ciks)) if ciks else 0
+    failure_threshold = 0.05
+    if failure_rate > failure_threshold:
+        print(
+            f"\nFAILURE: {len(failures)}/{len(ciks)} CIKs failed "
+            f"({failure_rate:.1%} > {failure_threshold:.0%} threshold). "
+            f"Run did NOT complete cleanly. Inspect failures and re-run "
+            f"the failed CIKs.",
+            file=sys.stderr,
+        )
+        return 1
 
     if not args.execute:
         print("Dry run only. Re-run with --execute after reviewing planned rows.")
+        print(
+            "\nAfter execute, run `python -m nport.enrichment.ncen_ingest.reconcile_live "
+            "--execute` to populate nport_registrants.adv_crd from the ingested data."
+        )
         return 0
 
-    backup_count = backup_registrants(client, ciks, Path(args.backup_path))
-    print(f"Backed up {backup_count} registrant rows to {args.backup_path}")
+    # Final flush for any rows accumulated since the last checkpoint
+    _maybe_checkpoint(len(ciks), force=True)
 
-    if summary_rows:
-        upsert_batches(
-            client,
-            "fund_ncen_records",
-            summary_rows,
-            "accession_number",
-        )
-    if link_rows:
-        upsert_batches(
-            client,
-            "fund_ncen_adviser_links",
-            link_rows,
-            "link_key",
-        )
-    registrants_updated = update_registrant_adv_links(client, summary_rows, link_rows)
     after = snapshot_counts(client)
     print("After counts:", json.dumps(after, sort_keys=True))
-    print(f"Registrant ADV links updated: {registrants_updated}")
+    print(
+        f"\nIngest complete: {fetched_total} N-CEN records + {links_total} "
+        f"adviser links written across {flushes} flushes."
+    )
+    print(
+        "\nNow run `python -m nport.enrichment.ncen_ingest.reconcile_live "
+        "--execute` to update nport_registrants.adv_crd from the ingested data."
+    )
     return 0
 
 
