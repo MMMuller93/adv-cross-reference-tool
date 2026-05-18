@@ -260,49 +260,69 @@ def fetch_nport_adviser_resolutions(
 
     Series-level (fund_ncen_adviser_links) is preferred over registrant-level
     (nport_registrants.adv_crd). Returns only entries with a non-NULL CRD.
+
+    Paginates within each CIK chunk: a single chunk of 100 CIKs can produce
+    thousands of series-level rows (some fund families have 20+ series each),
+    so PostgREST's 1000-row default would silently truncate without keyset
+    pagination here.
     """
     resolutions: dict[tuple[str, Optional[str]], dict[str, str]] = {}
+    if not registrant_ciks:
+        return resolutions
 
-    # Series-level first (most precise)
-    if registrant_ciks:
-        for chunk_start in range(0, len(registrant_ciks), 100):
-            chunk = registrant_ciks[chunk_start : chunk_start + 100]
-            response = (
-                nport.table("fund_ncen_adviser_links")
-                .select("registrant_cik,series_id,adviser_role,adviser_crd_normalized")
-                .in_("registrant_cik", chunk)
-                .eq("adviser_role", "investment_adviser")
-                .execute()
-            )
-            for row in response.data or []:
-                cik = str(row["registrant_cik"])
-                series_id = row.get("series_id")
-                crd = row.get("adviser_crd_normalized")
-                if crd:
-                    key = (cik, series_id)
-                    if key not in resolutions:
-                        resolutions[key] = {"crd": str(crd), "method": "ncen_xref"}
+    cik_set = set(registrant_ciks)
 
-    # Registrant-level fallback (use adv_crd cache for CIKs without series-level data)
-    if registrant_ciks:
-        for chunk_start in range(0, len(registrant_ciks), 100):
-            chunk = registrant_ciks[chunk_start : chunk_start + 100]
-            response = (
-                nport.table("nport_registrants")
-                .select("cik,adv_crd,adv_crd_match_method")
-                .in_("cik", chunk)
-                .not_.is_("adv_crd", "null")
-                .execute()
-            )
-            for row in response.data or []:
-                cik = str(row["cik"])
-                crd = row.get("adv_crd")
-                method = row.get("adv_crd_match_method") or "ncen_xref"
-                if crd:
-                    # Fill in only the (cik, None) key if no series-level entry exists
-                    key = (cik, None)
-                    if key not in resolutions:
-                        resolutions[key] = {"crd": str(crd), "method": method}
+    # Series-level: full-table scan with keyset pagination, filtered in memory.
+    # fund_ncen_adviser_links is ~15k rows total, cheap to walk.
+    page_size = 1000
+    last_link_key = ""
+    while True:
+        query = (
+            nport.table("fund_ncen_adviser_links")
+            .select("link_key,registrant_cik,series_id,adviser_role,adviser_crd_normalized")
+            .eq("adviser_role", "investment_adviser")
+            .gt("link_key", last_link_key)
+            .order("link_key")
+            .limit(page_size)
+        )
+        response = query.execute()
+        batch = response.data or []
+        if not batch:
+            break
+        for row in batch:
+            cik = str(row["registrant_cik"])
+            if cik not in cik_set:
+                continue
+            series_id = row.get("series_id")
+            crd = row.get("adviser_crd_normalized")
+            if crd:
+                key = (cik, series_id)
+                if key not in resolutions:
+                    resolutions[key] = {"crd": str(crd), "method": "ncen_xref"}
+        last_link_key = batch[-1]["link_key"]
+        if len(batch) < page_size:
+            break
+
+    # Registrant-level fallback: paginate within each chunk too.
+    for chunk_start in range(0, len(registrant_ciks), 100):
+        chunk = registrant_ciks[chunk_start : chunk_start + 100]
+        # Only 100 CIKs and each has at most one nport_registrants row, so
+        # this stays under the 1000-row cap. No internal pagination needed.
+        response = (
+            nport.table("nport_registrants")
+            .select("cik,adv_crd,adv_crd_match_method")
+            .in_("cik", chunk)
+            .not_.is_("adv_crd", "null")
+            .execute()
+        )
+        for row in response.data or []:
+            cik = str(row["cik"])
+            crd = row.get("adv_crd")
+            method = row.get("adv_crd_match_method") or "ncen_xref"
+            if crd:
+                key = (cik, None)
+                if key not in resolutions:
+                    resolutions[key] = {"crd": str(crd), "method": method}
     return resolutions
 
 

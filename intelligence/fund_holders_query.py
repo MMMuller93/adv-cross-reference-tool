@@ -72,30 +72,41 @@ def create_adv_client():
     return create_client(url, key)
 
 
-def fetch_holders(nport, company_slug: str) -> list[dict[str, Any]]:
-    """Pull every holder evidence row from v_intel_company_holders."""
+def _paginate_holders(nport, company_slug: str, source_type: str) -> list[dict[str, Any]]:
+    """Keyset-paginate one source_type bucket of v_intel_company_holders."""
     rows: list[dict[str, Any]] = []
-    last_id = -1
+    last_id = 0
+    page_size = 1000
     while True:
-        # The view doesn't have a single PK we can paginate by, so we accumulate
-        # all rows for one company. For scale on V1.1 we may need a different
-        # pagination strategy, but per-company row counts are small (~10s-100s).
         response = (
             nport.table("v_intel_company_holders")
             .select("*")
             .eq("company_slug", company_slug)
+            .eq("source_type", source_type)
+            .gt("evidence_id", last_id)
             .order("evidence_id")
-            .range(0, 9999)  # Hard cap for V1 — flag if exceeded
+            .limit(page_size)
             .execute()
         )
-        rows = response.data or []
-        if len(rows) >= 10000:
-            print(
-                f"  WARN: hit 10,000-row cap for {company_slug}. Some holders "
-                f"may be truncated. Switch to keyset pagination if this matters.",
-                file=sys.stderr,
-            )
-        break
+        batch = response.data or []
+        if not batch:
+            break
+        rows.extend(batch)
+        last_id = int(batch[-1]["evidence_id"])
+        if len(batch) < page_size:
+            break
+    return rows
+
+
+def fetch_holders(nport, company_slug: str) -> list[dict[str, Any]]:
+    """Pull every holder evidence row from v_intel_company_holders.
+
+    Splits by source_type so PostgREST's 1000-row default doesn't truncate
+    larger companies (SpaceX, Databricks, etc.).
+    """
+    rows: list[dict[str, Any]] = []
+    for source_type in ("nport", "formd_pooled_vehicle"):
+        rows.extend(_paginate_holders(nport, company_slug, source_type))
     return rows
 
 
