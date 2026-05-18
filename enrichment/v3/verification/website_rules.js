@@ -34,6 +34,25 @@ function sameDomain(urlA, urlB) {
 }
 
 /**
+ * Best identifying name from an identity object.
+ *
+ * For resolved identities returns the SEC-canonical adviser_name. For
+ * unresolved identities (state-only firms etc.) falls back through
+ * variants_tried[0] then input_name so the distinctive-token gate has a
+ * non-empty string to work with. Without this, unresolved identities had an
+ * empty token list and every candidate was rejected as
+ * `no_distinctive_token_match` (Codex root-cause, Zecca Lehn case).
+ */
+function identityName(identity) {
+  if (!identity) return '';
+  return identity.adviser_name
+    || identity.matched_variant
+    || (Array.isArray(identity.variants_tried) && identity.variants_tried[0])
+    || identity.input_name
+    || '';
+}
+
+/**
  * Generic tokens that appear in many firm names — not distinctive enough alone.
  */
 const GENERIC = new Set([
@@ -119,8 +138,11 @@ function decide(allEvidence, identity) {
       };
     }
 
-    // Check if this is at least a candidate (domain has distinctive firm token)
-    const tokens = distinctiveTokens(identity.adviser_name || identity.matched_variant || '');
+    // Check if this is at least a candidate (domain has distinctive firm token).
+    // For unresolved identities adviser_name/matched_variant are null — fall
+    // through to variants_tried[0] / input_name so the distinctive-token gate
+    // has something to match against (state-only firms case).
+    const tokens = distinctiveTokens(identityName(identity));
     if (tokens.length > 0 && tokens.some(t => host.includes(t))) {
       // Return as candidate (first one wins — strongest evidence first)
       return {
@@ -145,4 +167,4 @@ function decide(allEvidence, identity) {
   };
 }
 
-module.exports = { decide, hostname, sameDomain, distinctiveTokens };
+module.exports = { decide, hostname, sameDomain, distinctiveTokens, identityName };

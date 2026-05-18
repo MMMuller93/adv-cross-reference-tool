@@ -11,7 +11,7 @@
 
 'use strict';
 
-const { hostname, distinctiveTokens } = require('./website_rules');
+const { hostname, distinctiveTokens, identityName } = require('./website_rules');
 
 /**
  * Extract the company slug from a LinkedIn company URL.
@@ -37,7 +37,10 @@ function decide(allEvidence, identity, websiteDecision) {
   }
 
   const capturedAt = new Date().toISOString();
-  const tokens = distinctiveTokens(identity.adviser_name || identity.matched_variant || '');
+  // Use identityName helper so unresolved identities (state-only firms) still
+  // get a non-empty token list for the slug-match check below. Same Codex fix
+  // as in website_rules.js.
+  const tokens = distinctiveTokens(identityName(identity));
 
   // Prefer evidence that already has an anchor (found on website HTML).
   // Only treat as verified if the website itself is ALREADY independently verified —

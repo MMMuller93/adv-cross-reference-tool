@@ -13,7 +13,7 @@
 
 'use strict';
 
-const { distinctiveTokens } = require('./website_rules');
+const { distinctiveTokens, identityName } = require('./website_rules');
 
 const PLATFORM_STAFF = [
   'belltower', 'fund gp', 'angellist', 'avlok kohli',
@@ -50,7 +50,10 @@ function decide(allEvidence, identity, websiteDecision, linkedInDecision) {
   const capturedAt = new Date().toISOString();
   const hasVerifiedWebsite = websiteDecision && websiteDecision.status === 'verified';
   const hasVerifiedLinkedIn = linkedInDecision && linkedInDecision.status === 'verified';
-  const tokens = distinctiveTokens(identity.adviser_name || identity.matched_variant || '');
+  // Use identityName helper so unresolved identities still produce a non-empty
+  // token set. Same fix as website_rules / linkedin_rules — without this, team
+  // members from state-only firms fail the distinctive-token gate.
+  const tokens = distinctiveTokens(identityName(identity));
 
   const decisions = [];
   const seenNames = new Set();

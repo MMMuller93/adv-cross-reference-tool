@@ -79,12 +79,19 @@ function isValidHomepage(url) {
   return false;
 }
 
-async function braveSearch(query) {
+async function braveSearch(query, retryCount = 0) {
   if (!BRAVE_API_KEY) return null;
   try {
     const res = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}`, {
       headers: { 'Accept': 'application/json', 'X-Subscription-Token': BRAVE_API_KEY },
     });
+    // Brave free tier rate-limits ~1 req/sec. The orchestrator's Promise.all
+    // fires website+linkedin searches in parallel; second call commonly 429s.
+    // v2 retried with backoff; v3 had dropped this. Codex hardening rec.
+    if (res.status === 429 && retryCount < 2) {
+      await new Promise(r => setTimeout(r, 5000));
+      return braveSearch(query, retryCount + 1);
+    }
     if (!res.ok) return null;
     return res.json();
   } catch (_) { return null; }
