@@ -21,6 +21,7 @@
         "Company search uses N-PORT exposure and holder-count stats when available",
         "Homepage high-signal cards surface disclosed exposure, holder count, and latest snapshot date",
         "Stats-ranked directory ranks the full seeded universe before pagination",
+        "Homepage/company-card exposure uses the same latest-per-fund-security definition as company holder pages",
         "Stale historical N-PORT snapshots are downranked against current private-company exposure",
         "Admin unresolved queue groups raw holdings by normalized issuer name",
         "Admin triage shows candidate company matches with score and reason",
@@ -31,7 +32,7 @@
       "status": "done",
       "passes": true,
       "tested_at": "2026-05-18",
-      "notes": "Implemented in isolated nport/ subtree. Follow-up fixed stats-ranked pagination and stale-snapshot ranking. Verified with 41 Node API tests, 27 scraper tests, live API smoke showing SpaceX/Anthropic/Stripe at the top, and Browser dashboard smoke. Live Supabase preflight reran on 2026-05-17 after wiring preflight_live.py to the canonical .env.nport handoff."
+      "notes": "Implemented in isolated nport/ subtree. Follow-up fixed stats-ranked pagination, stale-snapshot ranking, and homepage/company-page exposure consistency by using latest-per-fund-security current rows. Verified with 42 Node API tests, 27 scraper tests, live API smoke, and Browser dashboard smoke. Live Supabase preflight reran on 2026-05-17 after wiring preflight_live.py to the canonical .env.nport handoff."
     },
     {
       "id": "nport-003",

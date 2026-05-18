@@ -382,7 +382,8 @@ async function fetchCompanyStatsFromPositionsMv(deps, { maxRows = COMPANY_STATS_
     return companyStatsCache.value;
   }
 
-  const bySlugPeriod = new Map();
+  const rowsBySlug = new Map();
+  const periodsSeen = new Map();
   let lastHoldingId = 0;
   let scanned = 0;
 
@@ -390,7 +391,7 @@ async function fetchCompanyStatsFromPositionsMv(deps, { maxRows = COMPANY_STATS_
     const pageSize = Math.min(BASE_TABLE_READ_PAGE_SIZE, maxRows - scanned);
     let query = deps.nportClient
       .from('nport_company_positions_mv')
-      .select('holding_id_internal, company_slug, report_period_date, report_period_end, registrant_cik, currency_value_usd')
+      .select('holding_id_internal, company_slug, report_period_date, report_period_end, registrant_cik, series_id, series_name, share_class_normalized, raw_issuer_title, asset_cat, exposure_type, currency_value_usd')
       .order('holding_id_internal', { ascending: true })
       .limit(pageSize);
     if (lastHoldingId > 0) query = query.gt('holding_id_internal', lastHoldingId);
@@ -402,18 +403,12 @@ async function fetchCompanyStatsFromPositionsMv(deps, { maxRows = COMPANY_STATS_
       const slug = row.company_slug;
       const period = positionPeriod(row);
       if (!slug || !period) continue;
-      const key = `${slug}|${period}`;
-      const bucket = bySlugPeriod.get(key) || {
-        slug,
-        period,
-        total_value: 0,
-        holders: new Set(),
-        position_count: 0,
-      };
-      bucket.total_value += toNumber(row.currency_value_usd) || 0;
-      if (row.registrant_cik) bucket.holders.add(String(row.registrant_cik));
-      bucket.position_count += 1;
-      bySlugPeriod.set(key, bucket);
+      const rows = rowsBySlug.get(slug) || [];
+      rows.push(row);
+      rowsBySlug.set(slug, rows);
+      const periods = periodsSeen.get(slug) || new Set();
+      periods.add(period);
+      periodsSeen.set(slug, periods);
     }
     scanned += page.length;
     if (page.length < pageSize) break;
@@ -423,32 +418,24 @@ async function fetchCompanyStatsFromPositionsMv(deps, { maxRows = COMPANY_STATS_
   }
 
   const statsBySlug = new Map();
-  for (const bucket of bySlugPeriod.values()) {
-    const current = statsBySlug.get(bucket.slug);
-    if (!current || bucket.period > current.latest_period_date) {
-      statsBySlug.set(bucket.slug, {
-        latest_period_date: bucket.period,
-        latest_value_usd: bucket.total_value,
-        latest_holder_count: bucket.holders.size,
-        position_count: bucket.position_count,
-        period_count: 1,
-      });
-    } else if (bucket.period === current.latest_period_date) {
-      current.latest_value_usd += bucket.total_value;
-      current.latest_holder_count += bucket.holders.size;
-      current.position_count += bucket.position_count;
+  for (const [slug, rows] of rowsBySlug.entries()) {
+    const currentRows = latestPositionsByHolderSecurity(rows);
+    const holders = new Set();
+    let totalValue = 0;
+    let latestPeriod = null;
+    for (const row of currentRows) {
+      totalValue += toNumber(row.currency_value_usd) || 0;
+      if (row.registrant_cik) holders.add(String(row.registrant_cik));
+      const period = positionPeriod(row);
+      if (period && (!latestPeriod || period > latestPeriod)) latestPeriod = period;
     }
-  }
-
-  const periodsSeen = new Map();
-  for (const bucket of bySlugPeriod.values()) {
-    const set = periodsSeen.get(bucket.slug) || new Set();
-    set.add(bucket.period);
-    periodsSeen.set(bucket.slug, set);
-  }
-  for (const [slug, set] of periodsSeen.entries()) {
-    const stats = statsBySlug.get(slug);
-    if (stats) stats.period_count = set.size;
+    statsBySlug.set(slug, {
+      latest_period_date: latestPeriod,
+      latest_value_usd: totalValue,
+      latest_holder_count: holders.size,
+      position_count: currentRows.length,
+      period_count: (periodsSeen.get(slug) || new Set()).size,
+    });
   }
 
   companyStatsCache = { loadedAt: now, value: statsBySlug, client: deps.nportClient };

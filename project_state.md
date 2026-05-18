@@ -51,9 +51,9 @@
 ✅ **N-PORT homepage ranking correction**
 - Fixed `/api/nport/companies?includeStats=true` to rank the full seeded company directory before applying response pagination; the prior implementation paginated alphabetically first, so top cards could be chosen from the first alphabetical page only
 - Added recency weighting so stale historical N-PORT snapshots no longer outrank current 2026 private-company exposure by holder count alone
-- Live API smoke now returns SpaceX, Anthropic, Stripe, ByteDance, and xAI at the top of the stats-ranked directory
-- Browser smoke verified the standalone dashboard loads the corrected high-signal list
-- Verification: `npm test` in `nport/api` → 41 passed; `.venv/bin/python -m pytest nport/scraper/tests -q` → 27 passed
+- Fixed homepage/company-card exposure to use the same latest-per-fund-security definition as company holder pages instead of summing only one reporting date
+- Browser smoke verified the standalone dashboard loads the corrected high-signal list: SpaceX `$26.30B`, Databricks `$7.55B`, Anthropic `$5.76B`, OpenAI `$1.29B`
+- Verification: `npm test` in `nport/api` → 42 passed; `.venv/bin/python -m pytest nport/scraper/tests -q` → 27 passed
 
 ✅ **N-PORT dashboard search and admin triage refinement**
 - Restored the isolated worktree at `.claude/worktrees/nport-buildout-claude` after the prior `/private/tmp` path was gone

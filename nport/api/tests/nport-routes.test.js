@@ -460,6 +460,57 @@ test('GET /companies — includeStats ranks before pagination', async () => {
   assert.equal(res.body.companies[0].nport_latest_value_usd, 1000000000);
 });
 
+test('GET /companies — includeStats uses current holder-security rows', async () => {
+  installMocks({
+    nportRouter: (table) => {
+      if (table === 'private_companies') {
+        return { data: [COMPANY_ROW], error: null, count: 1 };
+      }
+      if (table === 'nport_company_positions_mv') {
+        return {
+          data: [
+            {
+              holding_id_internal: 1,
+              company_slug: 'anthropic',
+              report_period_date: '2025-09-30',
+              registrant_cik: '24238',
+              series_id: 'S000004007',
+              share_class_normalized: 'Series F',
+              asset_cat: 'EP',
+              exposure_type: 'direct',
+              currency_value_usd: 100,
+            },
+            {
+              holding_id_internal: 2,
+              company_slug: 'anthropic',
+              report_period_date: '2025-12-31',
+              registrant_cik: '24238',
+              series_id: 'S000004007',
+              share_class_normalized: 'Series F',
+              asset_cat: 'EP',
+              exposure_type: 'direct',
+              currency_value_usd: 250,
+            },
+          ],
+          error: null,
+          count: 2,
+        };
+      }
+      return defaultNportRouter(table);
+    },
+  });
+
+  const res = await request(
+    baseUrl,
+    'GET',
+    '/api/nport/companies?page=1&pageSize=1&includeStats=true'
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.body.companies[0].nport_latest_value_usd, 250);
+  assert.equal(res.body.companies[0].nport_latest_holder_count, 1);
+  assert.equal(res.body.companies[0].nport_latest_period_date, '2025-12-31');
+});
+
 test('GET /companies — includeStats downranks stale N-PORT exposure', async () => {
   const staleExposure = {
     id: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
