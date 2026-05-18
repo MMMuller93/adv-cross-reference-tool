@@ -14,7 +14,12 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const { createClient } = require('@supabase/supabase-js');
-const { enrichManager, saveEnrichment } = require('./enrichment_engine_v2');
+// Feature flag: set ENRICHMENT_V3_ENABLED=true to use the new modular pipeline.
+const USE_V3 = process.env.ENRICHMENT_V3_ENABLED === 'true';
+const { enrichManager, saveEnrichment } = USE_V3
+  ? require('./v3/orchestrator')
+  : require('./enrichment_engine_v2');
+if (USE_V3) console.log('[Config] Using enrichment engine v3');
 
 // Database connections
 const FORMD_URL = process.env.FORMD_URL || 'https://ltdalxkhbbhmkimmogyq.supabase.co';

@@ -7,8 +7,13 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const { createClient } = require('@supabase/supabase-js');
-// USE V2 ENGINE - has Twitter, email extraction, and AI team extraction
-const { enrichManager, saveEnrichment } = require('./enrichment_engine_v2');
+// Feature flag: set ENRICHMENT_V3_ENABLED=true to use the new modular pipeline.
+// Default is off — production behavior unchanged until v3 is validated.
+const USE_V3 = process.env.ENRICHMENT_V3_ENABLED === 'true';
+const { enrichManager, saveEnrichment } = USE_V3
+  ? require('./v3/orchestrator')
+  : require('./enrichment_engine_v2');
+if (USE_V3) console.log('[Config] Using enrichment engine v3');
 // A11.1: shared ADV lookup so we can skip enriching managers who ARE already registered
 const { checkAdvDatabase } = require('../lib/adv_lookup');
 
