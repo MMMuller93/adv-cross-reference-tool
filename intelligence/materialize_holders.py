@@ -310,33 +310,23 @@ def _normalize_master_for_match(value: Optional[str]) -> Optional[str]:
 
 def fetch_enriched_manager_links(formd) -> dict[str, str]:
     """Return {normalized_series_master_name: linked_crd} from the
-    enriched_managers table. ~151 entries today; small enough to load fully.
+    enriched_managers table. ~151 entries today; small enough to load
+    in a single response, so no pagination needed.
     """
     master_to_crd: dict[str, str] = {}
-    last_id = ""
-    while True:
-        response = (
-            formd.table("enriched_managers")
-            .select("id,series_master_llc,linked_crd")
-            .not_.is_("series_master_llc", "null")
-            .not_.is_("linked_crd", "null")
-            .gt("id", last_id)
-            .order("id")
-            .limit(1000)
-        )
-        result = response.execute()
-        batch = result.data or []
-        if not batch:
-            break
-        for row in batch:
-            master = _normalize_master_for_match(row.get("series_master_llc"))
-            crd = row.get("linked_crd")
-            if master and crd:
-                # First write wins (avoid overwriting with later duplicates)
-                master_to_crd.setdefault(master, str(crd))
-            last_id = row["id"]
-        if len(batch) < 1000:
-            break
+    response = (
+        formd.table("enriched_managers")
+        .select("series_master_llc,linked_crd")
+        .not_.is_("series_master_llc", "null")
+        .not_.is_("linked_crd", "null")
+        .limit(1000)
+        .execute()
+    )
+    for row in (response.data or []):
+        master = _normalize_master_for_match(row.get("series_master_llc"))
+        crd = row.get("linked_crd")
+        if master and crd:
+            master_to_crd.setdefault(master, str(crd))
     return master_to_crd
 
 
@@ -533,14 +523,28 @@ def upsert_pooled_vehicle_offerings(
             batch, on_conflict="company_slug,accession_number"
         ).execute()
         total += len(response.data or batch)
-    # Read back to get the offering_ids
-    response = (
-        nport.table("intel_formd_pooled_vehicle_offering")
-        .select("offering_id,accession_number")
-        .eq("company_slug", company_slug)
-        .execute()
-    )
-    id_by_accession = {row["accession_number"]: row["offering_id"] for row in (response.data or [])}
+    # Read back to get the offering_ids. Paginate for safety even though
+    # current per-company counts are small — same 1000-row PostgREST cap.
+    id_by_accession: dict[str, int] = {}
+    last_offering_id = 0
+    while True:
+        response = (
+            nport.table("intel_formd_pooled_vehicle_offering")
+            .select("offering_id,accession_number")
+            .eq("company_slug", company_slug)
+            .gt("offering_id", last_offering_id)
+            .order("offering_id")
+            .limit(1000)
+            .execute()
+        )
+        batch = response.data or []
+        if not batch:
+            break
+        for row in batch:
+            id_by_accession[row["accession_number"]] = row["offering_id"]
+        last_offering_id = int(batch[-1]["offering_id"])
+        if len(batch) < 1000:
+            break
     return {"rows": total, "offering_id_by_accession": id_by_accession}
 
 
@@ -677,16 +681,31 @@ def materialize_company(
     # A single fund (series) can hold the tracked company in multiple share classes,
     # producing multiple positions with the same (cik, series_id). All of those
     # positions get the same adviser resolution — we don't collapse them.
-    response = (
-        nport.table("intel_nport_position")
-        .select("position_id,registrant_cik,series_id")
-        .eq("company_slug", company_slug)
-        .execute()
-    )
+    #
+    # Must keyset-paginate: PostgREST defaults to 1000 rows per response, and
+    # large companies like Databricks have 3000+ positions. Without pagination
+    # we'd silently skip the resolutions for positions beyond row 1000.
     nport_ids_by_key: dict[tuple[str, Optional[str]], list[int]] = defaultdict(list)
-    for row in (response.data or []):
-        key = (str(row["registrant_cik"]), row.get("series_id"))
-        nport_ids_by_key[key].append(row["position_id"])
+    last_position_id = 0
+    while True:
+        response = (
+            nport.table("intel_nport_position")
+            .select("position_id,registrant_cik,series_id")
+            .eq("company_slug", company_slug)
+            .gt("position_id", last_position_id)
+            .order("position_id")
+            .limit(1000)
+            .execute()
+        )
+        batch = response.data or []
+        if not batch:
+            break
+        for row in batch:
+            key = (str(row["registrant_cik"]), row.get("series_id"))
+            nport_ids_by_key[key].append(row["position_id"])
+        last_position_id = int(batch[-1]["position_id"])
+        if len(batch) < 1000:
+            break
 
     resolution_rows: list[dict[str, Any]] = []
     for (cik, series_id), position_ids in nport_ids_by_key.items():
