@@ -23,12 +23,12 @@
 ## Active Task
 **Currently Working On**: N-PORT live ingestion in isolated `nport/` subtree
 **Feature ID**: N-PORT private-company holdings database
-**Status**: Bulk + daily live ingestion loaded through 2026-05-14; materialized view refreshed; Anthropic holder adviser/contact enrichment smoke-tested; dashboard search/admin triage improvements verified in isolated tree
+**Status**: Bulk + daily live ingestion loaded through 2026-05-14; materialized view refreshed; full available N-CEN adviser backfill loaded/reconciled; dashboard search/admin triage improvements verified in isolated tree
 
 ### N-PORT Follow-Up Backlog (Keep Visible)
 
 **Usable next version estimate:** 4-6 hours with parallel agents.
-- Full N-CEN adviser backfill beyond Anthropic holders
+- Full N-CEN adviser backfill beyond Anthropic holders — done for available filings on 2026-05-17
 - Adviser/contact enrichment on all fund pages
 - Position delta computation
 - UI polish for adviser/fund/company drilldowns
@@ -59,6 +59,14 @@
 - Expanded SPV unwrap regexes for multi-word `SPV EXPOSURE TO ...`, `AESTAS LLC dba ...`, and G Squared invested-in strings
 - Verification: `nport/api npm test` → 39 passed; `.venv/bin/python -m pytest nport -q` → 178 passed; mock-browser smoke passed for homepage search and admin suggested-match display
 - Note: live `.env` was not present in this restored worktree, so live Supabase preflight was not rerun in this pass
+
+✅ **Full available N-CEN adviser backfill verification**
+- Confirmed Claude/Codex commit `a6bfd52` split N-CEN into scrape (`backfill_live.py`) and reconcile (`reconcile_live.py`) phases with validation/safety guards
+- Live N-PORT counts after backfill: `nport_registrants=1589`, `fund_ncen_records=1572`, `fund_ncen_adviser_links=15494`, `nport_registrants.adv_crd non-null=1389`
+- Reconcile dry-run loaded `57,543` ADV CRDs and `14,721` link rows, then reported `0` pending updates
+- Reconcile buckets: `resolved_single=1389`, `cleared_multi_adviser=97`, `cleared_not_in_adv=10`
+- Checked the 17 N-PORT registrants with no N-CEN summary row against EDGAR in dry-run mode; all 17 returned `skipped_no_ncen`, with `0` planned summary rows, `0` planned link rows, and `0` failures
+- Verification: `.venv/bin/python -m pytest nport/enrichment/ncen_ingest/tests -q` → 21 passed
 
 ### Recent Completion (Session May 15, 2026)
 

@@ -10,7 +10,7 @@
     "current_session": 11,
     "last_working_commit": "05456fa",
     "environment_verified": true,
-    "notes": "N-PORT isolated live ingestion loaded through 2026Q1 bulk plus Q2-to-date daily catch-up on 2026-05-14. Materialized view refreshed. Anthropic holder N-CEN adviser/contact enrichment loaded and smoke-tested on 2026-05-15. Search/admin triage refinement verified in isolated nport-buildout-claude tree on 2026-05-17."
+    "notes": "N-PORT isolated live ingestion loaded through 2026Q1 bulk plus Q2-to-date daily catch-up on 2026-05-14. Materialized view refreshed. Full available N-CEN adviser backfill verified on 2026-05-17: 1572 N-CEN records, 15494 adviser-link rows, 1389 registrants linked to ADV CRD, 0 reconcile updates pending. Search/admin triage refinement verified in isolated nport-buildout-claude tree on 2026-05-17."
   },
   "features": [
     {
@@ -52,20 +52,21 @@
     {
       "id": "nport-002",
       "category": "nport",
-      "description": "N-CEN adviser/contact enrichment for N-PORT fund pages",
+      "description": "N-CEN adviser/contact enrichment for N-PORT fund pages and available N-PORT registrants",
       "acceptance_criteria": [
         "Preserve per-series N-CEN adviser links via mgmtInvSeriesId",
         "Normalize zero-padded N-CEN CRDs before joining to ADV advisers_enriched",
         "Avoid registrant-level adviser links when a CIK has multiple primary adviser CRDs",
         "Expose fund adviser API routes with ADV contact data",
         "Render adviser/contact panel on fund pages",
-        "Load and verify Anthropic holder universe"
+        "Load Anthropic holder universe and then backfill all available N-PORT registrant N-CEN filings",
+        "Reconcile nport_registrants.adv_crd only when the N-CEN adviser CRD is unambiguous and present in ADV"
       ],
       "priority": 1,
       "status": "done",
       "passes": true,
-      "tested_at": "2026-05-15",
-      "notes": "Created fund_ncen_adviser_links, loaded 41 Anthropic holder N-CEN summaries and 879 normalized adviser/subadviser links. ARK Venture Fund resolves to CRD 169525 with ADV phone/CCO/Form ADV/website. BlackRock Funds is intentionally ambiguous at CIK level but resolves by exact series. Witness check passed: 166 Python tests, 37 Node route tests, live preflight with fund_ncen_adviser_links=879."
+      "tested_at": "2026-05-17",
+      "notes": "Full available N-CEN backfill verified live: fund_ncen_records=1572, fund_ncen_adviser_links=15494, nport_registrants adv_crd non-null=1389. Reconcile dry-run found 0 pending updates. Remaining 17 registrants were checked against EDGAR and returned skipped_no_ncen. N-CEN tests passed: 21 passed."
     },
     {
       "id": "nport-001",
@@ -317,7 +318,6 @@
     "Load N-CSR acquisition cost/date enrichment for major holders",
     "Load N-1A portfolio manager extraction for priority fund families",
     "Compute position deltas and surface coordinated repricing events",
-    "Run full N-CEN adviser backfill beyond the Anthropic holder CIK set",
     "Rehydrate local .env in the restored isolated worktree before live Supabase preflight or live admin triage",
     "Commit and push the isolated N-PORT branch when ready",
     "Set production env vars before any main-app mount: SUPABASE_URL_NPORT, SUPABASE_SERVICE_KEY_NPORT, NPORT_ADMIN_TOKEN, ADV_SUPABASE_ANON_KEY, FORMD_SUPABASE_ANON_KEY",

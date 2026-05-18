@@ -34,16 +34,26 @@ class NCenBackfillError(RuntimeError):
     """Raised when the backfill cannot safely proceed."""
 
 
-def load_dotenv(root: Path = PROJECT_ROOT) -> None:
-    env_path = root / ".env"
-    if not env_path.exists():
+def _read_env_file(path: Path) -> None:
+    if not path.exists():
         return
-    for line in env_path.read_text().splitlines():
+    for line in path.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+def load_dotenv(root: Path = PROJECT_ROOT) -> None:
+    """Load env from the worktree's .env, and also walk up to find the main
+    PFR repo's .env.nport (the canonical location for N-PORT credentials —
+    macOS auto-cleans /tmp/ so creds can't live in worktree dirs)."""
+    _read_env_file(root / ".env")
+    pfr_root = root
+    while pfr_root.parent != pfr_root and pfr_root.name != "PrivateFundsRadar":
+        pfr_root = pfr_root.parent
+    _read_env_file(pfr_root / ".env.nport")
 
 
 def create_supabase_client():
