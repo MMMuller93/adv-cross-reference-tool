@@ -33,6 +33,7 @@
 - `fund_ncen_records` in N-PORT DB is essentially empty (41 rows as of 2026-05-15 — validation batch only). Without backfill, N-PORT→ADV bridge resolves only ~2.5% of registrants (40/1,589).
 
 ### Environment quirks
+- **NEVER put credential files (`.env`, `.env.*`, key files) in `/tmp/` or `/private/tmp/`** — macOS auto-cleans these directories. The `/etc/periodic/daily/110.clean-tmps` script removes files older than 3 days. The N-PORT `.env` at `/private/tmp/nport-buildout-claude/.env` was silently deleted between sessions, breaking the bridge backfill. **Correct location for PFR creds:** `/Users/Miles/projects/PrivateFundsRadar/.env.nport` (gitignored via `.env.*` pattern), or `~/.config/private-funds-radar/`, or macOS Keychain.
 - **macOS Python 3.14 has broken pyexpat** (`Symbol not found: _XML_SetAllocTrackerActivationThreshold`) — use `uv venv` (Python 3.12)
 - **macOS Postgres 17 initdb needs** `LC_ALL=C` + `--locale=C` — otherwise `postmaster became multithreaded during startup`
 - **Anthropic API 529 Overloaded** is common at peak — fall back to writing code in main context, don't loop retries
@@ -96,6 +97,22 @@ Batch limits: 1000 reads, 500 inserts.
 - Values context retention — gets frustrated when info is forgotten (*"i constantly give you a ton of good info and feedback, you remember it for like 4 min, and then it disappears"*)
 - Wants evidence, not speculation
 - Don't make UI styling decisions without asking
+
+### Communication style (added 2026-05-17 — user explicit feedback)
+
+- **Plain English, no jargon.** Frame everything as you would explain it to a nontechnical manager. Avoid SQL/Postgres syntax in chat (`TEXT[]`, `JSONB`, etc.), column-type notation, unexplained schema field names, branch-and-commit shorthand.
+- **Lead with the answer or recommendation**, then reasoning only if asked. Don't bury the lede.
+- **Short over long.** No big tables or dense bullet lists unless specifically requested.
+- **Translate technical terms briefly** when they have to appear — e.g., "registrant (the legal entity that files with the SEC)" not just "registrant."
+- **One focused question with concrete options**, never open-ended ("what do you want me to do?").
+- **Don't dump information** — share what's needed for the next decision, not everything you know.
+- User has flagged this drift twice in one session: *"too complicated, too much jargon and length"* and *"too much info, just tell me what's next"*. Treat this as a hard rule.
+
+### Specificity & timeline framing (added 2026-05-14 — user explicit feedback)
+
+- **Don't propose actions as one-liners.** When recommending an action like "hide unverified data," explain concretely: which file/line, which fields, where the change happens (back-end strip vs front-end conditional render), what user sees afterward, and 2-3 strictness options when relevant. *"explain, you didnt give em enough details or context on this"*
+- **Don't anchor on human-team timelines.** It's May 2026 — with parallel sub-agents, Codex review running concurrently, and skills (`parallel-orchestrator`, `stress-test`, etc.), most "multi-week rebuilds" are realistically same-day jobs. *"why are you always doing such broken out long build plans, couldn't this be done much quicker with elite coding agents/LLMs in may 2026, using all tools/skills, best practices, parallelizing, etc?"*
+- **Default to parallel execution** for multi-part work: spawn coder + tester + researcher concurrently, have Codex review in parallel, orchestrate rather than serialize.
 - Internal tool — *"dont worry any user features like accounts/paywall, this is for our use"*
 - CSV-first output (*"csv fine for now, unless UI easy"*); weekly refresh cadence fine
 - Branch isolation — new work goes on isolated branches/subfolders; don't touch existing PFR files unless explicitly approved

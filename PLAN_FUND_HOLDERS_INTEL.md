@@ -61,7 +61,7 @@ Three Supabase projects already populated and querying. This work is the GLUE ac
 
 - **Project:** `ltdalxkhbbhmkimmogyq.supabase.co`
 - **Key tables:**
-  - `form_d_filings` — 330,000 rows
+  - `form_d_filings` — 358,765 rows (live count 2026-05-17 via POC4)
   - `cross_reference_matches` — 72,558 rows. **This is the working bridge from Form D filings → ADV adviser CRD**
   - `compliance_issues` — 150,000 (different use case, ignore for intel)
   - `enriched_managers` — 3,400 rows (where the existing enrichment engine writes)
@@ -151,7 +151,7 @@ Original plan from user's spec, refined after Codex review (NEEDS WORK verdict) 
 
 ### Phase 0 — PREREQUISITES (must happen before Phase 1)
 
-**Revised after stress-test (2026-05-15)** — the original "26 quarters / ~84K filings / ~5h" framing was wrong. The actual scraper at `nport/enrichment/ncen_ingest/backfill_live.py` is CIK-by-CIK, fetching the **latest** N-CEN per registrant from SEC submissions JSON. Real wall-clock: **1.5–2.5h for ~1,549 unprocessed CIKs**. The 41 N-CEN rows already in `fund_ncen_records` came from commit `2c2a67f` witness check, not a real backfill.
+**Revised after stress-test (2026-05-15)** — the original "26 quarters / ~84K filings / ~5h" framing was wrong. The actual scraper at `nport/enrichment/ncen_ingest/backfill_live.py` is CIK-by-CIK, fetching the **latest** N-CEN per registrant from SEC submissions JSON. Real wall-clock: **1.5–2.5h for ~1,549 unprocessed CIKs**. The 41 N-CEN rows already in `fund_ncen_records` came from commit `2c2a67f`'s `--execute` preflight run (commit message: "live preflight with fund_ncen_adviser_links=879"). Those 41 CIKs should be SKIPPED by the next run (use `--include-existing` only if you want to refresh them).
 
 **Three load-bearing bugs in the current `backfill_live.py` that MUST be fixed before a full-scale run** (stress-test verified):
 1. `backfill_live.py:407-414` only writes `nport_registrants.adv_crd` when **EXACTLY ONE** unique primary adviser CRD exists across all series for a CIK. Multi-adviser registrants are silently skipped — caps ceiling at ~79.2%.
@@ -198,7 +198,7 @@ Adviser resolution (link table, reviewable):
   adviser_resolution_link(
     source_key,        — fk to one of the evidence tables above
     crd,               — resolved CRD (must exist in advisers_enriched)
-    method,            — 'ncen_unanimous' | 'ncen_most_common' | 'cross_ref_match'
+    method,            — 'ncen_xref' | 'ncen_most_common' | 'cross_ref_match'
                        | 'entityname_alias' | 'series_master_parse' | 'manual'
     confidence,        — 100 / 75 / 50 (per method)
     status             — 'auto' | 'reviewed' | 'rejected'
@@ -235,7 +235,7 @@ Company: Anthropic
 - [ ] **1c. N-PORT section:** Query `nport_company_positions_mv` → resolve registrant via `fund_ncen_adviser_links` (series-level) → fallback to `nport_registrants.adv_crd` → join `advisers_enriched`. Write rows to `nport_position` evidence table.
 - [ ] **1d. Form D section — DUAL resolution path** (critical, addresses POC2/POC4 findings):
   - **Path 1: cross_reference_matches** (existing bridge — only 20% of Anthropic pooled vehicles, 27.5% corpus-wide)
-  - **Path 2: direct entityname alias matching** (NEW — was previously deferred but moved to CORE Phase 1 because POC2 showed 80% of Anthropic pooled vehicles are NOT in cross_ref). For each unbridged Form D filing with entityname matching a curated alias, write to `formd_pooled_vehicle_offering` with `method='entityname_alias'`. Adviser resolution attempts: `related_names` → series_master_llc lookup → manual review queue.
+  - **Path 2: direct entityname alias matching** (NEW — was previously deferred but moved to CORE Phase 1 because POC2 showed 80% of Anthropic pooled vehicles are NOT in cross_ref). For each unbridged Form D filing with entityname matching a curated alias, write to `formd_pooled_vehicle_offering` with `method='entityname_alias'`. These rows are surfaced as holder evidence in V1 even when we can't yet identify which adviser manages them — the adviser slot is just left empty. **Adviser resolution for these rows (related_names parse, series_master_llc lookup, etc.) is V1.1 work**, not V1.
 - [ ] **1e. Cross-link** at adviser-CRD level only. Label clearly as "same firm in both source families." Cross-link at FUND level is NOT supported (cross_reference_matches links Form D ↔ ADV private fund records, NOT to N-PORT positions — false positive risk).
 - [ ] **1f.** Output: structured JSON + CSV. Visual inspection before continuing.
 
@@ -285,7 +285,10 @@ Codex flagged: live `ILIKE ANY` on 330K Form D rows = slow. Materialize.
   - `form_adv_url` for source linking
 - [ ] Output: per-firm structured-data block in the report. NO web enrichment needed for these firms — they ship with V1.
 
-**Coverage projection (POC3-validated):** ~134/153 target CRDs (87.6%) get a verified canonical website + named contact + AUM directly from `advisers_enriched`. 17 advisers have zero website data; 6 more have only social-media profiles. These 23 firms are the Phase 4 enrichment targets.
+**Coverage projection (POC1+POC3-validated, stress-test witness corrected):**
+- **Any-usable-website:** 134/153 CRDs (87.6%) — using the canonical-domain selector to fall back to `other_websites` when `primary_website` is noisy. POC3 verified.
+- **Fully usable (website + named contact + AUM > 0):** 126/153 CRDs (82.4%). POC1 coverage check.
+- **Real Phase 4 enrichment targets:** 17 zero-website advisers + 6 social-only advisers = ~23 firms. These are the only CRDs needing web enrichment.
 
 ### Phase 4 — Targeted web-enrichment for the gap (POC3-scoped)
 
@@ -335,7 +338,7 @@ V1 ships with these explicit, documented limits — they are NOT bugs:
 Stress-test surfaced specific high-yield items to add after V1 ships:
 
 1. **Form D `a series of [X] LLC` extraction** (~15K filings). Pure string parse, no API calls. Unlocks the Sydecar/Republic/Wefunder pooled-vehicle ecosystem at scale. POC4 spot-check found 403+ filings with direct tracked-company references in entityname that V1's alias matching may miss.
-2. **Direct entityname alias matching on unbridged Form D filings** (~152K filings). POC4 confirmed only 27.5% of pooled-vehicle filings are bridged via `cross_reference_matches`. Scanning the unbridged 72.5% with `private_company_aliases` ILIKE matching surfaces SpaceX (113), Anthropic (70), Figure (49), Scale AI (49), OpenAI (30), Stripe (16) hits the current pipeline misses. Requires trigram GIN index on `form_d_filings.entityname` (already planned in Phase 2).
+2. **Adviser resolution for entityname-matched unbridged Form D filings.** V1 surfaces the pooled-vehicle holder evidence via entityname matching (Phase 1, Path 2) but leaves the adviser slot empty when neither `cross_reference_matches` nor the entityname pattern lets us identify the manager. V1.1 closes those gaps: parse `related_names` for adviser CRDs, look up `series_master_llc` against `advisers_enriched`, hit external sources where SEC data is insufficient. The Form D rows themselves are already in V1; V1.1 just adds the "managed by X" attribution.
 3. **PM names via N-1A backfill.** Wire up the N-1A scraper (exists at `nport/enrichment/n1a_ingest/` on `nport-buildout-claude`, never ran). Populate `fund_portfolio_managers`. Adds "PM: Danoff" style attribution.
 4. **Dynamic company onboarding CLI.** `intelligence/add_company.py --name "Foo Inc" --aliases "Foo,Foo Inc"` that inserts to `private_companies` + `private_company_aliases` + re-runs the join. ~30 min to build, makes the tool self-service for new tracked companies.
 5. **Multi-adviser registrant improvement.** Beyond the most-common fallback in Phase 0, allow per-series resolution (use `fund_ncen_adviser_links` directly when querying specific fund positions). Improves precision on variable-annuity sub-account complexes (SunAmerica, Voya).
