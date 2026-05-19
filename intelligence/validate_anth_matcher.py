@@ -1,24 +1,19 @@
-"""Validate the Anthropic Form D matcher against the 363 ANTH-prefix rows.
+"""Validate the Form D abbreviation-gap matcher.
 
 Usage:
-  python intelligence/validate_anth_matcher.py [--show-misses]
+  python intelligence/validate_anth_matcher.py [--company anthropic|openai] [--show-misses]
 
 Steps:
   1. Pull every form_d_filings row whose entityname contains a word-boundary
-     'ANTH' (Postgres regex ~* '\\mANTH').
-  2. Run each row through formd_company_matcher.evaluate_filing('anthropic').
-  3. Partition into:
-       - auto_include
-       - candidate
-       - excluded (no rule matched)
-  4. Spot-check the excluded bucket: known-Anthropic names should appear in
-     auto_include, known-non-Anthropic names should appear in excluded.
+     short-code for the company (e.g. '\\mANTH', '\\mOAI').
+  2. Run each row through formd_company_matcher.evaluate_filing(company).
+  3. Partition into auto_include / candidate / excluded.
+  4. Spot-check against known TP/FP samples.
 
 Acceptance:
-  - All sample TRUE-POSITIVES from the design review must land in auto_include
-    or be already caught by the ANTHROPIC alias (we don't need to double-cover).
-  - No sample FALSE-POSITIVE name (Pantheon/Panthera/Anthony/Anthem/Anthropy)
-    should land in auto_include.
+  - All sample TRUE-POSITIVES must land in auto_include or already be caught
+    by the company's long-name alias (e.g., 'ANTHROPIC' / 'OPENAI').
+  - No sample FALSE-POSITIVE name should land in auto_include.
 """
 from __future__ import annotations
 
@@ -41,31 +36,46 @@ from intelligence.formd_company_matcher import (  # noqa: E402
 )
 
 
-TRUE_POSITIVE_SAMPLES = [
-    "ANTH FUND I",                 # Altra Venture / HF Scale
-    "ANTH FUND IV",                # Altra FrontierTech
-    "Anth V Aug 2025",             # CGF2021 Sydecar series
-    "Anth IV Jul 2025",            # CGF2021 Sydecar
-    "CC ANTH I",                   # CGF2021 Sydecar
-    "CC ANTH II",                  # CGF2021 Sydecar
-]
+PROFILES: dict[str, dict] = {
+    "anthropic": {
+        "short_code_regex": r"\mANTH",
+        "long_alias_token": "ANTHROPIC",
+        "true_positives": [
+            "ANTH FUND I",                 # Altra Venture / HF Scale
+            "ANTH FUND IV",                # Altra FrontierTech
+            "Anth V Aug 2025",             # CGF2021 Sydecar
+            "Anth IV Jul 2025",            # CGF2021 Sydecar
+            "CC ANTH I",                   # CGF2021 Sydecar
+            "CC ANTH II",                  # CGF2021 Sydecar
+        ],
+        "false_positives": [
+            "Pantheon", "Pantheum", "Panthera", "Panther",
+            "Anthony", "Anthem", "Anthology",
+            "Anthropy Master", "ANTHR SYND",
+        ],
+    },
+    "openai": {
+        "short_code_regex": r"\mOAI",
+        "long_alias_token": "OPENAI",
+        "true_positives": [
+            "OAI Fund I",                  # Altra Venture II
+            "OAI Fund II",                 # Altra FrontierTech
+            "OAI Sunshine Eureka",         # CGF2021 Sydecar
+            "LFG OAI",                     # CGF2021 Sydecar
+            "Khosla Ventures OAI",         # Khosla SPV
+            "Type One OAI",                # Type One SPV
+        ],
+        # Pre-emptive: no known FPs in current universe. Listed names are
+        # plausible word-boundary OAI hits that might appear and should NOT
+        # be Anthropic-style auto-included if they aren't OpenAI-related.
+        "false_positives": [],
+    },
+}
 
-FALSE_POSITIVE_SAMPLES = [
-    "Pantheon",
-    "Pantheum",
-    "Panthera",
-    "Panther",
-    "Anthony",
-    "Anthem",
-    "Anthology",
-    "Anthropy Master",
-    "ANTHR SYND",
-]
 
-
-def fetch_anth_universe(formd) -> list[dict]:
-    """Pull every form_d_filings row with a word-boundary ANTH in entityname,
-    excluding D/A amendments. Mirrors the matcher's server-side query.
+def fetch_shortcode_universe(formd, short_code_regex: str) -> list[dict]:
+    """Pull every form_d_filings row matching the given short-code regex,
+    excluding D/A amendments.
     """
     SELECT = (
         "id,accessionnumber,entityname,cik,series_master_llc,"
@@ -77,7 +87,7 @@ def fetch_anth_universe(formd) -> list[dict]:
         response = (
             formd.table("form_d_filings")
             .select(SELECT)
-            .filter("entityname", "imatch", r"\mANTH")
+            .filter("entityname", "imatch", short_code_regex)
             .neq("isamendment", "true")
             .gt("id", last_id)
             .order("id")
@@ -94,6 +104,10 @@ def fetch_anth_universe(formd) -> list[dict]:
     return rows
 
 
+# Backwards-compat alias for older callers.
+fetch_anth_universe = lambda formd: fetch_shortcode_universe(formd, r"\mANTH")
+
+
 def has_keyword_match(text: str, samples: list[str]) -> bool:
     if not text:
         return False
@@ -103,6 +117,12 @@ def has_keyword_match(text: str, samples: list[str]) -> bool:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--company",
+        default="anthropic",
+        choices=sorted(PROFILES.keys()),
+        help="Which company profile to validate.",
+    )
     parser.add_argument(
         "--show-misses",
         action="store_true",
@@ -115,23 +135,26 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
-    if not get_rules("anthropic"):
-        print("ERROR: no rules registered for 'anthropic'")
+    profile = PROFILES[args.company]
+    if not get_rules(args.company):
+        print(f"ERROR: no rules registered for {args.company!r}")
         return 2
 
     load_credentials()
     formd = create_formd_client()
 
-    rows = fetch_anth_universe(formd)
-    print(f"Pulled {len(rows)} rows where entityname has word-boundary ANTH "
-          f"(amendments excluded).")
+    rows = fetch_shortcode_universe(formd, profile["short_code_regex"])
+    print(
+        f"Pulled {len(rows)} rows where entityname matches "
+        f"{profile['short_code_regex']!r} (amendments excluded)."
+    )
 
     auto = []
     candidate = []
     excluded = []
     rule_counter: Counter = Counter()
     for row in rows:
-        result = evaluate_filing("anthropic", row)
+        result = evaluate_filing(args.company, row)
         if not result:
             excluded.append(row)
             continue
@@ -150,21 +173,24 @@ def main(argv: list[str]) -> int:
     for rule_key, count in rule_counter.most_common():
         print(f"  {rule_key}: {count}")
 
-    # Check ANTHROPIC keyword (already covered by alias matcher).
-    anth_in_excluded = [r for r in excluded if "ANTHROPIC" in (r.get("entityname") or "").upper()]
-    print(f"\n'ANTHROPIC' in excluded (covered by alias matcher): {len(anth_in_excluded)}")
+    long_token = profile["long_alias_token"]
+    long_in_excluded = [
+        r for r in excluded if long_token in (r.get("entityname") or "").upper()
+    ]
+    print(
+        f"\n{long_token!r} in excluded (covered by long-name alias matcher): "
+        f"{len(long_in_excluded)}"
+    )
 
-    # True-positive coverage check: known TP names should appear in auto_include
-    # OR be already covered by ANTHROPIC alias.
     print("\nTrue-positive coverage check:")
     missing_tp = []
-    for sample in TRUE_POSITIVE_SAMPLES:
+    for sample in profile["true_positives"]:
         in_auto = any(
             has_keyword_match(row.get("entityname"), [sample]) for row, _ in auto
         )
         in_alias_cover = any(
             has_keyword_match(row.get("entityname"), [sample])
-            and "ANTHROPIC" in (row.get("entityname") or "").upper()
+            and long_token in (row.get("entityname") or "").upper()
             for row in rows
         )
         ok = in_auto or in_alias_cover
@@ -173,10 +199,9 @@ def main(argv: list[str]) -> int:
         if not ok:
             missing_tp.append(sample)
 
-    # False-positive containment check: NONE of these should appear in auto.
     print("\nFalse-positive containment check (auto_include should be EMPTY):")
     fp_leaks = []
-    for sample in FALSE_POSITIVE_SAMPLES:
+    for sample in profile["false_positives"]:
         leaked = [
             row.get("entityname")
             for row, _ in auto
@@ -194,12 +219,14 @@ def main(argv: list[str]) -> int:
                   f"({row.get('filing_date')})")
 
     if args.show_misses:
-        # Filter to non-ANTHROPIC excluded (the others are alias-covered already).
         non_alias_excluded = [
             r for r in excluded
-            if "ANTHROPIC" not in (r.get("entityname") or "").upper()
+            if long_token not in (r.get("entityname") or "").upper()
         ]
-        print(f"\n--- excluded rows (non-ANTHROPIC): {len(non_alias_excluded)} ---")
+        print(
+            f"\n--- excluded rows (non-{long_token}): "
+            f"{len(non_alias_excluded)} ---"
+        )
         for row in non_alias_excluded[:50]:
             print(f"  {row.get('entityname')!r}")
         if len(non_alias_excluded) > 50:

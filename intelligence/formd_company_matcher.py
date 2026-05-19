@@ -122,9 +122,43 @@ SYDECAR_CONTEXT_RELATED_REGEXES = [
 ]
 
 
+OPENAI_RULES: list[FormDRule] = [
+    FormDRule(
+        rule_key="oai_fund_phrase",
+        # 'OAI FUND I/II' (Altra Venture / HF Scale) — exact mirror of the
+        # ANTH FUND pattern: same Altra/HF Scale series operators use both
+        # 'ANTH FUND N' and 'OAI FUND N' naming.
+        entity_regex=_compile(r"\bOAI\s+FUND\b"),
+        decision="auto_include",
+        notes="Catches Altra Venture / HF Scale 'OAI FUND N' series.",
+    ),
+    FormDRule(
+        rule_key="oai_word",
+        # 'OAI' at a word boundary OR followed immediately by digits (e.g.,
+        # 'OAI1025'). Universe survey (2026-05-19, n=22 after digit relax)
+        # showed 100% precision: every hit was a real OpenAI SPV (Khosla,
+        # Type One, ATHOS, OPEN OAI, Sydecar/CGF2021, DataPower, Altra,
+        # AVKV, Cloverfield, OV, T1V, West Star, SLRTE, etc.).
+        # MORE permissive than the ANTH analog because OAI universe is
+        # small and clean. Negatives are pre-emptive.
+        entity_regex=_compile(r"\bOAI(?=\d|\b)"),
+        decision="auto_include",
+        negative_entity_regexes=[
+            # Pre-emptive: known unrelated entities that COULD match OAI in
+            # the future. Empty today; populate as false positives appear.
+        ],
+        notes=(
+            "OAI at word boundary or followed by digits. 100% precision on "
+            "22-row universe (2026-05-19). Negatives are pre-emptive."
+        ),
+    ),
+]
+
+
 # Map slug -> rules. Add new companies here.
 RULES_BY_COMPANY: dict[str, list[FormDRule]] = {
     "anthropic": ANTHROPIC_RULES,
+    "openai": OPENAI_RULES,
 }
 
 
