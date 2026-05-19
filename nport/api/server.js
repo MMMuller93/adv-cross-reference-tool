@@ -52,7 +52,11 @@ function buildApp() {
   const nportRoutes = require('./routes/nport');
   app.use('/api/nport', nportRoutes);
 
+  const intelRoutes = require('./routes/intel');
+  app.use('/api/intel', intelRoutes);
+
   app.get('/company/:slug', (_req, res) => res.sendFile(frontendIndex));
+  app.get('/intel/:slug', (_req, res) => res.sendFile(frontendIndex));
   app.get('/fund/:cik', (_req, res) => res.sendFile(frontendIndex));
   app.get('/fund/:cik/:series_id', (_req, res) => res.sendFile(frontendIndex));
   app.get('/admin/unresolved', (_req, res) => res.sendFile(frontendIndex));
@@ -64,6 +68,8 @@ function buildApp() {
     const pgClient = createPgShim(process.env.NPORT_PG_CONN);
     nportRoutes.deps.nportClient = pgClient;
     nportRoutes.deps.isConfigured = () => true;
+    intelRoutes.deps.nportClient = pgClient;
+    intelRoutes.deps.isConfigured = () => true;
   }
 
   return app;
