@@ -382,6 +382,78 @@ async function fetchAllResultsPaginated(buildQuery, pageSize = 1000) {
   return allResults;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Cached adviser-index for the /api/funds/new-managers matcher.
+//
+// Production bug 2026-05-19: the endpoint was rebuilding a 57K-row in-memory
+// index FROM SCRATCH on every request via OFFSET-paginated reads. Each request
+// took 30+ seconds just to load (offset-pagination on a 57K-row table is O(n)
+// per page). Combined with the variant-ladder matcher, requests hung past
+// curl/browser timeouts and the New Managers tab appeared to never load.
+//
+// Fix: build the index ONCE at module scope, refresh on TTL. Returns the
+// existing pending promise during a build so concurrent requests share it.
+// TTL = 1 hour. Adviser data updates roughly daily, so 1 hour is fresh enough.
+//
+// Refresh fires lazily on first request after expiry; doesn't block startup.
+// If the build errors, the previous index (if any) is kept and the error logs.
+// ─────────────────────────────────────────────────────────────────────────────
+const ADVISER_INDEX_TTL_MS = 60 * 60 * 1000;  // 1 hour
+let _adviserIndex = null;       // { advisersByNameExact, advisersByNamePrefix, builtAt, count }
+let _adviserIndexBuilding = null;  // Promise in flight, to dedupe concurrent rebuilds
+
+async function getAdviserIndex() {
+  const now = Date.now();
+  if (_adviserIndex && (now - _adviserIndex.builtAt) < ADVISER_INDEX_TTL_MS) {
+    return _adviserIndex;
+  }
+  if (_adviserIndexBuilding) {
+    return _adviserIndexBuilding;
+  }
+  _adviserIndexBuilding = (async () => {
+    const t0 = Date.now();
+    console.log('[adviser-index] Building (cache miss or expired)...');
+    const advisersData = await fetchAllResultsPaginated((from, to) => {
+      return advClient
+        .from('advisers_enriched')
+        .select('crd, adviser_name, adviser_entity_legal_name, primary_website, total_aum, aum_2023, aum_2024, aum_2025, aum_2026, registration_type')
+        .range(from, to);
+    });
+    const advisersByNameExact = {};
+    const advisersByNamePrefix = [];
+    let activeCount = 0;
+    let inactiveCount = 0;
+    const isAdviserActive = (adv) => adv.aum_2023 || adv.aum_2024 || adv.aum_2025 || adv.aum_2026 || adv.total_aum;
+    for (const adv of advisersData) {
+      const name1 = (adv.adviser_name || '').toLowerCase().trim();
+      const name2 = (adv.adviser_entity_legal_name || '').toLowerCase().trim();
+      if (!name1 && !name2) continue;
+      if (isAdviserActive(adv)) activeCount++; else inactiveCount++;
+      if (name1) advisersByNameExact[name1] = adv;
+      if (name2) advisersByNameExact[name2] = adv;
+      advisersByNamePrefix.push({ names: [name1, name2].filter(n => n), adv });
+    }
+    const built = {
+      advisersByNameExact,
+      advisersByNamePrefix,
+      builtAt: now,
+      count: advisersData.length,
+      activeCount,
+      inactiveCount,
+    };
+    console.log(`[adviser-index] Built in ${Date.now() - t0}ms — ${built.count} advisers (${activeCount} with AUM, ${inactiveCount} without)`);
+    _adviserIndex = built;
+    return built;
+  })().catch(err => {
+    console.error('[adviser-index] Build failed:', err.message);
+    // Keep stale index if present, so endpoint still works
+    return _adviserIndex || { advisersByNameExact: {}, advisersByNamePrefix: [], builtAt: now, count: 0 };
+  }).finally(() => {
+    _adviserIndexBuilding = null;
+  });
+  return _adviserIndexBuilding;
+}
+
 // API: Search Advisers
 app.get('/api/advisers/search', async (req, res) => {
   try {
@@ -1294,40 +1366,13 @@ app.get('/api/funds/new-managers', async (req, res) => {
     // (CRD 326490) — both legitimately registered State-ERAs with NULL AUM.
     // User caught it by Googling "Capital Factory form ADV"; the matcher was
     // structurally blind to them.
-    const advisersData = await fetchAllResultsPaginated((from, to) => {
-      return advClient
-        .from('advisers_enriched')
-        .select('crd, adviser_name, adviser_entity_legal_name, primary_website, total_aum, aum_2023, aum_2024, aum_2025, aum_2026, registration_type')
-        .range(from, to);
-    });
-
-    // Active = has any AUM data. Used as a CONFIDENCE flag on the response,
-    // NOT as a filter on the lookup population.
-    const isAdviserActive = (adv) => {
-      return adv.aum_2023 || adv.aum_2024 || adv.aum_2025 || adv.aum_2026 || adv.total_aum;
-    };
-
-    // Build lookup against ALL advisers (don't exclude State-ERAs / no-AUM).
-    // Skip blank-name rows (State-ERA scrape gaps).
-    const advisersByNameExact = {};
-    const advisersByNamePrefix = [];
-    let activeCount = 0;
-    let inactiveCount = 0;
-    advisersData.forEach(adv => {
-      const name1 = (adv.adviser_name || '').toLowerCase().trim();
-      const name2 = (adv.adviser_entity_legal_name || '').toLowerCase().trim();
-      if (!name1 && !name2) return;  // can't match a blank name
-
-      if (isAdviserActive(adv)) { activeCount++; } else { inactiveCount++; }
-
-      if (name1) advisersByNameExact[name1] = adv;
-      if (name2) advisersByNameExact[name2] = adv;
-      advisersByNamePrefix.push({
-        names: [name1, name2].filter(n => n),
-        adv,
-      });
-    });
-    console.log(`  Loaded ${advisersData.length} advisers for matching (${activeCount} with AUM, ${inactiveCount} without — both kept; AUM is a confidence signal, not a filter)`);
+    // Use the module-scope cached adviser index instead of rebuilding per request.
+    // See getAdviserIndex() comment block — fixes 30-second per-request hang.
+    const advIdx = await getAdviserIndex();
+    const advisersByNameExact = advIdx.advisersByNameExact;
+    const advisersByNamePrefix = advIdx.advisersByNamePrefix;
+    const isAdviserActive = (adv) => adv.aum_2023 || adv.aum_2024 || adv.aum_2025 || adv.aum_2026 || adv.total_aum;
+    console.log(`  Using cached adviser index: ${advIdx.count} advisers (built ${Math.round((Date.now() - advIdx.builtAt)/1000)}s ago)`);
 
     // Use shared base-name extractor from the detector lib. Production bug
     // 2026-05-11: the inline parseFundName regex was incorrectly stripping
