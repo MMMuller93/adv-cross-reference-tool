@@ -305,13 +305,19 @@ def fetch_formd_via_cross_reference(formd, aliases: list[dict[str, Any]]) -> dic
         last_id = 0
         capped = False
         while True:
+            # PFR pattern — exclude D/A amendments. Each Form D amendment is a
+            # re-filing of an existing offering, so including them shows the
+            # same fund multiple times. The original filing already captures
+            # the relationship. (form_d_filings.isamendment is a string
+            # 'true'/'false'; the PFR UI does the same .neq('isamendment','true').)
             query = (
                 formd.table("form_d_filings")
                 .select(
                     "id,accessionnumber,entityname,cik,series_master_llc,"
-                    "filing_date,totalofferingamount"
+                    "filing_date,totalofferingamount,isamendment"
                 )
                 .filter("entityname", "imatch", regex_pattern)
+                .neq("isamendment", "true")
                 .gt("id", last_id)
                 .order("id")
                 .limit(1000)
@@ -755,6 +761,41 @@ def materialize_company(
             print(f"      - {sa['alias']!r} ({sa['pattern_type']}): {sa['hits']}+ hits")
     print(f"    {len(all_matched)} alias matches (pre-routing)")
 
+    # 2c. Rule-based discovery (covers short-code/abbreviation gaps that
+    # alias matching can't safely handle). For Anthropic, this catches
+    # 'ANTH FUND', 'CC ANTH', and 'ANTH' + Sydecar/CGF2021 context.
+    # Returns a separate auto_include set + audit-only candidate set.
+    # See intelligence/formd_company_matcher.py for the rule library and
+    # intelligence/validate_anth_matcher.py for the validation harness.
+    #
+    # Sibling import — materialize_holders is run as a script, not a
+    # package member, so 'from intelligence.formd_company_matcher ...'
+    # would fail when invoked as 'python intelligence/materialize_holders.py'.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from formd_company_matcher import discover_via_rules  # type: ignore
+    rule_result = discover_via_rules(formd, company_slug)
+    rule_auto = rule_result["auto_include"]
+    rule_candidates = rule_result["candidate"]
+    rule_hits = rule_result["rule_hits"]
+    if rule_auto:
+        # Annotate to match the schema fetch_formd_via_cross_reference produces.
+        seen = {f.get("accessionnumber") for f in all_matched}
+        new_filings = []
+        for filing in rule_auto:
+            acc = filing.get("accessionnumber")
+            if acc and acc not in seen:
+                # _series_master must be set so the within-pool propagation
+                # step in fetch_formd_via_cross_reference's downstream logic
+                # would have worked; we mirror its annotation here.
+                filing["_series_master"] = parse_series_master(filing.get("entityname"))
+                new_filings.append(filing)
+                seen.add(acc)
+        all_matched = list(all_matched) + new_filings
+        print(f"    +{len(new_filings)} via formd_rule_match: {dict(rule_hits)}")
+    if rule_candidates:
+        print(f"    {len(rule_candidates)} candidate(s) flagged for manual review "
+              f"(NOT auto-published)")
+
     # 2a. Apply hardcoded negative-exclusion patterns
     negatives = NEGATIVE_PATTERNS_BY_COMPANY.get(company_slug, [])
     if negatives:
@@ -797,6 +838,8 @@ def materialize_company(
             "direct_pending": len(direct_filings),
             "resolutions_pending_total": len(resolutions_map),
             "suspicious_aliases": suspicious_aliases,
+            "rule_hits": rule_hits,
+            "rule_candidates_pending_review": len(rule_candidates),
         }
 
     # WRITES
@@ -929,6 +972,8 @@ def materialize_company(
         "resolutions": resolutions_written,
         "distinct_advisers": distinct_advisers,
         "suspicious_aliases": suspicious_aliases,
+        "rule_hits": rule_hits,
+        "rule_candidates_for_review": len(rule_candidates),
     }
 
 
