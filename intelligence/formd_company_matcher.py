@@ -49,6 +49,7 @@ class FormDRule:
     required_series_master_regexes: list[re.Pattern] = field(default_factory=list)
     required_related_names_regexes: list[re.Pattern] = field(default_factory=list)
     negative_entity_regexes: list[re.Pattern] = field(default_factory=list)
+    require_sydecar_context: bool = False
     notes: str = ""
 
 
@@ -86,9 +87,8 @@ ANTHROPIC_RULES: list[FormDRule] = [
         # many companies, NOT an Anthropic-specific master. The safe rule is
         # 'exact word ANTH + Sydecar platform context = Anthropic'.
         entity_regex=_compile(r"\bANTH\b"),
-        required_series_master_regexes=[],  # OR-logic below: handled in evaluate()
-        required_related_names_regexes=[],
         decision="auto_include",
+        require_sydecar_context=True,
         negative_entity_regexes=[
             _compile(r"\bANTHROPY\b"),       # 'Anthropy Master LLC' (different company)
             _compile(r"\bANTHRACITE\b"),
@@ -155,10 +155,62 @@ OPENAI_RULES: list[FormDRule] = [
 ]
 
 
+SPACEX_RULES: list[FormDRule] = [
+    FormDRule(
+        rule_key="spcx_word",
+        # 'SPCX' word-boundary. Universe survey (2026-05-19, n=7) showed
+        # 100% precision: SPCX SYND I-IV (Alt Financial / Bryan Casey),
+        # OurCrowd 'Investment in SpcX' / 'Investment in SpcX-QP', and one
+        # CGF2021 Sydecar (Brett Sagan). All clearly SpaceX.
+        entity_regex=_compile(r"\bSPCX\b"),
+        decision="auto_include",
+        notes="SPCX exact word. 7-row universe, 100% precision (2026-05-19).",
+    ),
+    FormDRule(
+        rule_key="spx_word_with_sydecar",
+        # 'SPX' word-boundary, BUT only when filing carries Sydecar/CGF2021
+        # context. SPX has 42 hits in entityname and some are ambiguous
+        # (SPX MGMT LLC, SPX Global Fund SPC, K Fund SPX, Hawker references
+        # — could be aviation/other companies). Sydecar guard restricts to
+        # the high-confidence subset: DCP SPX XI-XIV, DPV SPX V, LFG SPX,
+        # VELVET SPX Opportunity. These all have Brett Sagan / Taylor
+        # Hughes / LLC Sydecar in related_names.
+        entity_regex=_compile(r"\bSPX\b"),
+        decision="auto_include",
+        require_sydecar_context=True,
+        negative_entity_regexes=[
+            _compile(r"\bSPX\s+MGMT\b"),     # SPX MGMT LLC — internal fund
+            _compile(r"\bGLOBAL\s+EAGLE\b"), # Global Eagle (different co)
+            _compile(r"\bHAWKER\b"),         # Hawker aviation reference
+        ],
+        notes=(
+            "SPX exact word + Sydecar/CGF2021 context required. SPX universe "
+            "is more ambiguous than SPCX; Sydecar guard restricts to "
+            "high-confidence subset (DCP/DPV/LFG/VELVET SPX series)."
+        ),
+    ),
+]
+
+
+CANVA_RULES: list[FormDRule] = [
+    FormDRule(
+        rule_key="ourcrowd_cnva_phrase",
+        # OurCrowd uses 'Investment in <CompanyAbbreviation>' as a naming
+        # convention. 'Investment in Cnva' is the Canva instance (verified
+        # in 2026-05-19 universe survey).
+        entity_regex=_compile(r"OurCrowd\s*\(\s*Investment\s+in\s+Cnva\b"),
+        decision="auto_include",
+        notes="OurCrowd 'Investment in Cnva' SPV. 1-row universe.",
+    ),
+]
+
+
 # Map slug -> rules. Add new companies here.
 RULES_BY_COMPANY: dict[str, list[FormDRule]] = {
     "anthropic": ANTHROPIC_RULES,
     "openai": OPENAI_RULES,
+    "spacex": SPACEX_RULES,
+    "canva": CANVA_RULES,
 }
 
 
@@ -219,10 +271,12 @@ def evaluate_rule(rule: FormDRule, filing: dict[str, Any]) -> Optional[str]:
         for pat in rule.required_related_names_regexes:
             if not pat.search(related):
                 return None
-    # Special-case Sydecar guard for the short-code rule.
-    if rule.rule_key == "anth_word_with_cgf2021_or_sydecar":
-        if not _has_sydecar_context(filing):
-            return None
+    # Sydecar/CGF2021 platform-context guard. Used by short-code rules
+    # whose universe is ambiguous without platform anchoring (raw ANTH,
+    # raw SPX). Generalized from the original 'anth_word_with_cgf2021_or
+    # _sydecar' special case via FormDRule.require_sydecar_context.
+    if rule.require_sydecar_context and not _has_sydecar_context(filing):
+        return None
     return rule.decision
 
 

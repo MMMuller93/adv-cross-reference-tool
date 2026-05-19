@@ -65,9 +65,33 @@ PROFILES: dict[str, dict] = {
             "Khosla Ventures OAI",         # Khosla SPV
             "Type One OAI",                # Type One SPV
         ],
-        # Pre-emptive: no known FPs in current universe. Listed names are
-        # plausible word-boundary OAI hits that might appear and should NOT
-        # be Anthropic-style auto-included if they aren't OpenAI-related.
+        # Pre-emptive: no known FPs in current universe.
+        "false_positives": [],
+    },
+    "spacex": {
+        "short_code_regex": r"\mSP(CX|X)\M",
+        "long_alias_token": "SPACEX",
+        "true_positives": [
+            "SPCX SYND I",                 # Alt Financial
+            "OurCrowd (Investment in SpcX)",
+            "DCP SPX XIV",                 # CGF2021 Sydecar
+            "DPV SPX V",                   # DataPower + Sydecar
+            "LFG SPX",                     # Sydecar
+            "VELVET SPX Opportunity II",   # Sydecar
+        ],
+        # Ambiguous SPX hits that should NOT auto-include (no Sydecar guard).
+        "false_positives": [
+            "SPX MGMT LLC",
+            "Global Eagle",
+            "Hawker",
+        ],
+    },
+    "canva": {
+        "short_code_regex": r"\mCNVA\M",
+        "long_alias_token": "CANVA",
+        "true_positives": [
+            "OurCrowd (Investment in Cnva)",
+        ],
         "false_positives": [],
     },
 }
