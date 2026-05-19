@@ -202,6 +202,121 @@ EVENTS: list[dict[str, Any]] = [
         "confidence": 95,
         "notes": "Take-private completion by Permira. Codex-verified.",
     },
+
+    # =====================================================================
+    # Codex 2026-05-18 follow-up: 31 publishable+public/acquired seeds
+    # without lifecycle events were getting 'unknown' = eligible. Adding
+    # their IPO (and where applicable, take-private/acquisition) events.
+    # Confidence 90 on dates from widely-reported IPO press releases.
+    # =====================================================================
+
+    {"company_slug": "uipath", "event_date": "2021-04-21", "event_type": "ipo",
+     "status_after": "public", "source_name": "NYSE PATH IPO", "confidence": 90},
+
+    {"company_slug": "instacart", "event_date": "2023-09-19", "event_type": "ipo",
+     "status_after": "public", "source_name": "NASDAQ CART IPO (Maplebear)", "confidence": 90},
+
+    {"company_slug": "blue-apron", "event_date": "2017-06-29", "event_type": "ipo",
+     "status_after": "public", "source_name": "NYSE APRN IPO", "confidence": 90},
+    {"company_slug": "blue-apron", "event_date": "2023-11-13", "event_type": "take_private",
+     "status_after": "acquired_private", "source_name": "Wonder Group acquisition", "confidence": 85,
+     "notes": "Wonder Group take-private completion."},
+
+    {"company_slug": "toast", "event_date": "2021-09-22", "event_type": "ipo",
+     "status_after": "public", "source_name": "NYSE TOST IPO", "confidence": 90},
+
+    {"company_slug": "rivian", "event_date": "2021-11-10", "event_type": "ipo",
+     "status_after": "public", "source_name": "NASDAQ RIVN IPO", "confidence": 90},
+
+    {"company_slug": "airbnb", "event_date": "2020-12-10", "event_type": "ipo",
+     "status_after": "public", "source_name": "NASDAQ ABNB IPO", "confidence": 95},
+
+    {"company_slug": "figma", "event_date": "2025-07-31", "event_type": "ipo",
+     "status_after": "public", "source_name": "NYSE FIG IPO", "confidence": 90},
+
+    {"company_slug": "coupang", "event_date": "2021-03-11", "event_type": "ipo",
+     "status_after": "public", "source_name": "NYSE CPNG IPO", "confidence": 90},
+
+    {"company_slug": "compass-inc", "event_date": "2021-04-01", "event_type": "ipo",
+     "status_after": "public", "source_name": "NYSE COMP IPO", "confidence": 90},
+
+    {"company_slug": "avidxchange", "event_date": "2021-10-13", "event_type": "ipo",
+     "status_after": "public", "source_name": "NASDAQ AVDX IPO", "confidence": 90},
+    {"company_slug": "avidxchange", "event_date": "2025-05-06", "event_type": "take_private",
+     "status_after": "acquired_private", "source_name": "Corpay/TPG take-private", "confidence": 75,
+     "notes": "Take-private by TPG and Corpay (approximate date)."},
+
+    {"company_slug": "doordash", "event_date": "2020-12-09", "event_type": "ipo",
+     "status_after": "public", "source_name": "NYSE DASH IPO", "confidence": 95},
+
+    {"company_slug": "robinhood", "event_date": "2021-07-29", "event_type": "ipo",
+     "status_after": "public", "source_name": "NASDAQ HOOD IPO", "confidence": 95},
+
+    {"company_slug": "coursera", "event_date": "2021-03-31", "event_type": "ipo",
+     "status_after": "public", "source_name": "NYSE COUR IPO", "confidence": 90},
+
+    {"company_slug": "gitlab", "event_date": "2021-10-14", "event_type": "ipo",
+     "status_after": "public", "source_name": "NASDAQ GTLB IPO", "confidence": 90},
+
+    {"company_slug": "coinbase", "event_date": "2021-04-14", "event_type": "direct_listing",
+     "status_after": "public", "source_name": "NASDAQ COIN direct listing", "confidence": 95,
+     "notes": "Direct listing, NOT IPO."},
+
+    {"company_slug": "rent-the-runway", "event_date": "2021-10-27", "event_type": "ipo",
+     "status_after": "public", "source_name": "NASDAQ RENT IPO", "confidence": 90},
+
+    {"company_slug": "snowflake", "event_date": "2020-09-16", "event_type": "ipo",
+     "status_after": "public", "source_name": "NYSE SNOW IPO", "confidence": 95},
+
+    {"company_slug": "wework", "event_date": "2021-10-21", "event_type": "spac",
+     "status_after": "public", "source_name": "NYSE WE SPAC merger", "confidence": 90,
+     "notes": "SPAC merger with BowX Acquisition Corp."},
+    {"company_slug": "wework", "event_date": "2023-11-06", "event_type": "delisting",
+     "status_after": "private", "source_name": "WeWork Chapter 11 bankruptcy", "confidence": 90,
+     "notes": "Filed Ch 11. Emerged 2024 as private. Treating as 'private' since post-bankruptcy."},
+
+    {"company_slug": "sonder-corp", "event_date": "2022-01-19", "event_type": "spac",
+     "status_after": "public", "source_name": "NASDAQ SOND SPAC merger", "confidence": 85},
+
+    {"company_slug": "amplitude", "event_date": "2021-09-28", "event_type": "direct_listing",
+     "status_after": "public", "source_name": "NASDAQ AMPL direct listing", "confidence": 90},
+
+    {"company_slug": "recursion-pharmaceuticals", "event_date": "2021-04-16", "event_type": "ipo",
+     "status_after": "public", "source_name": "NASDAQ RXRX IPO", "confidence": 90},
+
+    {"company_slug": "confluent", "event_date": "2021-06-24", "event_type": "ipo",
+     "status_after": "public", "source_name": "NASDAQ CFLT IPO", "confidence": 90},
+
+    {"company_slug": "uber", "event_date": "2019-05-10", "event_type": "ipo",
+     "status_after": "public", "source_name": "NYSE UBER IPO", "confidence": 95},
+
+    {"company_slug": "ginkgo-bioworks", "event_date": "2021-09-17", "event_type": "spac",
+     "status_after": "public", "source_name": "NYSE DNA SPAC merger (Soaring Eagle)", "confidence": 90},
+
+    {"company_slug": "peloton", "event_date": "2019-09-26", "event_type": "ipo",
+     "status_after": "public", "source_name": "NASDAQ PTON IPO", "confidence": 95},
+
+    {"company_slug": "applovin", "event_date": "2021-04-15", "event_type": "ipo",
+     "status_after": "public", "source_name": "NASDAQ APP IPO", "confidence": 90},
+
+    {"company_slug": "krafton", "event_date": "2021-08-10", "event_type": "ipo",
+     "status_after": "public", "source_name": "KOSPI (Korea) IPO", "confidence": 85,
+     "notes": "Listed on KOSPI, not US exchange."},
+
+    {"company_slug": "dropbox", "event_date": "2018-03-23", "event_type": "ipo",
+     "status_after": "public", "source_name": "NASDAQ DBX IPO", "confidence": 95},
+
+    {"company_slug": "nubank", "event_date": "2021-12-09", "event_type": "ipo",
+     "status_after": "public", "source_name": "NYSE NU IPO", "confidence": 90},
+
+    {"company_slug": "udemy", "event_date": "2021-10-29", "event_type": "ipo",
+     "status_after": "public", "source_name": "NASDAQ UDMY IPO", "confidence": 90},
+
+    {"company_slug": "walkme", "event_date": "2021-06-16", "event_type": "ipo",
+     "status_after": "public", "source_name": "NASDAQ WKME IPO", "confidence": 90},
+    {"company_slug": "walkme", "event_date": "2024-09-04", "event_type": "take_private",
+     "status_after": "acquired_private", "source_name": "SAP acquisition", "confidence": 85,
+     "notes": "SAP take-private completion."},
 ]
 
 
