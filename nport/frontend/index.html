@@ -3,17 +3,246 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>N-PORT Holdings — Private Funds Radar</title>
+    <title>N-PORT Holdings - Private Funds Radar</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
-      body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
+      :root {
+        --nport-ink: #111827;
+        --nport-muted: #667085;
+        --nport-faint: #98a2b3;
+        --nport-line: #d7dde5;
+        --nport-soft-line: #edf1f5;
+        --nport-paper: #f6f7f8;
+        --nport-panel: #ffffff;
+        --nport-rail: #111827;
+        --nport-accent: #315b7d;
+        --nport-accent-soft: #e7eef4;
+        --nport-warning: #8a5f2d;
+        --nport-danger: #8c4f45;
+      }
+
+      html { scroll-behavior: smooth; }
+      body {
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--nport-paper);
+        color: var(--nport-ink);
+      }
+
+      body > header { display: none; }
+      body > main > #root { max-width: none; padding: 0; }
+
+      .nport-workspace {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 224px minmax(0, 1fr);
+        background:
+          linear-gradient(90deg, rgba(17,24,39,0.03) 0, rgba(17,24,39,0) 420px),
+          var(--nport-paper);
+      }
+      .nport-rail {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+        padding: 18px 16px;
+        background: var(--nport-rail);
+        color: #f9fafb;
+        border-right: 1px solid rgba(255,255,255,0.08);
+      }
+      .nport-rail-link {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-size: 12px;
+        color: #cbd5e1;
+      }
+      .nport-rail-link:hover { background: rgba(255,255,255,0.06); color: #ffffff; }
+      .nport-rail-chip {
+        border: 1px solid rgba(255,255,255,0.09);
+        border-radius: 6px;
+        padding: 8px;
+        background: rgba(255,255,255,0.03);
+      }
+      .nport-rail-kicker {
+        font-size: 10px;
+        line-height: 1;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        color: #94a3b8;
+      }
+      .nport-main {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .nport-topbar {
+        position: sticky;
+        top: 0;
+        z-index: 30;
+        height: 52px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        padding: 0 28px;
+        background: rgba(255,255,255,0.86);
+        backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--nport-line);
+      }
+      .nport-content {
+        width: 100%;
+        max-width: 1480px;
+        margin: 0 auto;
+        padding: 22px 28px 44px;
+      }
+      .nport-page-head {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 18px;
+      }
+      .nport-title {
+        font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+        font-size: 28px;
+        line-height: 1.05;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+      .nport-panel {
+        background: var(--nport-panel);
+        border: 1px solid var(--nport-line);
+        border-radius: 8px;
+        box-shadow: 0 1px 0 rgba(17, 24, 39, .03);
+      }
+      .nport-panel + .nport-panel { margin-top: 16px; }
+      .nport-panel-header {
+        min-height: 48px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--nport-soft-line);
+      }
+      .nport-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: 12px;
+      }
+      .nport-table thead th {
+        padding: 10px 12px;
+        background: #f8fafc;
+        border-bottom: 1px solid var(--nport-line);
+        color: #667085;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+      }
+      .nport-table tbody td {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--nport-soft-line);
+        vertical-align: top;
+      }
+      .nport-table tbody tr:hover td { background: #f8fafc; }
+      .nport-table tbody tr:last-child td { border-bottom: 0; }
+      .nport-metric-strip {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        border: 1px solid var(--nport-line);
+        border-radius: 8px;
+        background: #fff;
+        overflow: hidden;
+      }
+      .nport-metric-strip > * {
+        padding: 14px 16px;
+        border-right: 1px solid var(--nport-soft-line);
+      }
+      .nport-metric-strip > *:last-child { border-right: 0; }
+      .nport-metric-strip-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .nport-subnav {
+        position: sticky;
+        top: 52px;
+        z-index: 20;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0;
+        margin: 0 0 16px;
+        border: 1px solid var(--nport-line);
+        border-radius: 8px;
+        background: rgba(255,255,255,.9);
+        backdrop-filter: blur(10px);
+        overflow: hidden;
+      }
+      .nport-subnav a {
+        border-right: 1px solid var(--nport-soft-line);
+        border-radius: 0;
+      }
+      .nport-subnav a:last-child { border-right: 0; }
+      .nport-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        border-radius: 6px;
+        border: 1px solid var(--nport-line);
+        background: #fff;
+        color: #344054;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1;
+        padding: 8px 10px;
+      }
+      .nport-button:hover { background: #f8fafc; color: #111827; }
+      .nport-button-primary {
+        border-color: #22364d;
+        background: #22364d;
+        color: #fff;
+      }
+      .nport-button-primary:hover { background: #1b2d41; color: #fff; }
+      .nport-status {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 4px;
+        border: 1px solid var(--nport-line);
+        background: #fff;
+        color: #475467;
+        padding: 2px 6px;
+        font-size: 10px;
+        line-height: 1.4;
+        font-weight: 700;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+      }
+      .nport-input {
+        border: 1px solid var(--nport-line);
+        border-radius: 8px;
+        background: #fff;
+      }
+      .nport-input:focus {
+        outline: none;
+        border-color: var(--nport-accent);
+        box-shadow: 0 0 0 3px rgba(49,91,125,.12);
+      }
+
+      @media (max-width: 900px) {
+        .nport-workspace { grid-template-columns: 1fr; }
+        .nport-rail { display: none; }
+        .nport-content { padding: 18px 16px 32px; }
+        .nport-page-head { align-items: flex-start; flex-direction: column; }
+        .nport-metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .nport-metric-strip > * { border-bottom: 1px solid var(--nport-soft-line); }
+      }
     </style>
   </head>
-  <body class="bg-gray-50 text-slate-800">
+  <body>
     <header class="bg-white border-b border-slate-200">
       <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
         <h1 class="text-xl font-semibold tracking-tight">N-PORT Holdings (standalone)</h1>

@@ -1,5 +1,5 @@
 // ============================================================================
-// N-PORT private-company pages — Company / Fund / Admin triage.
+// N-PORT private-company pages - Company / Fund / Admin triage.
 // Styled to match existing app.js (Tailwind, Chart.js, gray-50 surfaces,
 // slate accents). Loaded only when window.location.pathname matches one of:
 //   /company/:slug
@@ -12,7 +12,7 @@
 const { useState: useStateN, useEffect: useEffectN, useMemo: useMemoN, useRef: useRefN, useCallback: useCallbackN } = React;
 
 // ---------------------------------------------------------------------------
-// Route matcher — exposed for app.js boot dispatch.
+// Route matcher - exposed for app.js boot dispatch.
 // ---------------------------------------------------------------------------
 window.matchNportRoute = function (pathname) {
   if (!pathname) pathname = window.location.pathname;
@@ -36,7 +36,7 @@ window.matchNportRoute = function (pathname) {
 };
 
 // ---------------------------------------------------------------------------
-// Mock mode detection — ?mock=1 or window.NPORT_FORCE_MOCK = true.
+// Mock mode detection - ?mock=1 or window.NPORT_FORCE_MOCK = true.
 // ---------------------------------------------------------------------------
 const isMockMode = () => {
   if (window.NPORT_FORCE_MOCK === true) return true;
@@ -45,7 +45,7 @@ const isMockMode = () => {
 };
 
 // ---------------------------------------------------------------------------
-// fetchNport — uniform fetch helper. In mock mode returns fixture payload.
+// fetchNport - uniform fetch helper. In mock mode returns fixture payload.
 // Always resolves to { ok: bool, data: any|null, error: string|null }.
 // ---------------------------------------------------------------------------
 async function fetchNport(url, options) {
@@ -109,7 +109,7 @@ const writeNportWatchlist = (slugs) => {
 };
 
 // ---------------------------------------------------------------------------
-// Formatting helpers (kept local — app.js doesn't expose its helpers).
+// Formatting helpers (kept local - app.js doesn't expose its helpers).
 // ---------------------------------------------------------------------------
 const fmtUsd = (n) => {
   if (n === null || n === undefined) return '—';
@@ -394,56 +394,82 @@ const IconChevronDown = (p) => <Svg {...p}><path d="m6 9 6 6 6-6"/></Svg>;
 const IconSearch     = (p) => <Svg {...p}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></Svg>;
 
 // ---------------------------------------------------------------------------
-// Shared chrome — top header bar (logo + back button + mock indicator)
+// Shared chrome - navigation shell.
 // ---------------------------------------------------------------------------
 const PageChrome = ({ children, breadcrumb }) => {
   const goHome = (e) => { e.preventDefault(); window.location.href = '/'; };
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="border-b border-gray-200 bg-white">
-        <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <a href="/" onClick={goHome} className="flex items-center gap-2 text-sm font-semibold text-gray-900 tracking-tight">
-              <IconBuilding className="w-4 h-4 text-slate-600" />
-              Private Funds Radar
-            </a>
-            {breadcrumb && (
-              <span className="text-xs text-gray-400 ml-2">/ {breadcrumb}</span>
-            )}
+    <div className="nport-workspace">
+      <aside className="nport-rail">
+        <div>
+          <a href="/" onClick={goHome} className="block text-white">
+            <div className="nport-rail-kicker">Private Funds Radar</div>
+            <div className="mt-2 flex items-center gap-2 text-lg font-semibold tracking-tight">
+              <IconBuilding className="w-4 h-4 text-slate-300" />
+              N-PORT
+            </div>
+          </a>
+        </div>
+        <nav className="space-y-1">
+          <a className="nport-rail-link" href="/" onClick={goHome}><span>Companies</span><span>Index</span></a>
+          <a className="nport-rail-link" href="/admin/unresolved"><span>Unresolved</span><span>QA</span></a>
+          <a className="nport-rail-link" href="/company/anthropic"><span>Anthropic</span><span>watch</span></a>
+        </nav>
+        <div className="mt-auto space-y-4">
+          <div className="nport-rail-chip">
+            <div className="nport-rail-kicker">Coverage</div>
+            <div className="mt-2 grid grid-cols-2 gap-3 text-xs text-slate-200">
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-slate-500">Source</div>
+                <div>SEC EDGAR</div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-slate-500">Cadence</div>
+                <div>Quarterly</div>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            {isMockMode() && (
-              <span className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                mock data
-              </span>
-            )}
-            <a href="/" onClick={goHome} className="text-xs text-slate-600 hover:text-slate-800 inline-flex items-center gap-1.5">
+          {isMockMode() && (
+            <span className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded bg-amber-100 text-amber-900">
+              mock data
+            </span>
+          )}
+        </div>
+      </aside>
+      <div className="nport-main">
+        <header className="nport-topbar">
+          <div className="flex items-center gap-3 min-w-0">
+            <a href="/" onClick={goHome} className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 hover:text-slate-900">PFR</a>
+            {breadcrumb && <span className="truncate text-xs text-slate-500">/ {breadcrumb}</span>}
+          </div>
+          <div className="flex items-center gap-4">
+            {isMockMode() && <SourceBadge label="mock" />}
+            <a href="/" onClick={goHome} className="text-xs text-slate-600 hover:text-slate-900 inline-flex items-center gap-1.5">
               <IconArrowLeft className="w-3.5 h-3.5" /> Dashboard
             </a>
           </div>
-        </div>
-      </header>
-      <main className="max-w-7xl mx-auto px-6 py-8">{children}</main>
+        </header>
+        <main className="nport-content">{children}</main>
+      </div>
     </div>
   );
 };
 
 const SectionCard = ({ id, title, subtitle, right, children }) => (
-  <section id={id} className="bg-white rounded-2xl ring-1 ring-gray-200 mb-6 overflow-hidden scroll-mt-24">
-    <header className="px-6 py-4 border-b border-gray-100 flex items-start justify-between">
+  <section id={id} className="nport-panel mb-4 overflow-hidden scroll-mt-24">
+    <header className="nport-panel-header flex items-start justify-between gap-4">
       <div>
-        <h2 className="text-sm font-semibold text-gray-900 tracking-tight">{title}</h2>
+        <h2 className="text-[13px] font-semibold text-gray-900 tracking-tight">{title}</h2>
         {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
       </div>
       {right}
     </header>
-    <div className="px-6 py-5">{children}</div>
+    <div className="px-4 py-4">{children}</div>
   </section>
 );
 
 const SourceBadge = ({ label }) => (
-  <span className="inline-flex items-center rounded-md bg-white px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500 ring-1 ring-slate-200">
+  <span className="inline-flex items-center whitespace-nowrap rounded-md bg-white px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500 ring-1 ring-slate-200">
     {label}
   </span>
 );
@@ -482,8 +508,51 @@ const ErrorState = ({ message }) => (
   </div>
 );
 
+const CompanySignalTable = ({ title, subtitle, companies }) => (
+  <section className="nport-panel mb-4 overflow-hidden">
+    <header className="nport-panel-header flex items-start justify-between gap-4">
+      <div>
+        <h2 className="text-[13px] font-semibold text-gray-900 tracking-tight">{title}</h2>
+        {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
+      </div>
+      <SourceBadge label="N-PORT" />
+    </header>
+    <div className="overflow-x-auto">
+      <table className="nport-table">
+        <thead>
+          <tr>
+            <th className="text-left py-2.5 px-4">Company</th>
+            <th className="text-left py-2.5 px-3">Sector</th>
+            <th className="text-right py-2.5 px-3">Exposure</th>
+            <th className="text-right py-2.5 px-3">Holders</th>
+            <th className="text-left py-2.5 px-3">Snapshot</th>
+            <th className="text-right py-2.5 px-4">Open</th>
+          </tr>
+        </thead>
+        <tbody>
+          {companies.map((c) => (
+            <tr key={c.slug}>
+              <td className="py-2.5 px-4">
+                <a href={`/company/${c.slug}`} className="font-semibold text-gray-900 hover:underline">{companyDisplayName(c)}</a>
+                <div className="text-[11px] text-gray-500">{c.primary_domain || c.slug}</div>
+              </td>
+              <td className="py-2.5 px-3 text-gray-700">{titleCaseSector(c.sector)}</td>
+              <td className="py-2.5 px-3 text-right tabular-nums font-semibold text-gray-900">{fmtUsd(c.nport_latest_value_usd)}</td>
+              <td className="py-2.5 px-3 text-right tabular-nums text-gray-700">{fmtInt(c.nport_latest_holder_count)}</td>
+              <td className="py-2.5 px-3 text-gray-700">{fmtDate(c.nport_latest_period_date)}</td>
+              <td className="py-2.5 px-4 text-right">
+                <a href={`/company/${c.slug}`} className="text-xs text-slate-600 hover:text-slate-900 inline-flex items-center gap-1">open <IconExternal className="w-3 h-3" /></a>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </section>
+);
+
 // ---------------------------------------------------------------------------
-// Dashboard — /
+// Dashboard - /
 // ---------------------------------------------------------------------------
 const DashboardPage = () => {
   const [loading, setLoading] = useStateN(true);
@@ -566,89 +635,49 @@ const DashboardPage = () => {
 
   return (
     <PageChrome breadcrumb="n-port">
-      <div className="bg-white rounded-2xl ring-1 ring-gray-200 mb-6 p-6">
-        <div className="flex items-start justify-between gap-6 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-900">N-PORT private-company holdings</h1>
-            <p className="text-sm text-gray-600 mt-1 max-w-3xl">
-              Search registered funds and ETFs that disclose positions in private companies. Open a company to inspect fund holders, security classes, marks, and SEC source filings.
-            </p>
-          </div>
-          <div className="text-right shrink-0">
-            <div className="text-[10px] uppercase tracking-wider text-gray-400">Companies seeded</div>
-            <div className="text-lg font-semibold text-gray-900 tabular-nums">{fmtInt(companies.length)}</div>
-          </div>
+      <div className="nport-page-head">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500">N-PORT intelligence</div>
+          <h1 className="nport-title mt-1">Private-company holdings</h1>
         </div>
-        <div className="mt-6 relative">
+        <div className="flex items-end gap-8">
+          <Stat label="Companies seeded" value={fmtInt(companies.length)} source="seed" />
+          <Stat label="With N-PORT exposure" value={fmtInt(companies.filter((c) => Number(c.nport_latest_value_usd || 0) > 0).length)} source="N-PORT" />
+        </div>
+      </div>
+
+      <div className="nport-panel mb-4 p-4">
+        <div className="relative">
           <IconSearch className="w-4 h-4 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search company, domain, or sector..."
-            className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 py-3 text-sm outline-none focus:bg-white focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+            className="nport-input w-full pl-10 pr-4 py-3 text-sm text-gray-900 placeholder-gray-400"
           />
         </div>
       </div>
 
       {focusCompanies.length > 0 && !q && (
-        <section className="mb-6">
-          <div className="flex items-end justify-between gap-4 mb-3">
-            <div>
-              <h2 className="text-sm font-semibold text-gray-900">High-signal companies</h2>
-              <p className="text-xs text-gray-500">A short watchlist for the names most likely to matter in N-PORT private-company analysis.</p>
-            </div>
-            <div className="text-xs text-gray-500">Search above for the full seeded universe.</div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-          {focusCompanies.map((c) => (
-            <a key={c.slug} href={`/company/${c.slug}`} className="bg-white rounded-2xl ring-1 ring-gray-200 p-5 hover:ring-slate-300 hover:shadow-sm transition">
-              <div className="text-sm font-semibold text-gray-900">{companyDisplayName(c)}</div>
-              <div className="text-xs text-gray-500 mt-1">{titleCaseSector(c.sector)}</div>
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <Stat label="N-PORT exposure" value={fmtUsd(c.nport_latest_value_usd)} source="N-PORT" />
-                <Stat label="Fund holders" value={fmtInt(c.nport_latest_holder_count)} source="N-PORT" />
-              </div>
-              <div className="mt-3 text-[11px] text-gray-500">Latest snapshot {fmtDate(c.nport_latest_period_date)}</div>
-            </a>
-          ))}
-          </div>
-        </section>
+        <CompanySignalTable
+          title="High-signal companies"
+          subtitle="Ranked by current disclosed exposure and holder breadth."
+          companies={focusCompanies}
+        />
       )}
 
       {watchedCompanies.length > 0 && !q && (
-        <section className="mb-6">
-          <div className="flex items-end justify-between gap-4 mb-3">
-            <div>
-              <h2 className="text-sm font-semibold text-gray-900">Followed companies</h2>
-              <p className="text-xs text-gray-500">Local watchlist for names you want to revisit quickly.</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => { writeNportWatchlist([]); setWatchlistSlugs([]); }}
-              className="text-xs text-slate-500 hover:text-slate-800"
-            >
-              Clear
-            </button>
+        <section className="relative">
+          <div className="absolute right-3 top-3 z-10">
+            <button type="button" onClick={() => { writeNportWatchlist([]); setWatchlistSlugs([]); }} className="text-xs text-slate-500 hover:text-slate-900">Clear</button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-          {watchedCompanies.map((c) => (
-            <a key={c.slug} href={`/company/${c.slug}`} className="bg-white rounded-2xl ring-1 ring-gray-200 p-5 hover:ring-slate-300 hover:shadow-sm transition">
-              <div className="text-sm font-semibold text-gray-900">{companyDisplayName(c)}</div>
-              <div className="text-xs text-gray-500 mt-1">{titleCaseSector(c.sector)}</div>
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <Stat label="N-PORT exposure" value={fmtUsd(c.nport_latest_value_usd)} source="N-PORT" />
-                <Stat label="Fund holders" value={fmtInt(c.nport_latest_holder_count)} source="N-PORT" />
-              </div>
-              <div className="mt-3 text-[11px] text-gray-500">Latest snapshot {fmtDate(c.nport_latest_period_date)}</div>
-            </a>
-          ))}
-          </div>
+          <CompanySignalTable title="Followed companies" subtitle="Local watchlist." companies={watchedCompanies} />
         </section>
       )}
 
       <SectionCard title={q ? 'Search results' : 'Company search'} subtitle={q ? `${fmtInt(searchResults.length)} shown` : `${fmtInt(companies.length)} seeded companies available`}>
         {!q ? (
-          <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-5 py-8 text-center">
+          <div className="border border-dashed border-gray-200 bg-gray-50 px-5 py-8 text-center">
             <p className="text-sm font-medium text-gray-900">Search by company, sector, domain, or alias.</p>
             <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
               {['SpaceX', 'OpenAI', 'Databricks', 'Stripe'].map((term) => (
@@ -656,7 +685,7 @@ const DashboardPage = () => {
                   key={term}
                   type="button"
                   onClick={() => setQuery(term)}
-                  className="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-gray-300 hover:text-gray-900"
+                  className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-gray-300 hover:text-gray-900"
                 >
                   {term}
                 </button>
@@ -667,8 +696,8 @@ const DashboardPage = () => {
           <p className="text-sm text-gray-500">No companies match this search.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-[11px] uppercase tracking-wider text-gray-400 border-b border-gray-100">
+            <table className="nport-table">
+              <thead>
                 <tr>
                   <th className="text-left py-2 pr-3">Company</th>
                   <th className="text-left pr-3">Sector</th>
@@ -706,10 +735,10 @@ const DashboardPage = () => {
 };
 
 // ---------------------------------------------------------------------------
-// Charts — value-over-time (single line) and markup history (multi-line).
+// Charts - value-over-time (single line) and markup history (multi-line).
 // Mirrors the Chart.js wrapper style used in app.js HistoricalChart.
 // ---------------------------------------------------------------------------
-const TimeSeriesChart = ({ points, label = 'Value', color = '#4F46E5' }) => {
+const TimeSeriesChart = ({ points, label = 'Value', color = '#315b7d' }) => {
   const ref = useRefN(null);
   const inst = useRefN(null);
 
@@ -719,7 +748,7 @@ const TimeSeriesChart = ({ points, label = 'Value', color = '#4F46E5' }) => {
     const ctx = ref.current.getContext('2d');
     const vals = points.map(p => p.value_usd);
     const positive = vals.length >= 2 ? vals[vals.length - 1] >= vals[0] : true;
-    const line = positive ? '#10b981' : '#ef4444';
+    const line = positive ? '#315b7d' : '#8c4f45';
 
     inst.current = new Chart(ctx, {
       type: 'line',
@@ -734,8 +763,8 @@ const TimeSeriesChart = ({ points, label = 'Value', color = '#4F46E5' }) => {
             const { ctx: cx, chartArea } = chart;
             if (!chartArea) return null;
             const g = cx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
-            g.addColorStop(0.05, positive ? 'rgba(16,185,129,0.25)' : 'rgba(239,68,68,0.25)');
-            g.addColorStop(0.95, positive ? 'rgba(16,185,129,0)'    : 'rgba(239,68,68,0)');
+            g.addColorStop(0.05, positive ? 'rgba(49,91,125,0.20)' : 'rgba(140,79,69,0.18)');
+            g.addColorStop(0.95, positive ? 'rgba(49,91,125,0)'    : 'rgba(140,79,69,0)');
             return g;
           },
           borderWidth: 2,
@@ -775,7 +804,7 @@ const TimeSeriesChart = ({ points, label = 'Value', color = '#4F46E5' }) => {
 const MarkupHistoryChart = ({ series }) => {
   const ref = useRefN(null);
   const inst = useRefN(null);
-  const palette = ['#4F46E5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+  const palette = ['#315b7d', '#6f7f68', '#7c6f64', '#8a6d3b', '#7b5f72', '#4f6f7a'];
 
   useEffectN(() => {
     if (!ref.current || !series || series.length === 0) return;
@@ -833,7 +862,7 @@ const MarkupHistoryChart = ({ series }) => {
 };
 
 // ---------------------------------------------------------------------------
-// Company Page  —  /company/:slug
+// Company Page - /company/:slug
 // ---------------------------------------------------------------------------
 const CompanyPage = ({ slug }) => {
   const [loading, setLoading] = useStateN(true);
@@ -992,7 +1021,7 @@ const CompanyPage = ({ slug }) => {
   return (
     <PageChrome breadcrumb={`company / ${slug}`}>
       {/* Header */}
-      <div className="bg-white rounded-2xl ring-1 ring-gray-200 mb-6 p-6">
+      <div className="nport-panel mb-4 p-5">
         <div className="flex items-start justify-between gap-6">
           <div>
             <div className="flex items-baseline gap-3 flex-wrap">
@@ -1004,7 +1033,7 @@ const CompanyPage = ({ slug }) => {
                 </a>
               )}
               {company.lifecycle_status && company.lifecycle_status !== 'private' && (
-                <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">{company.lifecycle_status}</span>
+                <span className="nport-status">{company.lifecycle_status}</span>
               )}
             </div>
             {company.description && (
@@ -1023,14 +1052,14 @@ const CompanyPage = ({ slug }) => {
             <button
               type="button"
               onClick={toggleWatchlist}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium ring-1 ${isWatched ? 'bg-slate-800 text-white ring-slate-800' : 'bg-white text-slate-700 ring-gray-200 hover:bg-gray-50'}`}
+              className={`nport-button ${isWatched ? 'nport-button-primary' : ''}`}
             >
               {isWatched ? 'Following' : 'Follow company'}
             </button>
           </div>
         </div>
 
-        <div className="mt-6 grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="mt-5 nport-metric-strip">
           <Stat label="Disclosed N-PORT exposure" value={fmtUsd(disclosedValue)} hint={latestSnapshotDate ? `as of ${fmtDate(latestSnapshotDate)}` : 'latest period'} source="N-PORT" />
           <Stat label="Distinct fund-family holders" value={fmtInt(distinctFilers)} source="N-PORT" />
           <Stat label="Last known valuation" value={fmtUsd(company.latest_known_valuation_usd)} source="seed" />
@@ -1039,15 +1068,15 @@ const CompanyPage = ({ slug }) => {
         </div>
       </div>
 
-      <nav className="mb-6 flex flex-wrap gap-2">
+      <nav className="nport-subnav">
         {companyTabs.map((tab) => (
           <a
             key={tab.href}
             href={tab.href}
-            className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-medium text-slate-700 ring-1 ring-gray-200 hover:bg-gray-50 hover:text-slate-900"
+            className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-gray-50 hover:text-slate-900"
           >
             <span>{tab.label}</span>
-            <span className="rounded-md bg-slate-50 px-1.5 py-0.5 text-[10px] tabular-nums text-slate-500 ring-1 ring-slate-100">{fmtInt(tab.count)}</span>
+            <span className="nport-status !text-[9px] !px-1.5 !py-0.5">{fmtInt(tab.count)}</span>
           </a>
         ))}
       </nav>
@@ -1060,13 +1089,13 @@ const CompanyPage = ({ slug }) => {
           {latestMarks.classes.length === 0 ? (
             <p className="text-sm text-gray-500">No recent marks.</p>
           ) : (
-            <table className="w-full text-sm">
-              <thead className="text-[11px] uppercase tracking-wider text-gray-400">
+            <table className="nport-table">
+              <thead>
                 <tr><th className="text-left py-2">Security class</th><th className="text-right">Median value / share</th><th className="text-right">Holders</th><th className="text-right">Total shares / units</th></tr>
               </thead>
               <tbody>
                 {latestMarks.classes.map((c) => (
-                  <tr key={c.share_class} className="border-t border-gray-100">
+                  <tr key={c.share_class}>
                     <td className="py-2.5 font-medium text-gray-900">{c.share_class}</td>
                     <td className="py-2.5 text-right tabular-nums text-gray-900">{fmtUsdPerShare(c.median_per_share)}</td>
                     <td className="py-2.5 text-right tabular-nums text-gray-700">{fmtInt(c.holders)}</td>
@@ -1092,8 +1121,8 @@ const CompanyPage = ({ slug }) => {
                     <div>
                       <div className="text-sm font-medium text-gray-900">
                         {d.share_class}{' '}
-                        {isNew && <span className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-white text-slate-600 ring-1 ring-slate-200">new</span>}
-                        {isRepricing && <span className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-white text-slate-600 ring-1 ring-slate-200">repricing event</span>}
+                        {isNew && <span className="ml-2 nport-status">new</span>}
+                        {isRepricing && <span className="ml-2 nport-status">repricing event</span>}
                       </div>
                       <div className="text-[11px] text-gray-500 mt-0.5">
                         {fmtUsdPerShare(d.prev_per_share)} → <span className="font-semibold text-gray-700">{fmtUsdPerShare(d.curr_per_share)}</span>
@@ -1101,7 +1130,7 @@ const CompanyPage = ({ slug }) => {
                       </div>
                       {d.note && <div className="text-[11px] text-rose-600 mt-0.5">{d.note}</div>}
                     </div>
-                    <div className={`text-sm font-semibold inline-flex items-center gap-1 ${positive ? 'text-emerald-600' : 'text-rose-600'} ${isNew ? 'opacity-0' : ''}`}>
+                    <div className={`text-sm font-semibold inline-flex items-center gap-1 ${positive ? 'text-slate-700' : 'text-rose-700'} ${isNew ? 'opacity-0' : ''}`}>
                       {positive ? <IconTrendUp className="w-4 h-4" /> : <IconTrendDown className="w-4 h-4" />}
                       {fmtPct(d.pct_change, true)}
                     </div>
@@ -1122,11 +1151,11 @@ const CompanyPage = ({ slug }) => {
           <div className="flex flex-wrap justify-end gap-2">
             <SourceBadge label="N-PORT" />
             <button type="button" onClick={exportCurrentHolders}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-gray-200 hover:bg-gray-50">
+              className="nport-button">
               <IconDownload className="w-3.5 h-3.5" /> Current CSV
             </button>
             <button type="button" onClick={exportAllPositions} disabled={exportingPositions}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900 disabled:opacity-60">
+              className="nport-button nport-button-primary disabled:opacity-60">
               <IconDownload className="w-3.5 h-3.5" /> {exportingPositions ? 'Exporting...' : 'All positions CSV'}
             </button>
           </div>
@@ -1141,8 +1170,8 @@ const CompanyPage = ({ slug }) => {
           <p className="text-sm text-gray-500">No holders reported.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-[11px] uppercase tracking-wider text-gray-400 border-b border-gray-100">
+            <table className="nport-table">
+              <thead>
                 <tr>
                   <SortableHeader label="Fund family" sortKey="fund" sort={holderSort} onSort={setHolderSortKey} className="py-2 pr-3" />
                   <SortableHeader label="Portfolio snapshot" sortKey="snapshot" sort={holderSort} onSort={setHolderSortKey} className="pr-3" />
@@ -1167,7 +1196,7 @@ const CompanyPage = ({ slug }) => {
                   const mark = currentMark(h);
                   return (
                     <React.Fragment key={key}>
-                      <tr className="border-b border-gray-50 hover:bg-gray-50">
+                      <tr>
                         <td className="py-2.5 pr-3">
                           <a href={fundUrl} className="font-medium text-gray-900 hover:underline">{h.registrant_name}</a>
                           <div className="text-[11px] text-gray-500">
@@ -1197,7 +1226,7 @@ const CompanyPage = ({ slug }) => {
                         </td>
                       </tr>
                       {isExpanded && (
-                        <tr className="bg-slate-50/70 border-b border-gray-100">
+                        <tr className="bg-slate-50/70">
                           <td colSpan="9" className="px-4 py-3">
                             <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
                               <Detail label="Raw security name" value={h.raw_issuer_name} />
@@ -1342,7 +1371,7 @@ const stripCikLeadingZeros = (cik) => {
 };
 
 // ---------------------------------------------------------------------------
-// Fund Page — /fund/:cik/:series_id
+// Fund Page - /fund/:cik/:series_id
 // ---------------------------------------------------------------------------
 const FundPage = ({ cik, seriesId }) => {
   const [loading, setLoading] = useStateN(true);
@@ -1426,7 +1455,7 @@ const FundPage = ({ cik, seriesId }) => {
   return (
     <PageChrome breadcrumb={`fund / ${pageTitle}`}>
       {/* Header */}
-      <div className="bg-white rounded-2xl ring-1 ring-gray-200 mb-6 p-6">
+      <div className="nport-panel mb-4 p-5">
         <div className="flex items-start justify-between gap-6 flex-wrap">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">{pageTitle}</h1>
@@ -1445,7 +1474,7 @@ const FundPage = ({ cik, seriesId }) => {
               )}
             </p>
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="nport-metric-strip nport-metric-strip-3">
             <Stat label="Fund NAV" value={fmtUsd(latestNav)} hint={fmtDate(latestPositionDate)} source="N-PORT" />
             <Stat label="Private-company exposure" value={fmtUsd(privateExposureUsd)} source="N-PORT" />
             <Stat label="% of NAV" value={exposurePct != null ? fmtPct(exposurePct, false) : '—'} source="N-PORT" />
@@ -1513,23 +1542,23 @@ const FundPage = ({ cik, seriesId }) => {
         {managers.length === 0 ? (
           <p className="text-sm text-gray-500">No managers on record yet.</p>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="text-[11px] uppercase tracking-wider text-gray-400">
+          <table className="nport-table">
+            <thead>
               <tr><th className="text-left py-2">Name</th><th className="text-left">Role</th><th className="text-left">Tenure since</th><th className="text-left">Status</th></tr>
             </thead>
             <tbody>
               {managers.map((m, i) => (
-                <tr key={i} className="border-t border-gray-100">
+                <tr key={i}>
                   <td className="py-2.5 font-medium text-gray-900">{m.pm_name}</td>
                   <td className="py-2.5 text-gray-700">{m.pm_role}</td>
                   <td className="py-2.5 text-gray-700">{fmtDate(m.pm_managing_since)}</td>
                   <td className="py-2.5">
                     {m.retirement_date ? (
-                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-white text-slate-700 ring-1 ring-slate-200">Retiring {fmtDate(m.retirement_date)}</span>
+                      <span className="nport-status">Retiring {fmtDate(m.retirement_date)}</span>
                     ) : m.is_currently_active ? (
-                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-white text-slate-700 ring-1 ring-slate-200">Active</span>
+                      <span className="nport-status">Active</span>
                     ) : (
-                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-white text-slate-700 ring-1 ring-slate-200">Past</span>
+                      <span className="nport-status">Past</span>
                     )}
                   </td>
                 </tr>
@@ -1545,8 +1574,8 @@ const FundPage = ({ cik, seriesId }) => {
           <p className="text-sm text-gray-500">No private positions reported.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-[11px] uppercase tracking-wider text-gray-400 border-b border-gray-100">
+            <table className="nport-table">
+              <thead>
                 <tr>
                   <SortableHeader label="Company" sortKey="company" sort={positionSort} onSort={setPositionSortKey} className="py-2 pr-3" />
                   <SortableHeader label="Security" sortKey="security" sort={positionSort} onSort={setPositionSortKey} className="pr-3" />
@@ -1560,7 +1589,7 @@ const FundPage = ({ cik, seriesId }) => {
                 {sortedPositions.map((p, i) => {
                   const filingUrl = secFilingUrl(p.registrant_cik, p.accession_number);
                   return (
-                    <tr key={`${p.accession_number || i}-${p.holding_id_internal || i}`} className="border-b border-gray-50 hover:bg-gray-50">
+                    <tr key={`${p.accession_number || i}-${p.holding_id_internal || i}`}>
                       <td className="py-2.5 pr-3">
                         {p.company_slug ? (
                           <a href={`/company/${p.company_slug}${isMockMode() ? '?mock=1' : ''}`} className="font-medium text-gray-900 hover:underline">{p.company_name}</a>
@@ -1614,7 +1643,7 @@ const FundPage = ({ cik, seriesId }) => {
                         </a>
                       ) : '—'}
                       {c.share_class && <span className="text-[11px] text-gray-500">{c.share_class}</span>}
-                      <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${badge.cls}`}>{badge.txt}</span>
+                      <span className="nport-status">{badge.txt}</span>
                     </div>
                     <div className="text-[11px] text-gray-500 mt-0.5">
                       {c.prev_value_usd != null && <>{fmtUsd(c.prev_value_usd)} → </>}
@@ -1622,7 +1651,7 @@ const FundPage = ({ cik, seriesId }) => {
                       {c.note && <span className="ml-2 italic">{c.note}</span>}
                     </div>
                   </div>
-                  <div className={`text-sm font-semibold inline-flex items-center gap-1 ${positive ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  <div className={`text-sm font-semibold inline-flex items-center gap-1 ${positive ? 'text-slate-700' : 'text-rose-700'}`}>
                     {c.pct_change != null && (positive ? <IconTrendUp className="w-4 h-4" /> : <IconTrendDown className="w-4 h-4" />)}
                     {fmtPct(c.pct_change, true)}
                   </div>
@@ -1637,7 +1666,7 @@ const FundPage = ({ cik, seriesId }) => {
 };
 
 // ---------------------------------------------------------------------------
-// Admin triage page — /admin/unresolved
+// Admin triage page - /admin/unresolved
 // ---------------------------------------------------------------------------
 const AdminUnresolvedPage = () => {
   const [loading, setLoading] = useStateN(true);
@@ -1707,7 +1736,7 @@ const AdminUnresolvedPage = () => {
 
   return (
     <PageChrome breadcrumb="admin / unresolved">
-      <div className="bg-white rounded-2xl ring-1 ring-gray-200 mb-6 p-6">
+      <div className="nport-panel mb-4 p-5">
         <h1 className="text-2xl font-bold tracking-tight text-gray-900">Unresolved holdings</h1>
         <p className="text-sm text-gray-600 mt-1">
           {fmtInt(groups.length)} normalized issuer name{groups.length === 1 ? '' : 's'} need triage. Match to an existing company,
@@ -1716,7 +1745,7 @@ const AdminUnresolvedPage = () => {
       </div>
 
       {groups.length === 0 ? (
-        <div className="bg-white rounded-2xl ring-1 ring-gray-200 p-12 text-center">
+        <div className="nport-panel p-12 text-center">
           <IconCheck className="w-8 h-8 text-emerald-500 mx-auto mb-3" />
           <p className="text-sm font-medium text-gray-900">No unresolved holdings in the queue.</p>
         </div>
@@ -1725,19 +1754,19 @@ const AdminUnresolvedPage = () => {
           {groups.map((g) => {
             const decision = resolved[g.normalized_name];
             return (
-              <li key={g.normalized_name} className="bg-white rounded-2xl ring-1 ring-gray-200 overflow-hidden">
+              <li key={g.normalized_name} className="nport-panel overflow-hidden">
                 <header className="px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4 flex-wrap">
                   <div>
                     <h3 className="text-sm font-semibold text-gray-900 font-mono">{g.normalized_name}</h3>
                     <p className="text-xs text-gray-500 mt-0.5">
                       {fmtInt(g.filer_count)} filers · {fmtUsd(g.total_value_usd)} total value · {fmtInt(g.total_balance)} units
                       {g.suggested_action && (
-                        <span className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-50 text-rose-700">suggested: {g.suggested_action}</span>
+                        <span className="ml-2 nport-status">suggested: {g.suggested_action}</span>
                       )}
                     </p>
                   </div>
                   {decision && (
-                    <span className="text-[11px] px-2 py-1 rounded bg-emerald-50 text-emerald-700 inline-flex items-center gap-1.5">
+                    <span className="nport-status inline-flex items-center gap-1.5">
                       <IconCheck className="w-3 h-3" />
                       {decision.action === 'matched' ? `Matched → ${decision.target_slug}`
                        : decision.action === 'created' ? `Created → ${decision.target_slug}`
@@ -1748,8 +1777,8 @@ const AdminUnresolvedPage = () => {
 
                 {/* Sample rows */}
                 <div className="px-6 py-3 border-b border-gray-100">
-                  <table className="w-full text-xs">
-                    <thead className="text-[10px] uppercase tracking-wider text-gray-400">
+                  <table className="nport-table !text-xs">
+                    <thead>
                       <tr><th className="text-left py-1">Issuer name (raw)</th><th className="text-left">Title</th><th className="text-left">Registrant</th><th className="text-right">Value</th></tr>
                     </thead>
                     <tbody>
