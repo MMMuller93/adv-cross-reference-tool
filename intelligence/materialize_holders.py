@@ -126,6 +126,23 @@ MIN_ALIAS_LENGTH = 5  # Aliases shorter than this risk false-positive explosions
 # Empty by default in V1 — add per request after manual review.
 SHORT_ALIAS_ALLOWLIST: set[str] = set()
 
+# Aliases for very-popular companies that legitimately produce many real
+# Form D matches. These bypass the per-alias hit cap (ALIAS_HIT_CAP=100)
+# which would otherwise discard real SPV data.
+#
+# Verification protocol before adding: pull the word-boundary universe for
+# the alias and confirm precision is ~100% (i.e., every hit is a real SPV
+# for that company). SpaceX SPACEX universe = 143 rows, 100% precision
+# (2026-05-19, all CGF2021/Koru/HII/Inflection/MWAM/etc. SpaceX SPVs).
+TRUSTED_LONG_ALIASES: set[str] = {
+    "SPACEX",      # 143 rows, all real SpaceX SPVs (verified 2026-05-19)
+    "ANTHROPIC",   # current count low; pre-emptive in case it grows
+    "OPENAI",      # current count low; pre-emptive
+    "DATABRICKS",
+    "STRIPE",
+    "FIGMA",
+}
+
 
 def fetch_company_aliases(nport, company_id: str) -> list[dict[str, Any]]:
     """Curated alias list for a company (used for Form D entityname matching).
@@ -304,6 +321,10 @@ def fetch_formd_via_cross_reference(formd, aliases: list[dict[str, Any]]) -> dic
         alias_hits: list[dict[str, Any]] = []
         last_id = 0
         capped = False
+        # Trusted aliases (popular distinctive long names) bypass the cap.
+        # Their universes are verified ~100% precision, so the cap would
+        # only cause real-data loss. See TRUSTED_LONG_ALIASES definition.
+        alias_is_trusted = alias.upper() in TRUSTED_LONG_ALIASES
         while True:
             # PFR pattern — exclude D/A amendments. Each Form D amendment is a
             # re-filing of an existing offering, so including them shows the
@@ -328,13 +349,16 @@ def fetch_formd_via_cross_reference(formd, aliases: list[dict[str, Any]]) -> dic
             if len(batch) < 1000:
                 break
             last_id = int(batch[-1]["id"])
-            if len(alias_hits) > ALIAS_HIT_CAP * 5:
+            if not alias_is_trusted and len(alias_hits) > ALIAS_HIT_CAP * 5:
                 # Safety break — keep going only enough to confirm "too many"
                 capped = True
                 break
 
-        # Per-alias hit-cap check
-        if len(alias_hits) > ALIAS_HIT_CAP or capped:
+        # Per-alias hit-cap check. Trusted aliases (TRUSTED_LONG_ALIASES)
+        # bypass this — their universes are verified-high-precision and
+        # discarding them was producing real data loss (SpaceX 143 rows
+        # silently dropped, 2026-05-19).
+        if (not alias_is_trusted) and (len(alias_hits) > ALIAS_HIT_CAP or capped):
             suspicious_aliases.append({
                 "alias": alias,
                 "pattern_type": alias_row.get("pattern_type"),
