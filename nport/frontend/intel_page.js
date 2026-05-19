@@ -9,7 +9,7 @@
  *   1. Company header card        (name, sector, founded, last round, valuation)
  *   2. Lifecycle banner           (only when current_status != 'private')
  *   3. Summary metrics row        (4 stat cards)
- *   4. Adviser firm rollup        (cards sorted by total holdings value)
+ *   4. Adviser firms              (two-pane list + detail, list sorted by total $ desc)
  *   5. N-PORT holdings table      (collapsible)
  *   6. Form D pooled vehicles     (collapsible)
  *   7. Lifecycle events timeline  (collapsible, only when events exist)
@@ -41,144 +41,352 @@ const fmtStatus = (s) => {
   return s.replace(/_/g, ' ');
 };
 
-// --- adviser card -----------------------------------------------------------
+const normalizeHref = (url) => {
+  if (!url) return null;
+  return url.toLowerCase().startsWith('http') ? url : `https://${url}`;
+};
 
-function AdviserCard({ adv }) {
+const firstInitial = (name) => {
+  if (!name) return '?';
+  const ch = name.trim().charAt(0);
+  return ch ? ch.toUpperCase() : '?';
+};
+
+// --- adviser list row (left pane) -------------------------------------------
+
+function AdviserListRow({ adv, selected, onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      className={
+        'flex items-center gap-3 px-3 py-3 cursor-pointer transition-colors border-l-2 ' +
+        (selected
+          ? 'bg-slate-50 border-slate-800'
+          : 'bg-white border-transparent hover:bg-slate-50')
+      }
+    >
+      {/* Avatar */}
+      <div className="w-9 h-9 rounded bg-slate-800 flex items-center justify-center text-white font-serif font-medium text-base flex-shrink-0">
+        {firstInitial(adv.name)}
+      </div>
+
+      {/* Name + CRD */}
+      <div className="flex-1 min-w-0">
+        <div className="text-[13px] font-serif font-semibold italic text-slate-900 tracking-tight truncate">
+          {adv.name || '(unidentified)'}
+        </div>
+        <div className="text-[10px] font-mono text-slate-400 mt-0.5">CRD {adv.crd}</div>
+      </div>
+
+      {/* AUM */}
+      <div className="text-right shrink-0 hidden sm:block">
+        <div className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">AUM</div>
+        <div className="text-[12px] font-mono text-slate-700 tabular-nums">{fmtUsdShort(adv.total_aum)}</div>
+      </div>
+
+      {/* Total value */}
+      <div className="text-right shrink-0 w-20">
+        <div className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">Held</div>
+        <div className="text-[13px] font-mono font-semibold text-slate-900 tabular-nums">{fmtUsdShort(adv.total_value_usd)}</div>
+      </div>
+
+      {/* Chevron */}
+      <span className={'text-slate-300 shrink-0 ' + (selected ? 'text-slate-700' : '')}>›</span>
+    </div>
+  );
+}
+
+// --- adviser detail panel (right pane) --------------------------------------
+
+function AdviserDetailPanel({ adv }) {
+  if (!adv) {
+    return (
+      <div className="flex items-center justify-center h-64 text-sm text-slate-400 italic px-6 text-center">
+        Select a firm on the left to see contacts, principals, and links.
+      </div>
+    );
+  }
+
   const owners = (adv.owner_full_legal_name || '').split(';').map(s => s.trim()).filter(Boolean);
   const titles = (adv.owner_title_or_status || '').split(';').map(s => s.trim()).filter(Boolean);
-  const principals = owners.slice(0, 6).map((name, i) => ({
-    name,
-    title: titles[i] || '',
-  }));
-  const hasContact = adv.cco_email || adv.regulatory_contact_email || adv.alt_contact_email;
+  const principals = owners.map((name, i) => ({ name, title: titles[i] || '' }));
+
+  const hasContact = adv.phone || adv.website || adv.cco_name || adv.signatory_name;
+  const hasWeb = adv.linkedin_company_url || adv.team_members || adv.twitter_handle || adv.alt_contact_email;
+  const showRegContact =
+    adv.regulatory_contact_email && adv.regulatory_contact_email !== adv.cco_email;
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-5 hover:shadow-md transition-shadow">
-      <div className="flex items-start justify-between gap-4 mb-3">
-        <div className="flex-1 min-w-0">
-          <h3 className="font-serif text-lg font-semibold text-slate-900 leading-tight">
+    <div className="bg-white">
+      {/* Sticky header with name, CRD, action buttons */}
+      <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
+        <div className="min-w-0 flex-1">
+          <h2 className="font-serif text-lg font-semibold text-slate-900 tracking-tight leading-tight truncate">
             {adv.name || '(unidentified)'}
-          </h3>
-          <p className="font-mono text-xs text-slate-500 mt-0.5">CRD {adv.crd}</p>
+          </h2>
+          <div className="text-[10px] font-mono text-slate-500 mt-0.5">CRD {adv.crd}</div>
         </div>
-        <div className="text-right shrink-0">
-          <div className="text-2xl font-serif font-semibold text-slate-900">
-            {fmtUsdShort(adv.total_value_usd)}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {adv.website && (
+            <a
+              href={normalizeHref(adv.website)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white transition-all"
+            >
+              Website ↗
+            </a>
+          )}
+          {adv.crd && (
+            <a
+              href={`https://adviserinfo.sec.gov/firm/summary/${adv.crd}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white transition-all"
+            >
+              IAPD ↗
+            </a>
+          )}
+          {adv.form_adv_url && (
+            <a
+              href={adv.form_adv_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white transition-all"
+            >
+              Form ADV ↗
+            </a>
+          )}
+          {adv.linkedin_company_url && (
+            <a
+              href={adv.linkedin_company_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white transition-all"
+            >
+              LinkedIn ↗
+            </a>
+          )}
+        </div>
+      </div>
+
+      <div className="px-5 py-4 space-y-4">
+        {/* Headline stats */}
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">Total AUM</div>
+            <div className="font-mono text-[15px] font-semibold text-slate-900 tabular-nums mt-0.5">{fmtUsdShort(adv.total_aum)}</div>
           </div>
-          <div className="text-xs text-slate-500">{adv.evidence_count} holding{adv.evidence_count === 1 ? '' : 's'}</div>
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">Held $</div>
+            <div className="font-mono text-[15px] font-semibold text-slate-900 tabular-nums mt-0.5">{fmtUsdShort(adv.total_value_usd)}</div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">Evidence</div>
+            <div className="font-mono text-[15px] font-semibold text-slate-900 tabular-nums mt-0.5">{fmtInt(adv.evidence_count)}</div>
+          </div>
         </div>
-      </div>
 
-      <div className="grid grid-cols-2 gap-3 text-sm mb-3">
-        <div>
-          <div className="text-xs text-slate-500 uppercase tracking-wide">Total AUM</div>
-          <div className="font-mono">{fmtUsdShort(adv.total_aum)}</div>
-        </div>
-        <div>
-          <div className="text-xs text-slate-500 uppercase tracking-wide">Phone</div>
-          <div className="font-mono text-xs">{adv.phone || '—'}</div>
-        </div>
-      </div>
-
-      {adv.website && (
-        <div className="mb-3">
-          <div className="text-xs text-slate-500 uppercase tracking-wide mb-0.5">Website</div>
-          <a href={adv.website.toLowerCase().startsWith('http') ? adv.website : 'https://' + adv.website}
-             target="_blank" rel="noopener noreferrer"
-             className="text-sm text-slate-700 hover:text-slate-900 underline break-all">
-            {adv.website}
-          </a>
-        </div>
-      )}
-
-      {hasContact && (
-        <div className="border-t border-slate-100 pt-3 mb-3">
-          <div className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">Contact</div>
-          {adv.cco_name && (
-            <div className="text-sm mb-1">
-              <span className="text-slate-500">CCO: </span>
-              <span className="text-slate-900">{adv.cco_name}</span>
-              {adv.cco_email && (
-                <a href={`mailto:${adv.cco_email}`} className="ml-2 text-xs text-slate-600 hover:text-slate-900 font-mono break-all">
-                  {adv.cco_email}
-                </a>
+        {/* Contact */}
+        {hasContact && (
+          <div className="border-t border-slate-100 pt-4">
+            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Contact</div>
+            <div className="space-y-1.5 text-sm">
+              {adv.phone && (
+                <div className="flex gap-2">
+                  <span className="text-slate-500 w-20 shrink-0">Phone</span>
+                  <span className="font-mono text-[12px] text-slate-700">{adv.phone}</span>
+                </div>
+              )}
+              {adv.website && (
+                <div className="flex gap-2">
+                  <span className="text-slate-500 w-20 shrink-0">Website</span>
+                  <a
+                    href={normalizeHref(adv.website)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-[12px] text-slate-700 hover:text-slate-900 underline break-all"
+                  >
+                    {adv.website}
+                  </a>
+                </div>
+              )}
+              {adv.cco_name && (
+                <div className="flex gap-2">
+                  <span className="text-slate-500 w-20 shrink-0">CCO</span>
+                  <div className="min-w-0">
+                    <span className="text-slate-900">{adv.cco_name}</span>
+                    {adv.cco_email && (
+                      <a
+                        href={`mailto:${adv.cco_email}`}
+                        className="ml-2 text-[12px] font-mono text-slate-600 hover:text-slate-900 break-all"
+                      >
+                        {adv.cco_email}
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+              {adv.signatory_name && adv.signatory_name !== adv.cco_name && (
+                <div className="flex gap-2">
+                  <span className="text-slate-500 w-20 shrink-0">Signatory</span>
+                  <div className="min-w-0">
+                    <span className="text-slate-900">{adv.signatory_name}</span>
+                    {adv.signatory_title && (
+                      <span className="text-[11px] text-slate-500 ml-1.5">({adv.signatory_title})</span>
+                    )}
+                  </div>
+                </div>
               )}
             </div>
-          )}
-          {adv.signatory_name && adv.signatory_name !== adv.cco_name && (
-            <div className="text-sm mb-1">
-              <span className="text-slate-500">Signatory: </span>
-              <span className="text-slate-900">{adv.signatory_name}</span>
-              {adv.signatory_title && <span className="text-xs text-slate-500 ml-1">({adv.signatory_title})</span>}
+          </div>
+        )}
+
+        {/* Principals / Owners */}
+        {principals.length > 0 && (
+          <div className="border-t border-slate-100 pt-4">
+            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">
+              Principals / Owners
+              {adv.ownership_amount && (
+                <span className="ml-1.5 text-slate-400 normal-case tracking-normal font-normal">({adv.ownership_amount})</span>
+              )}
             </div>
-          )}
-          {adv.regulatory_contact_email && adv.regulatory_contact_email !== adv.cco_email && (
-            <div className="text-sm">
-              <span className="text-slate-500">Reg contact: </span>
-              <a href={`mailto:${adv.regulatory_contact_email}`} className="text-xs font-mono text-slate-700 hover:text-slate-900 break-all">
+            <ul className="text-sm space-y-1">
+              {principals.map((p, i) => (
+                <li key={i} className="text-slate-700">
+                  <span className="font-medium text-slate-900">{p.name}</span>
+                  {p.title && <span className="text-[11px] text-slate-500 ml-2">{p.title}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Web-enriched */}
+        {hasWeb && (
+          <div className="border-t border-slate-100 pt-4">
+            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Web-enriched</div>
+            <div className="space-y-1.5 text-sm">
+              {adv.linkedin_company_url && (
+                <div className="flex gap-2">
+                  <span className="text-slate-500 w-20 shrink-0">LinkedIn</span>
+                  <a
+                    href={adv.linkedin_company_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-[12px] text-slate-700 hover:text-slate-900 underline break-all"
+                  >
+                    {adv.linkedin_company_url.replace(/^https?:\/\//, '')}
+                  </a>
+                </div>
+              )}
+              {adv.twitter_handle && (
+                <div className="flex gap-2">
+                  <span className="text-slate-500 w-20 shrink-0">Twitter</span>
+                  <a
+                    href={`https://twitter.com/${adv.twitter_handle.replace(/^@/, '')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-[12px] text-slate-700 hover:text-slate-900 underline"
+                  >
+                    @{adv.twitter_handle.replace(/^@/, '')}
+                  </a>
+                </div>
+              )}
+              {adv.alt_contact_email && (
+                <div className="flex gap-2">
+                  <span className="text-slate-500 w-20 shrink-0">Email</span>
+                  <a
+                    href={`mailto:${adv.alt_contact_email}`}
+                    className="font-mono text-[12px] text-slate-700 hover:text-slate-900 break-all"
+                  >
+                    {adv.alt_contact_email}
+                  </a>
+                </div>
+              )}
+              {adv.team_members && (
+                <div className="flex gap-2">
+                  <span className="text-slate-500 w-20 shrink-0">Team</span>
+                  <span className="text-slate-700">{adv.team_members}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Regulatory contact */}
+        {showRegContact && (
+          <div className="border-t border-slate-100 pt-4">
+            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Regulatory contact</div>
+            <div className="text-sm flex gap-2">
+              {adv.regulatory_contact_name && (
+                <span className="text-slate-900">{adv.regulatory_contact_name}</span>
+              )}
+              <a
+                href={`mailto:${adv.regulatory_contact_email}`}
+                className="font-mono text-[12px] text-slate-700 hover:text-slate-900 underline break-all"
+              >
                 {adv.regulatory_contact_email}
               </a>
             </div>
-          )}
-          {adv.alt_contact_email && (
-            <div className="text-sm">
-              <span className="text-slate-500">Web-found: </span>
-              <a href={`mailto:${adv.alt_contact_email}`} className="text-xs font-mono text-slate-700 hover:text-slate-900 break-all">
-                {adv.alt_contact_email}
-              </a>
-            </div>
-          )}
-        </div>
-      )}
-
-      {principals.length > 0 && (
-        <div className="border-t border-slate-100 pt-3 mb-3">
-          <div className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">
-            Principals / Owners
-            {adv.ownership_amount && (
-              <span className="ml-1 text-slate-500 normal-case font-normal">({adv.ownership_amount})</span>
-            )}
           </div>
-          <ul className="text-sm space-y-0.5">
-            {principals.map((p, i) => (
-              <li key={i} className="text-slate-700">
-                <span className="font-medium text-slate-900">{p.name}</span>
-                {p.title && <span className="text-xs text-slate-500 ml-2">{p.title}</span>}
-              </li>
-            ))}
-            {owners.length > principals.length && (
-              <li className="text-xs text-slate-400 italic">+{owners.length - principals.length} more</li>
-            )}
-          </ul>
-        </div>
-      )}
+        )}
+      </div>
+    </div>
+  );
+}
 
-      {adv.team_members && (
-        <div className="border-t border-slate-100 pt-3 mb-3">
-          <div className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1">Team (web-enriched)</div>
-          <div className="text-sm text-slate-700">{adv.team_members}</div>
-        </div>
-      )}
+// --- adviser list+detail wrapper --------------------------------------------
 
-      <div className="border-t border-slate-100 pt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-        {adv.form_adv_url && (
-          <a href={adv.form_adv_url} target="_blank" rel="noopener noreferrer"
-             className="text-slate-600 hover:text-slate-900 underline">
-            Form ADV ↗
-          </a>
-        )}
-        {adv.linkedin_company_url && (
-          <a href={adv.linkedin_company_url} target="_blank" rel="noopener noreferrer"
-             className="text-slate-600 hover:text-slate-900 underline">
-            LinkedIn ↗
-          </a>
-        )}
-        {adv.twitter_handle && (
-          <a href={`https://twitter.com/${adv.twitter_handle.replace(/^@/, '')}`} target="_blank" rel="noopener noreferrer"
-             className="text-slate-600 hover:text-slate-900 underline">
-            @{adv.twitter_handle.replace(/^@/, '')} ↗
-          </a>
-        )}
+function AdviserListDetail({ advisers }) {
+  // Identified advisers only — null-CRD rows live in the source tables below
+  const identified = useMemoI(
+    () => (advisers || []).filter(a => a.crd && a.crd !== 'null'),
+    [advisers]
+  );
+  const [selectedCrd, setSelectedCrd] = useStateI(identified[0] ? identified[0].crd : null);
+
+  // If the data refreshes (audit toggle, slug change), re-seed selection
+  useEffectI(() => {
+    if (identified.length === 0) {
+      setSelectedCrd(null);
+      return;
+    }
+    if (!identified.some(a => a.crd === selectedCrd)) {
+      setSelectedCrd(identified[0].crd);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [advisers]);
+
+  if (identified.length === 0) {
+    return (
+      <p className="text-sm text-slate-500">
+        No adviser firms identified for this company's eligible holdings.
+      </p>
+    );
+  }
+
+  const selected = identified.find(a => a.crd === selectedCrd) || null;
+
+  return (
+    <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 items-stretch">
+      {/* LEFT: list */}
+      <div className="lg:w-3/5 w-full rounded-lg border border-slate-200 bg-white overflow-hidden">
+        <div className="divide-y divide-slate-100 max-h-[640px] overflow-y-auto">
+          {identified.map((adv) => (
+            <AdviserListRow
+              key={adv.crd}
+              adv={adv}
+              selected={adv.crd === selectedCrd}
+              onClick={() => setSelectedCrd(adv.crd)}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* RIGHT: detail */}
+      <div className="lg:w-2/5 w-full rounded-lg border border-slate-200 bg-white overflow-hidden lg:max-h-[640px] lg:overflow-y-auto">
+        <AdviserDetailPanel adv={selected} />
       </div>
     </div>
   );
@@ -417,16 +625,10 @@ function IntelPage({ slug }) {
         </label>
       </div>
 
-      {/* Advisers — primary section */}
+      {/* Advisers — primary section (two-pane list + detail) */}
       <section className="mb-10">
         <h2 className="font-serif text-2xl font-semibold text-slate-900 mb-4">Adviser firms</h2>
-        {advisers.length === 0 ? (
-          <p className="text-sm text-slate-500">No adviser firms identified for this company's eligible holdings.</p>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {advisers.map((adv) => <AdviserCard key={adv.crd} adv={adv} />)}
-          </div>
-        )}
+        <AdviserListDetail advisers={advisers} />
       </section>
 
       {/* N-PORT holdings */}
