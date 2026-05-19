@@ -76,6 +76,38 @@ const nportAdminHeaders = () => {
   };
 };
 
+const NPORT_WATCHLIST_KEY = 'nport.watchlist.slugs';
+const NPORT_WATCHLIST_COOKIE = 'nport_watchlist_slugs';
+
+const readNportWatchlist = () => {
+  const parseList = (raw) => {
+    const parsed = JSON.parse(raw || '[]');
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  };
+  try {
+    if (window.localStorage) return parseList(window.localStorage.getItem(NPORT_WATCHLIST_KEY));
+  } catch (_) {
+    // Fall through to the cookie backup used by stricter browser contexts.
+  }
+  try {
+    const cookie = (`; ${document.cookie}`).split(`; ${NPORT_WATCHLIST_COOKIE}=`).pop();
+    const raw = cookie && cookie.includes(';') ? cookie.split(';').shift() : cookie;
+    return raw ? parseList(decodeURIComponent(raw)) : [];
+  } catch (_) {
+    return [];
+  }
+};
+
+const writeNportWatchlist = (slugs) => {
+  const value = JSON.stringify(Array.from(new Set(slugs)).sort());
+  try {
+    if (window.localStorage) window.localStorage.setItem(NPORT_WATCHLIST_KEY, value);
+  } catch (_) {
+    // Cookie backup below keeps this feature usable when localStorage is blocked.
+  }
+  document.cookie = `${NPORT_WATCHLIST_COOKIE}=${encodeURIComponent(value)}; path=/; max-age=31536000; SameSite=Lax`;
+};
+
 // ---------------------------------------------------------------------------
 // Formatting helpers (kept local — app.js doesn't expose its helpers).
 // ---------------------------------------------------------------------------
@@ -397,8 +429,8 @@ const PageChrome = ({ children, breadcrumb }) => {
   );
 };
 
-const SectionCard = ({ title, subtitle, right, children }) => (
-  <section className="bg-white rounded-2xl ring-1 ring-gray-200 mb-6 overflow-hidden">
+const SectionCard = ({ id, title, subtitle, right, children }) => (
+  <section id={id} className="bg-white rounded-2xl ring-1 ring-gray-200 mb-6 overflow-hidden scroll-mt-24">
     <header className="px-6 py-4 border-b border-gray-100 flex items-start justify-between">
       <div>
         <h2 className="text-sm font-semibold text-gray-900 tracking-tight">{title}</h2>
@@ -408,6 +440,12 @@ const SectionCard = ({ title, subtitle, right, children }) => (
     </header>
     <div className="px-6 py-5">{children}</div>
   </section>
+);
+
+const SourceBadge = ({ label }) => (
+  <span className="inline-flex items-center rounded-md bg-white px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500 ring-1 ring-slate-200">
+    {label}
+  </span>
 );
 
 const SortableHeader = ({ label, sortKey, sort, onSort, align = 'left', className = '' }) => {
@@ -452,6 +490,7 @@ const DashboardPage = () => {
   const [error, setError] = useStateN(null);
   const [companies, setCompanies] = useStateN([]);
   const [query, setQuery] = useStateN('');
+  const [watchlistSlugs, setWatchlistSlugs] = useStateN(() => readNportWatchlist());
 
   useEffectN(() => {
     let cancelled = false;
@@ -513,6 +552,10 @@ const DashboardPage = () => {
     .map((slug) => companies.find((c) => c.slug === slug))
     .filter(Boolean)
     .sort((a, b) => Number(b.nport_latest_value_usd || 0) - Number(a.nport_latest_value_usd || 0));
+  const watchedCompanies = watchlistSlugs
+    .map((slug) => companies.find((c) => c.slug === slug))
+    .filter(Boolean)
+    .sort((a, b) => Number(b.nport_latest_value_usd || 0) - Number(a.nport_latest_value_usd || 0));
 
   if (loading) {
     return <PageChrome breadcrumb="n-port"><Spinner label="Loading N-PORT companies..." /></PageChrome>;
@@ -562,8 +605,39 @@ const DashboardPage = () => {
               <div className="text-sm font-semibold text-gray-900">{companyDisplayName(c)}</div>
               <div className="text-xs text-gray-500 mt-1">{titleCaseSector(c.sector)}</div>
               <div className="mt-4 grid grid-cols-2 gap-3">
-                <Stat label="N-PORT exposure" value={fmtUsd(c.nport_latest_value_usd)} />
-                <Stat label="Fund holders" value={fmtInt(c.nport_latest_holder_count)} />
+                <Stat label="N-PORT exposure" value={fmtUsd(c.nport_latest_value_usd)} source="N-PORT" />
+                <Stat label="Fund holders" value={fmtInt(c.nport_latest_holder_count)} source="N-PORT" />
+              </div>
+              <div className="mt-3 text-[11px] text-gray-500">Latest snapshot {fmtDate(c.nport_latest_period_date)}</div>
+            </a>
+          ))}
+          </div>
+        </section>
+      )}
+
+      {watchedCompanies.length > 0 && !q && (
+        <section className="mb-6">
+          <div className="flex items-end justify-between gap-4 mb-3">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">Followed companies</h2>
+              <p className="text-xs text-gray-500">Local watchlist for names you want to revisit quickly.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => { writeNportWatchlist([]); setWatchlistSlugs([]); }}
+              className="text-xs text-slate-500 hover:text-slate-800"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          {watchedCompanies.map((c) => (
+            <a key={c.slug} href={`/company/${c.slug}`} className="bg-white rounded-2xl ring-1 ring-gray-200 p-5 hover:ring-slate-300 hover:shadow-sm transition">
+              <div className="text-sm font-semibold text-gray-900">{companyDisplayName(c)}</div>
+              <div className="text-xs text-gray-500 mt-1">{titleCaseSector(c.sector)}</div>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <Stat label="N-PORT exposure" value={fmtUsd(c.nport_latest_value_usd)} source="N-PORT" />
+                <Stat label="Fund holders" value={fmtInt(c.nport_latest_holder_count)} source="N-PORT" />
               </div>
               <div className="mt-3 text-[11px] text-gray-500">Latest snapshot {fmtDate(c.nport_latest_period_date)}</div>
             </a>
@@ -773,6 +847,7 @@ const CompanyPage = ({ slug }) => {
   const [holderSort, setHolderSort] = useStateN({ key: 'value', dir: 'desc' });
   const [exportingPositions, setExportingPositions] = useStateN(false);
   const [exportError, setExportError] = useStateN(null);
+  const [watchlistSlugs, setWatchlistSlugs] = useStateN(() => readNportWatchlist());
 
   useEffectN(() => {
     let cancelled = false;
@@ -897,6 +972,22 @@ const CompanyPage = ({ slug }) => {
       setExportingPositions(false);
     }
   };
+  const isWatched = watchlistSlugs.includes(slug);
+  const toggleWatchlist = () => {
+    setWatchlistSlugs((prev) => {
+      const next = prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug];
+      writeNportWatchlist(next);
+      return next;
+    });
+  };
+  const uniqueNportFilings = new Set(topHolders.map((h) => h.accession_number).filter(Boolean)).size;
+  const companyTabs = [
+    { href: '#holders', label: 'Holders', count: sortedHolders.length },
+    { href: '#security-classes', label: 'Security classes', count: latestMarks.classes.length },
+    { href: '#markups', label: 'Markups', count: markups.length },
+    { href: '#filings', label: 'Filings', count: uniqueNportFilings + crossFormDFilings.length },
+    { href: '#advisers', label: 'Advisers', count: crossRelatedAdvisers.length },
+  ];
 
   return (
     <PageChrome breadcrumb={`company / ${slug}`}>
@@ -920,26 +1011,52 @@ const CompanyPage = ({ slug }) => {
               <p className="text-sm text-gray-600 mt-1.5 max-w-2xl">{company.description}</p>
             )}
           </div>
-          <div className="text-right shrink-0">
-            <div className="text-[10px] uppercase tracking-wider text-gray-400">Most recent round</div>
-            <div className="text-sm font-semibold text-gray-900">{company.most_recent_round || '—'}</div>
-            <div className="text-[11px] text-gray-500">{fmtDate(company.most_recent_round_date)}</div>
+          <div className="text-right shrink-0 space-y-3">
+            <div>
+              <div className="flex items-center justify-end gap-1.5 text-[10px] uppercase tracking-wider text-gray-400">
+                <span>Most recent round</span>
+                <SourceBadge label="seed" />
+              </div>
+              <div className="text-sm font-semibold text-gray-900">{company.most_recent_round || '—'}</div>
+              <div className="text-[11px] text-gray-500">{fmtDate(company.most_recent_round_date)}</div>
+            </div>
+            <button
+              type="button"
+              onClick={toggleWatchlist}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium ring-1 ${isWatched ? 'bg-slate-800 text-white ring-slate-800' : 'bg-white text-slate-700 ring-gray-200 hover:bg-gray-50'}`}
+            >
+              {isWatched ? 'Following' : 'Follow company'}
+            </button>
           </div>
         </div>
 
         <div className="mt-6 grid grid-cols-2 md:grid-cols-5 gap-4">
-          <Stat label="Disclosed N-PORT exposure" value={fmtUsd(disclosedValue)} hint={latestSnapshotDate ? `as of ${fmtDate(latestSnapshotDate)}` : 'latest period'} />
-          <Stat label="Distinct fund-family holders" value={fmtInt(distinctFilers)} />
-          <Stat label="Last known valuation" value={fmtUsd(company.latest_known_valuation_usd)} />
-          <Stat label="Total funding to date" value={fmtUsd(company.total_funding_usd)} />
-          <Stat label="Sector" value={titleCaseSector(company.sector)} />
+          <Stat label="Disclosed N-PORT exposure" value={fmtUsd(disclosedValue)} hint={latestSnapshotDate ? `as of ${fmtDate(latestSnapshotDate)}` : 'latest period'} source="N-PORT" />
+          <Stat label="Distinct fund-family holders" value={fmtInt(distinctFilers)} source="N-PORT" />
+          <Stat label="Last known valuation" value={fmtUsd(company.latest_known_valuation_usd)} source="seed" />
+          <Stat label="Total funding to date" value={fmtUsd(company.total_funding_usd)} source="seed" />
+          <Stat label="Sector" value={titleCaseSector(company.sector)} source="seed" />
         </div>
       </div>
 
+      <nav className="mb-6 flex flex-wrap gap-2">
+        {companyTabs.map((tab) => (
+          <a
+            key={tab.href}
+            href={tab.href}
+            className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-medium text-slate-700 ring-1 ring-gray-200 hover:bg-gray-50 hover:text-slate-900"
+          >
+            <span>{tab.label}</span>
+            <span className="rounded-md bg-slate-50 px-1.5 py-0.5 text-[10px] tabular-nums text-slate-500 ring-1 ring-slate-100">{fmtInt(tab.count)}</span>
+          </a>
+        ))}
+      </nav>
+
       {/* Latest marks + QoQ deltas */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <SectionCard title="Latest valuation by security class"
-          subtitle={`Portfolio snapshot ${fmtDate(latestMarks.report_period_end)} — median reported value per share/unit`}>
+        <SectionCard id="security-classes" title="Latest valuation by security class"
+          subtitle={`Portfolio snapshot ${fmtDate(latestMarks.report_period_end)} — median reported value per share/unit`}
+          right={<SourceBadge label="N-PORT" />}>
           {latestMarks.classes.length === 0 ? (
             <p className="text-sm text-gray-500">No recent marks.</p>
           ) : (
@@ -961,7 +1078,7 @@ const CompanyPage = ({ slug }) => {
           )}
         </SectionCard>
 
-        <SectionCard title="Quarterly valuation changes" subtitle="Per-share change vs. prior public filing period">
+        <SectionCard id="markups" title="Quarterly valuation changes" subtitle="Per-share change vs. prior public filing period" right={<SourceBadge label="deltas" />}>
           {markups.length === 0 ? (
             <p className="text-sm text-gray-500">No deltas this period.</p>
           ) : (
@@ -975,8 +1092,8 @@ const CompanyPage = ({ slug }) => {
                     <div>
                       <div className="text-sm font-medium text-gray-900">
                         {d.share_class}{' '}
-                        {isNew && <span className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">new</span>}
-                        {isRepricing && <span className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-50 text-rose-700">repricing event</span>}
+                        {isNew && <span className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-white text-slate-600 ring-1 ring-slate-200">new</span>}
+                        {isRepricing && <span className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-white text-slate-600 ring-1 ring-slate-200">repricing event</span>}
                       </div>
                       <div className="text-[11px] text-gray-500 mt-0.5">
                         {fmtUsdPerShare(d.prev_per_share)} → <span className="font-semibold text-gray-700">{fmtUsdPerShare(d.curr_per_share)}</span>
@@ -998,10 +1115,12 @@ const CompanyPage = ({ slug }) => {
 
       {/* Current holders table */}
       <SectionCard
+        id="holders"
         title="Current holders"
         subtitle={`Latest available filing per fund/security through ${fmtDate(latestSnapshotDate)} — first seen is the earliest public N-PORT snapshot`}
         right={
           <div className="flex flex-wrap justify-end gap-2">
+            <SourceBadge label="N-PORT" />
             <button type="button" onClick={exportCurrentHolders}
               className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-gray-200 hover:bg-gray-50">
               <IconDownload className="w-3.5 h-3.5" /> Current CSV
@@ -1121,19 +1240,20 @@ const CompanyPage = ({ slug }) => {
 
       {/* Time-series + markup-history charts */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
-        <SectionCard title="Holdings time series" subtitle="Total disclosed N-PORT $ across all holders per quarter">
+        <SectionCard id="history" title="Holdings time series" subtitle="Total disclosed N-PORT $ across all holders per quarter" right={<SourceBadge label="N-PORT" />}>
           <TimeSeriesChart points={tsPoints} label="Disclosed $" />
         </SectionCard>
-        <SectionCard title="Security-class valuation history" subtitle="Implied reported value per share/unit by class">
+        <SectionCard title="Security-class valuation history" subtitle="Implied reported value per share/unit by class" right={<SourceBadge label="N-PORT" />}>
           <MarkupHistoryChart series={history} />
         </SectionCard>
       </div>
 
       {/* Cross-source view */}
-      <SectionCard title="Cross-source view"
-        subtitle="Form D filings + ADV-registered advisers + N-PORT consolidated">
+      <SectionCard id="filings" title="Filings and advisers"
+        subtitle="Form D filings + ADV-registered advisers + N-PORT consolidated"
+        right={<div className="flex items-center gap-2"><SourceBadge label="Form D" /><SourceBadge label="ADV" /><SourceBadge label="N-CEN" /></div>}>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div>
+          <div id="advisers" className="scroll-mt-24">
             <h3 className="text-xs uppercase tracking-wider text-gray-500 mb-2">Form D filings mentioning {companyDisplayName(company)}</h3>
             {crossFormDFilings.length === 0 ? (
               <p className="text-sm text-gray-500">No Form D filings on record.</p>
@@ -1178,9 +1298,12 @@ const CompanyPage = ({ slug }) => {
   );
 };
 
-const Stat = ({ label, value, hint }) => (
+const Stat = ({ label, value, hint, source }) => (
   <div>
-    <div className="text-[10px] uppercase tracking-wider text-gray-400">{label}</div>
+    <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-gray-400">
+      <span>{label}</span>
+      {source && <SourceBadge label={source} />}
+    </div>
     <div className="text-base font-semibold text-gray-900 tabular-nums mt-0.5">{value}</div>
     {hint && <div className="text-[10px] text-gray-400">{hint}</div>}
   </div>
@@ -1323,15 +1446,15 @@ const FundPage = ({ cik, seriesId }) => {
             </p>
           </div>
           <div className="grid grid-cols-3 gap-4">
-            <Stat label="Fund NAV" value={fmtUsd(latestNav)} hint={fmtDate(latestPositionDate)} />
-            <Stat label="Private-company exposure" value={fmtUsd(privateExposureUsd)} />
-            <Stat label="% of NAV" value={exposurePct != null ? fmtPct(exposurePct, false) : '—'} />
+            <Stat label="Fund NAV" value={fmtUsd(latestNav)} hint={fmtDate(latestPositionDate)} source="N-PORT" />
+            <Stat label="Private-company exposure" value={fmtUsd(privateExposureUsd)} source="N-PORT" />
+            <Stat label="% of NAV" value={exposurePct != null ? fmtPct(exposurePct, false) : '—'} source="N-PORT" />
           </div>
         </div>
       </div>
 
       {/* Adviser and contact */}
-      <SectionCard title="Adviser and contacts" subtitle="N-CEN adviser link enriched with Form ADV firm data">
+      <SectionCard title="Adviser and contacts" subtitle="N-CEN adviser link enriched with Form ADV firm data" right={<div className="flex items-center gap-2"><SourceBadge label="N-CEN" /><SourceBadge label="ADV" /></div>}>
         {!adviserName ? (
           <p className="text-sm text-gray-500">{adviserPayload.note || 'No adviser link has been resolved yet.'}</p>
         ) : (
@@ -1357,10 +1480,10 @@ const FundPage = ({ cik, seriesId }) => {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <Stat label="ADV firm AUM" value={fmtUsd(adviserRecord && (adviserRecord.total_aum || adviserRecord.aum_2026))} />
-              <Stat label="Phone" value={(adviserRecord && adviserRecord.phone_number) || '—'} />
-              <Stat label="Registration" value={(adviserRecord && adviserRecord.registration_type) || '—'} />
-              <Stat label="Source" value={adviserPayload.ncen_source === 'fund_ncen_adviser_links' ? (ncenLink && ncenLink.series_id ? 'N-CEN series' : 'N-CEN registrant') : 'N-CEN filing'} />
+              <Stat label="ADV firm AUM" value={fmtUsd(adviserRecord && (adviserRecord.total_aum || adviserRecord.aum_2026))} source="ADV" />
+              <Stat label="Phone" value={(adviserRecord && adviserRecord.phone_number) || '—'} source="ADV" />
+              <Stat label="Registration" value={(adviserRecord && adviserRecord.registration_type) || '—'} source="ADV" />
+              <Stat label="Source" value={adviserPayload.ncen_source === 'fund_ncen_adviser_links' ? (ncenLink && ncenLink.series_id ? 'N-CEN series' : 'N-CEN registrant') : 'N-CEN filing'} source="N-CEN" />
             </div>
             <div className="text-sm">
               <div className="text-[11px] uppercase tracking-wider text-gray-400">Firm contacts</div>
@@ -1386,7 +1509,7 @@ const FundPage = ({ cik, seriesId }) => {
       </SectionCard>
 
       {/* Portfolio Managers */}
-      <SectionCard title="Portfolio managers" subtitle="From the most recent N-1A / 485BPOS filing">
+      <SectionCard title="Portfolio managers" subtitle="From the most recent N-1A / 485BPOS filing" right={<SourceBadge label="N-1A" />}>
         {managers.length === 0 ? (
           <p className="text-sm text-gray-500">No managers on record yet.</p>
         ) : (
@@ -1402,11 +1525,11 @@ const FundPage = ({ cik, seriesId }) => {
                   <td className="py-2.5 text-gray-700">{fmtDate(m.pm_managing_since)}</td>
                   <td className="py-2.5">
                     {m.retirement_date ? (
-                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">Retiring {fmtDate(m.retirement_date)}</span>
+                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-white text-slate-700 ring-1 ring-slate-200">Retiring {fmtDate(m.retirement_date)}</span>
                     ) : m.is_currently_active ? (
-                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">Active</span>
+                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-white text-slate-700 ring-1 ring-slate-200">Active</span>
                     ) : (
-                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">Past</span>
+                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-white text-slate-700 ring-1 ring-slate-200">Past</span>
                     )}
                   </td>
                 </tr>
@@ -1417,7 +1540,7 @@ const FundPage = ({ cik, seriesId }) => {
       </SectionCard>
 
       {/* Private-company exposure table */}
-      <SectionCard title="Private-company holdings" subtitle={`${fmtInt(positions.length)} reported positions${data.companyFilter ? ` matching ${data.companyFilter}` : ''}`}>
+      <SectionCard title="Private-company holdings" subtitle={`${fmtInt(positions.length)} reported positions${data.companyFilter ? ` matching ${data.companyFilter}` : ''}`} right={<SourceBadge label="N-PORT" />}>
         {positions.length === 0 ? (
           <p className="text-sm text-gray-500">No private positions reported.</p>
         ) : (
@@ -1468,7 +1591,7 @@ const FundPage = ({ cik, seriesId }) => {
       </SectionCard>
 
       {/* QoQ changes */}
-      <SectionCard title="Q-over-Q changes" subtitle="New, exited, marked-up, or marked-down positions since prior period">
+      <SectionCard title="Q-over-Q changes" subtitle="New, exited, marked-up, or marked-down positions since prior period" right={<SourceBadge label="deltas" />}>
         {qoq.length === 0 ? (
           <p className="text-sm text-gray-500">No quarter-over-quarter changes.</p>
         ) : (
@@ -1476,11 +1599,11 @@ const FundPage = ({ cik, seriesId }) => {
             {qoq.map((c, i) => {
               const positive = (c.pct_change || 0) >= 0;
               const badge =
-                c.change_kind === 'new'        ? { txt: 'NEW',       cls: 'bg-indigo-50 text-indigo-700' } :
-                c.change_kind === 'exited'     ? { txt: 'EXITED',    cls: 'bg-rose-50 text-rose-700' } :
-                c.change_kind === 'repricing'  ? { txt: 'REPRICING', cls: 'bg-amber-50 text-amber-700' } :
-                c.change_kind === 'markdown'   ? { txt: 'MARKDOWN',  cls: 'bg-rose-50 text-rose-700' } :
-                                                 { txt: 'MARKUP',    cls: 'bg-emerald-50 text-emerald-700' };
+                c.change_kind === 'new'        ? { txt: 'NEW',       cls: 'bg-white text-slate-700 ring-1 ring-slate-200' } :
+                c.change_kind === 'exited'     ? { txt: 'EXITED',    cls: 'bg-white text-slate-700 ring-1 ring-slate-200' } :
+                c.change_kind === 'repricing'  ? { txt: 'REPRICING', cls: 'bg-white text-slate-700 ring-1 ring-slate-200' } :
+                c.change_kind === 'markdown'   ? { txt: 'MARKDOWN',  cls: 'bg-white text-slate-700 ring-1 ring-slate-200' } :
+                                                 { txt: 'MARKUP',    cls: 'bg-white text-slate-700 ring-1 ring-slate-200' };
               return (
                 <li key={i} className="flex items-start justify-between gap-3 py-2 border-b border-gray-50 last:border-b-0">
                   <div className="min-w-0">
