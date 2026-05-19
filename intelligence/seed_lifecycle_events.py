@@ -242,9 +242,10 @@ EVENTS: list[dict[str, Any]] = [
 
     {"company_slug": "avidxchange", "event_date": "2021-10-13", "event_type": "ipo",
      "status_after": "public", "source_name": "NASDAQ AVDX IPO", "confidence": 90},
-    {"company_slug": "avidxchange", "event_date": "2025-05-06", "event_type": "take_private",
-     "status_after": "acquired_private", "source_name": "Corpay/TPG take-private", "confidence": 75,
-     "notes": "Take-private by TPG and Corpay (approximate date)."},
+    {"company_slug": "avidxchange", "event_date": "2025-10-15", "event_type": "take_private",
+     "status_after": "acquired_private", "source_name": "Corpay completion release",
+     "source_url": "https://investor.corpay.com/node/19411/pdf", "confidence": 90,
+     "notes": "Codex sign-off correction: 2025-05-06 was the ANNOUNCEMENT date; 2025-10-15 is the close (TPG/Corpay)."},
 
     {"company_slug": "doordash", "event_date": "2020-12-09", "event_type": "ipo",
      "status_after": "public", "source_name": "NYSE DASH IPO", "confidence": 95},

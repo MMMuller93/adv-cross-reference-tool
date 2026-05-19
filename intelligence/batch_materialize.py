@@ -80,6 +80,7 @@ MANIFEST_COLUMNS = [
     # eligible = status is 'private' or 'unknown' at the evidence date.
     "eligible_evidence",
     "public_era_evidence",
+    "eligible_distinct_advisers",
     "wall_clock_seconds",
     "error",
 ]
@@ -161,23 +162,22 @@ def evaluate_publishable(
     result: dict[str, Any],
     flags: list[str],
     eligible_evidence: int,
+    eligible_distinct_advisers: int,
 ) -> tuple[bool, str]:
     """Apply the publication gate (Codex 2026-05-18 spec — lifecycle-aware).
 
     A company is publishable iff:
       - no error
-      - has at least MIN_EVIDENCE_FOR_PUBLISH ELIGIBLE evidence rows
+      - at least MIN_EVIDENCE_FOR_PUBLISH ELIGIBLE evidence rows
         (status_at_evidence_date IN private/unknown)
-        OR at least MIN_RESOLVED_FOR_PUBLISH advisers identified
+        OR at least MIN_RESOLVED_FOR_PUBLISH ELIGIBLE distinct advisers
       - resolution rate >= LOW_RESOLUTION_THRESHOLD
 
-    Eligible-evidence count comes from v_intel_company_holders filtered to
-    status_at_evidence_date IN PUBLISH_ELIGIBLE_STATUSES. This replaces the
-    earlier static `lifecycle_status` gate. Companies that are CURRENTLY
-    public but had real private-era N-PORT history still publish — their
-    public-era rows are still in the CSV but labeled `was_private_at_
-    evidence_date=False`. Dana / CoreWeave / Squarespace post-2024 / etc.
-    will show zero eligible evidence and correctly fail this gate.
+    Eligible-distinct-advisers (Codex sign-off correction): count distinct
+    adviser CRDs ONLY among private-era rows. Public-era advisers don't
+    count toward thin_evidence fallback. Previously, Ginkgo Bioworks had
+    eligible=1 + 2 distinct advisers (1 private-era + 1 public-era) and
+    slipped through — now eligible_distinct_advisers=1, correctly thin.
 
     Returns (publishable, reason).
     """
@@ -185,7 +185,6 @@ def evaluate_publishable(
         return False, "error"
 
     res_n = result.get("resolutions") or 0
-    distinct_advisers = result.get("distinct_advisers") or 0
     nport_n = result.get("positions") or 0
     pooled_n = result.get("pooled") or 0
     total = nport_n + pooled_n
@@ -196,7 +195,8 @@ def evaluate_publishable(
         # Has data but all of it is public-era — block from auto-publish.
         return False, "no_private_era_evidence"
 
-    if eligible_evidence < MIN_EVIDENCE_FOR_PUBLISH and distinct_advisers < MIN_RESOLVED_FOR_PUBLISH:
+    if (eligible_evidence < MIN_EVIDENCE_FOR_PUBLISH
+            and eligible_distinct_advisers < MIN_RESOLVED_FOR_PUBLISH):
         return False, "thin_evidence"
     if total > 0 and (res_n / total) < LOW_RESOLUTION_THRESHOLD:
         return False, "low_resolution"
@@ -206,14 +206,20 @@ def evaluate_publishable(
     return True, "ok"
 
 
-def count_lifecycle_eligible_evidence(nport_client, company_slug: str) -> tuple[int, int]:
-    """Return (eligible_count, public_era_count) by querying v_intel_company_holders.
+def count_lifecycle_eligible_evidence(
+    nport_client, company_slug: str
+) -> tuple[int, int, int]:
+    """Return (eligible_count, public_era_count, eligible_distinct_advisers).
 
     eligible_count = rows where status_at_evidence_date IN PUBLISH_ELIGIBLE_STATUSES
     public_era_count = rows where status_at_evidence_date NOT IN that set
+    eligible_distinct_advisers = distinct adviser_crd values among eligible rows ONLY
+        (Codex sign-off blocker: counting distinct_advisers across ALL evidence
+        was a bug — Ginkgo had eligible=1 + 2 distinct advisers crossing public/
+        private era, slipping through the gate. The gate should require advisers
+        attached to PRIVATE-ERA holdings.)
     """
     # Count eligible (private or unknown at evidence date)
-    eligible = 0
     response = (
         nport_client.table("v_intel_company_holders")
         .select("evidence_id", count="exact")
@@ -234,7 +240,34 @@ def count_lifecycle_eligible_evidence(nport_client, company_slug: str) -> tuple[
         .execute()
     )
     public_era = int(response.count or 0)
-    return eligible, public_era
+
+    # Count distinct adviser CRDs among ELIGIBLE rows. Pull all eligible CRDs
+    # (small set per company) and dedupe in memory.
+    eligible_advisers: set[str] = set()
+    last_id = 0
+    while True:
+        response = (
+            nport_client.table("v_intel_company_holders")
+            .select("evidence_id,adviser_crd")
+            .eq("company_slug", company_slug)
+            .in_("status_at_evidence_date", list(PUBLISH_ELIGIBLE_STATUSES))
+            .not_.is_("adviser_crd", "null")
+            .gt("evidence_id", last_id)
+            .order("evidence_id")
+            .limit(1000)
+            .execute()
+        )
+        batch = response.data or []
+        if not batch:
+            break
+        for row in batch:
+            crd = row.get("adviser_crd")
+            if crd:
+                eligible_advisers.add(str(crd))
+        last_id = int(batch[-1]["evidence_id"])
+        if len(batch) < 1000:
+            break
+    return eligible, public_era, len(eligible_advisers)
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
@@ -316,6 +349,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                     "suspicious_alias_count": 0,
                     "eligible_evidence": 0,
                     "public_era_evidence": 0,
+                    "eligible_distinct_advisers": 0,
                     "wall_clock_seconds": round(elapsed, 1),
                     "error": str(result["error"])[:200],
                 }
@@ -325,10 +359,14 @@ def main(argv: Optional[list[str]] = None) -> int:
                 # Lifecycle-aware evidence counts (Codex 2026-05-18 design).
                 # Queries v_intel_company_holders which uses
                 # company_status_at_date() to compute status per row.
-                eligible_evidence, public_era_evidence = count_lifecycle_eligible_evidence(
+                (eligible_evidence,
+                 public_era_evidence,
+                 eligible_distinct_advisers) = count_lifecycle_eligible_evidence(
                     nport, slug
                 )
-                publishable, reason = evaluate_publishable(result, flags, eligible_evidence)
+                publishable, reason = evaluate_publishable(
+                    result, flags, eligible_evidence, eligible_distinct_advisers
+                )
                 nport_n = result.get("positions") or result.get("positions_pending") or 0
                 pooled_n = result.get("pooled") or result.get("pooled_pending") or 0
                 direct_n = result.get("direct") or result.get("direct_pending") or 0
@@ -353,6 +391,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                     "suspicious_alias_count": len(susp),
                     "eligible_evidence": eligible_evidence,
                     "public_era_evidence": public_era_evidence,
+                    "eligible_distinct_advisers": eligible_distinct_advisers,
                     "wall_clock_seconds": round(elapsed, 1),
                     "error": "",
                 }

@@ -81,13 +81,29 @@ def create_formd_client():
     return create_client(url, key)
 
 
-def _paginate_holders(nport, company_slug: str, source_type: str) -> list[dict[str, Any]]:
-    """Keyset-paginate one source_type bucket of v_intel_company_holders."""
+# Statuses that count as "private-era" — used as the default CSV filter.
+# Matches batch_materialize.PUBLISH_ELIGIBLE_STATUSES intentionally.
+DEFAULT_ELIGIBLE_STATUSES = ("private", "unknown")
+
+
+def _paginate_holders(
+    nport, company_slug: str, source_type: str, *, audit: bool
+) -> list[dict[str, Any]]:
+    """Keyset-paginate one source_type bucket of v_intel_company_holders.
+
+    When audit=False (the default), only returns rows where
+    status_at_evidence_date is private or unknown — i.e., the
+    company was actually private at the time of the holding. Public-era
+    rows are filtered out so the published CSV doesn't claim "Anthropic
+    holder" for a fund that bought Anthropic AFTER its IPO.
+
+    audit=True returns every row including public-era + acquired-private.
+    """
     rows: list[dict[str, Any]] = []
     last_id = 0
     page_size = 1000
     while True:
-        response = (
+        query = (
             nport.table("v_intel_company_holders")
             .select("*")
             .eq("company_slug", company_slug)
@@ -95,8 +111,10 @@ def _paginate_holders(nport, company_slug: str, source_type: str) -> list[dict[s
             .gt("evidence_id", last_id)
             .order("evidence_id")
             .limit(page_size)
-            .execute()
         )
+        if not audit:
+            query = query.in_("status_at_evidence_date", list(DEFAULT_ELIGIBLE_STATUSES))
+        response = query.execute()
         batch = response.data or []
         if not batch:
             break
@@ -107,15 +125,16 @@ def _paginate_holders(nport, company_slug: str, source_type: str) -> list[dict[s
     return rows
 
 
-def fetch_holders(nport, company_slug: str) -> list[dict[str, Any]]:
-    """Pull every holder evidence row from v_intel_company_holders.
+def fetch_holders(nport, company_slug: str, *, audit: bool = False) -> list[dict[str, Any]]:
+    """Pull holder evidence rows from v_intel_company_holders.
 
-    Splits by source_type so PostgREST's 1000-row default doesn't truncate
-    larger companies (SpaceX, Databricks, etc.).
+    By default returns only private-era / unknown-status rows (the
+    publication surface). Pass audit=True to include every row regardless
+    of lifecycle status (for internal audit + debugging).
     """
     rows: list[dict[str, Any]] = []
     for source_type in ("nport", "formd_pooled_vehicle"):
-        rows.extend(_paginate_holders(nport, company_slug, source_type))
+        rows.extend(_paginate_holders(nport, company_slug, source_type, audit=audit))
     return rows
 
 
@@ -333,7 +352,17 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--output",
         default=None,
-        help="Output CSV path. Defaults to ./out/{company}_holders_{date}.csv",
+        help="Output CSV path. Defaults to ./out/{company}_holders_{date}.csv (or _audit_ when --audit)",
+    )
+    parser.add_argument(
+        "--audit",
+        action="store_true",
+        help=(
+            "Include every holder row, including public-era and acquired-private. "
+            "Default behavior (without this flag) is to write only private-era / "
+            "unknown-status rows — the publication surface. The audit output is "
+            "useful for internal review of misclassifications."
+        ),
     )
     return parser.parse_args(argv)
 
@@ -346,15 +375,22 @@ def main(argv: Optional[list[str]] = None) -> int:
     adv = create_adv_client()
     formd = create_formd_client()  # may be None — enriched_managers join is optional
 
-    print(f"Fetching holder evidence for {args.company}...")
-    holders = fetch_holders(nport, args.company)
+    mode = "audit" if args.audit else "publication"
+    print(f"Fetching holder evidence for {args.company} ({mode} mode)...")
+    holders = fetch_holders(nport, args.company, audit=args.audit)
     print(f"  {len(holders)} evidence rows")
 
     if not holders:
-        print(
-            "  No evidence found. Did you run materialize_holders.py "
-            f"--company {args.company} --execute first?"
-        )
+        if args.audit:
+            print(
+                "  No evidence found. Did you run materialize_holders.py "
+                f"--company {args.company} --execute first?"
+            )
+        else:
+            print(
+                "  No private-era / unknown-status evidence found. "
+                "(Run again with --audit to see public-era rows.)"
+            )
         return 1
 
     nport_count = sum(1 for h in holders if h["source_type"] == "nport")
@@ -377,11 +413,15 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     from datetime import datetime, timezone
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d")
-    output_path = (
-        Path(args.output)
-        if args.output
-        else Path(__file__).resolve().parent / "out" / f"{args.company}_holders_{timestamp}.csv"
-    )
+    if args.output:
+        output_path = Path(args.output)
+    else:
+        suffix = "audit" if args.audit else "publication"
+        output_path = (
+            Path(__file__).resolve().parent
+            / "out"
+            / f"{args.company}_holders_{suffix}_{timestamp}.csv"
+        )
     write_csv(csv_rows, output_path)
     print(f"\nWrote {len(csv_rows)} rows to {output_path}")
     return 0
