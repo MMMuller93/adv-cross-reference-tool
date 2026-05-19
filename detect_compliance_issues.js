@@ -14,7 +14,7 @@
  */
 
 const { createClient } = require('@supabase/supabase-js');
-const { extractBaseName, checkAdvDatabase, parseRelatedPersons } = require('./lib/adv_lookup');
+const { extractBaseName, checkAdvDatabase, searchAdvByName, parseRelatedPersons } = require('./lib/adv_lookup');
 const { detectPlatform } = require('./lib/platform_detection');
 
 // Database configuration - use environment variables for GitHub Actions, fallback to defaults for local dev
@@ -322,16 +322,21 @@ async function detectNeedsInitialADVFiling() {
     let checkedCount = 0;
 
     for (const [managerName, data] of managerFilings) {
-        // A6: Check ADV with multi-strategy lookup (now in lib/adv_lookup.js).
-        // We pass related_names AND related_roles so the lib can do title-filtered
-        // adviser_owners cross-check on Form D principals with executive roles.
-        const dbResult = await checkAdvDatabase(advDb, managerName, {
+        // A6: Check ADV with variant-laddered multi-strategy lookup (lib/adv_lookup.js).
+        // searchAdvByName generates name variants (full → strip strategy tail →
+        // first 2 tokens → first distinctive token) and delegates each to
+        // checkAdvDatabase, then applies passesStricterCrdGate to reject
+        // acronym/short-token false positives. Fixes the Hash3/Ineffable class
+        // where the Form D series-master had a tail token the SEC name lacked
+        // (e.g., "Ineffable Ventures Series, LLC" → matches "INEFFABLE VENTURES LLC"
+        // via the "Ineffable Ventures" variant).
+        const dbResult = await searchAdvByName(advDb, managerName, {
             relatedNames: data.related_names,
             relatedRoles: data.related_roles,
         });
 
         if (dbResult.found) {
-            console.log(`  ✓ Found: ${managerName} → ${dbResult.adviser_name} (CRD ${dbResult.crd}, via ${dbResult.source}${dbResult.matched_person ? `, person: ${dbResult.matched_person}` : ''})`);
+            console.log(`  ✓ Found: ${managerName} → ${dbResult.adviser_name} (CRD ${dbResult.crd}, via ${dbResult.source}, variant "${dbResult.matched_variant}"${dbResult.matched_person ? `, person: ${dbResult.matched_person}` : ''})`);
             continue;
         }
 

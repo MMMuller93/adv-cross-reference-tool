@@ -1381,6 +1381,7 @@ app.get('/api/funds/new-managers', async (req, res) => {
     // matching paths (this endpoint + the detector) use the same name shape.
     const { extractBaseName: parseFundName } = require('./lib/adv_lookup');
     const nameVariants = require('./lib/name_variants');
+    const { passesStricterCrdGate } = require('./lib/name_matcher');
 
     // Token-subset matcher. Production bug 2026-05-11 (multiple): the previous
     // bidirectional `startsWith` matched on very short adviser_entity_legal_name
@@ -1471,22 +1472,35 @@ app.get('/api/funds/new-managers', async (req, res) => {
       return null;
     };
 
-    // Variant-laddered match (added 2026-05-18). Codex review identified that
-    // the original single-shot match missed cases like "Hash3 Capital Opportunity"
-    // → "HASH3 LLC" — full name has extra distinctive "opportunity" token that
-    // adv lacks, blocking Direction B. By trying progressively shorter variants
-    // (Hash3 Capital Opportunity → Hash3 Capital → Hash3), Direction B passes
-    // on the shortest variant. Same shared module v3 identity uses.
-    const findAdviserMatch = (parsedName) => {
+    // Variant-laddered match (2026-05-18). Tries progressively shorter
+    // variants so manager-side tail tokens ("Series", "Master", "Opportunity",
+    // "Growth", "Holdings") that aren't in the SEC adviser_name don't block
+    // a match.
+    //
+    // Stricter CRD gate added 2026-05-19: once a variant produces a match,
+    // verify the shared distinctive token count with passesStricterCrdGate.
+    // Without this, a single-token variant like "TMS" can wrongly match
+    // "TMS Capital Management" (TMS Angels false-positive regression that
+    // the v3 enrichment pipeline already protects against).
+    const findAdviserMatch = (parsedName, opts = {}) => {
       const variants = nameVariants.generateVariants(parsedName, { extraStripper: parseFundName });
-      // Always try the input as-is first in case it's already canonical.
       const tries = [parsedName, ...variants];
       const seen = new Set();
       for (const v of tries) {
         if (!v || seen.has(v.toLowerCase())) continue;
         seen.add(v.toLowerCase());
-        const hit = tryAdviserMatch(v);
-        if (hit) return hit;
+        const adv = tryAdviserMatch(v);
+        if (!adv) continue;
+
+        // Gate against acronym FPs. Build a checkAdvDatabase-shaped result
+        // for the gate (it expects {found, adviser_name}).
+        const gate = passesStricterCrdGate(
+          { found: true, adviser_name: adv.adviser_name },
+          parsedName,
+          { matchedVariant: v, relatedNames: opts.relatedNames || null }
+        );
+        if (gate.pass) return adv;
+        // Rejected as FP — try next variant
       }
       return null;
     };
@@ -1531,8 +1545,9 @@ app.get('/api/funds/new-managers', async (req, res) => {
         }
       }
 
-      // Check advisers lookup
-      const advData = findAdviserMatch(parsedName);
+      // Check advisers lookup. Pass relatedNames so the stricter gate can
+      // do acronym corroboration via Form D principals when needed.
+      const advData = findAdviserMatch(parsedName, { relatedNames: manager.related_names });
       if (advData) {
         enrichedManager.has_form_adv = true;
         enrichedManager.linked_crd = advData.crd;
