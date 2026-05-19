@@ -1409,14 +1409,21 @@ app.get('/api/funds/new-managers', async (req, res) => {
     // Added 2026-05-11: "investment(s)", "partnership(s)" — both common generic
     // firm-name modifiers that lead to wrong matches when they're the only
     // overlap.
-    const MATCH_STOPWORDS = new Set([
+    const MATCH_STOPWORDS_BASE = [
       'the','of','and','co','llc','lp','llp','ltd','inc','corp','company',
       'fund','funds','capital','ventures','venture','partners','partner','partnership','partnerships',
       'holdings','holding','group','management','mgmt','advisors','advisers',
       'gp','master','feeder','series','spv','spvs','investment','investments',
       'first','new','global','international',
-    ]);
+    ];
     const stem = (t) => (t.length >= 4 && t.endsWith('s') ? t.slice(0, -1) : t);
+    // Pre-stem the stopword list so distinctiveOf catches stemmed token forms.
+    // Without this, words like "series" stem to "serie" (length 6, ends in 's')
+    // but the base set only contains 'series' — so 'serie' leaks as "distinctive"
+    // and pollutes the manager-side extra-token check. Same fix in
+    // lib/name_matcher.js#distinctiveTokens.
+    const MATCH_STOPWORDS = new Set(MATCH_STOPWORDS_BASE);
+    for (const w of MATCH_STOPWORDS_BASE) MATCH_STOPWORDS.add(stem(w));
     const rawTokens = (s) => {
       const toks = (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(/\s+/).filter(Boolean);
       return new Set(toks.filter(t => t.length >= 2).map(stem));
