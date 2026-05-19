@@ -1335,6 +1335,7 @@ app.get('/api/funds/new-managers', async (req, res) => {
     // "Moreno"). Using lib/adv_lookup.js's extractBaseName ensures the two
     // matching paths (this endpoint + the detector) use the same name shape.
     const { extractBaseName: parseFundName } = require('./lib/adv_lookup');
+    const nameVariants = require('./lib/name_variants');
 
     // Token-subset matcher. Production bug 2026-05-11 (multiple): the previous
     // bidirectional `startsWith` matched on very short adviser_entity_legal_name
@@ -1384,14 +1385,17 @@ app.get('/api/funds/new-managers', async (req, res) => {
       for (const t of a) if (b.has(t) && !MATCH_STOPWORDS.has(t)) n++;
       return n;
     };
-    const findAdviserMatch = (parsedName) => {
-      const lowerName = parsedName.toLowerCase();
+    // Per-pair predicate: does this single adviser candidate match the
+    // (variant-derived) manager name? Same bidirectional token-subset rule as
+    // before — only the OUTER iteration changed.
+    const tryAdviserMatch = (variantName) => {
+      const lowerName = variantName.toLowerCase();
       if (advisersByNameExact[lowerName]) {
         return advisersByNameExact[lowerName];
       }
       const mgrTokens = rawTokens(lowerName);
       const mgrDist = distinctiveOf(mgrTokens);
-      if (mgrTokens.size < 2) return null;
+      if (mgrTokens.size < 1) return null;
 
       for (const { names, adv } of advisersByNamePrefix) {
         for (let nameIdx = 0; nameIdx < names.length; nameIdx++) {
@@ -1408,21 +1412,36 @@ app.get('/api/funds/new-managers', async (req, res) => {
           if (sharedDistinctive(mgrTokens, advTokens) < 1) continue;
           const advDist = distinctiveOf(advTokens);
           // Direction A: adv ⊆ mgr (adviser name fully inside manager).
-          // Reject if mgr has DISTINCTIVE tokens that adv lacks — those extras
-          // suggest a different firm (e.g., AGC AI Nexus Fund vs AI FUNDS).
           if (advTokens.size <= mgrTokens.size && [...advTokens].every(t => mgrTokens.has(t))) {
             const mgrExtraDist = [...mgrDist].filter(t => !advDist.has(t));
             if (mgrExtraDist.length === 0) return adv;
           }
           // Direction B: mgr ⊆ adv (manager name fully inside adviser).
-          // Reject if adv has DISTINCTIVE tokens that mgr lacks (e.g.,
-          // Forge Investments vs VALLEY FORGE INVESTMENT CONSULTANTS;
-          // Infinitas Capital Master vs BLUE INFINITAS CAPITAL).
           if (mgrTokens.size <= advTokens.size && [...mgrTokens].every(t => advTokens.has(t))) {
             const advExtraDist = [...advDist].filter(t => !mgrDist.has(t));
             if (advExtraDist.length === 0) return adv;
           }
         }
+      }
+      return null;
+    };
+
+    // Variant-laddered match (added 2026-05-18). Codex review identified that
+    // the original single-shot match missed cases like "Hash3 Capital Opportunity"
+    // → "HASH3 LLC" — full name has extra distinctive "opportunity" token that
+    // adv lacks, blocking Direction B. By trying progressively shorter variants
+    // (Hash3 Capital Opportunity → Hash3 Capital → Hash3), Direction B passes
+    // on the shortest variant. Same shared module v3 identity uses.
+    const findAdviserMatch = (parsedName) => {
+      const variants = nameVariants.generateVariants(parsedName, { extraStripper: parseFundName });
+      // Always try the input as-is first in case it's already canonical.
+      const tries = [parsedName, ...variants];
+      const seen = new Set();
+      for (const v of tries) {
+        if (!v || seen.has(v.toLowerCase())) continue;
+        seen.add(v.toLowerCase());
+        const hit = tryAdviserMatch(v);
+        if (hit) return hit;
       }
       return null;
     };

@@ -13,6 +13,8 @@ require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 const { createClient } = require('@supabase/supabase-js');
 const { checkAdvDatabase, extractBaseName, NAME_STOPWORDS } = require('../../lib/adv_lookup');
 const { ensureLoaded, lookupInvestor } = require('../external_investor_lookup');
+const { generateVariants: generateVariantsShared, stripLegal: stripLegalShared, STRATEGY_TAILS: STRATEGY_TAILS_SHARED }
+  = require('../../lib/name_variants');
 
 /**
  * Stricter SEC-CRD-match gate (added 2026-05-18 after Hash3/TMS-Angels post-cleanup audit).
@@ -106,84 +108,13 @@ if (!FORMD_KEY) throw new Error('Missing required env var: FORMD_SERVICE_KEY');
 
 const formdDb = createClient(FORMD_URL, FORMD_KEY);
 
-// Strategy-tail words that appear in fund series names but not adviser names.
-const STRATEGY_TAILS = [
-  'Opportunity', 'Opportunities',
-  'Growth', 'Income', 'Aggressive',
-  'Balanced', 'Conservative', 'Diversified',
-  'Sustainable', 'Impact', 'ESG',
-  'Global', 'International', 'Emerging',
-  'Technology', 'Healthcare', 'Climate',
-  'Select', 'Premium', 'Enhanced',
-  'Plus', 'Pro', 'Elite',
-  'Alpha', 'Beta',
-  'Master', 'Feeder', 'Onshore', 'Offshore',
-];
-
-const LEGAL_SUFFIXES_RE = /\s*,?\s*(LP|LLC|L\.P\.|L\.L\.C\.|LTD|LIMITED|INC|CORP|INCORPORATED)\.?\s*$/i;
-const FUND_NUMBER_RE = /\s+(Fund\s+)?(I{1,3}|IV|V|VI{0,3}|IX|X|\d+)\s*$/i;
-
-/**
- * Strip legal suffixes and fund numbers from a name.
- */
-function stripLegal(name) {
-  return name
-    .replace(LEGAL_SUFFIXES_RE, '')
-    .replace(FUND_NUMBER_RE, '')
-    .trim();
-}
-
-/**
- * Generate name variants from most-specific to least-specific.
- * Returns an array of strings to try against checkAdvDatabase.
- *
- * Example: "Hash3 Capital Opportunity, LP"
- *   1. "Hash3 Capital Opportunity"   (full stripped)
- *   2. "Hash3 Capital"               (strip strategy tail)
- *   3. "Hash3"                       (first token)
- */
+// Variant generation lives in lib/name_variants.js (shared with server.js).
+// Re-export wrappers preserve the local API + add the adv_lookup extractBaseName
+// stripper that v3 historically applied as a second pass.
+const STRATEGY_TAILS = STRATEGY_TAILS_SHARED;
+const stripLegal = stripLegalShared;
 function generateVariants(rawName) {
-  if (!rawName) return [];
-
-  const variants = new Set();
-
-  // Variant 1: full name with legal suffix stripped
-  const stripped = stripLegal(rawName);
-  if (stripped) variants.add(stripped);
-
-  // Also try extractBaseName (adv_lookup's own stripper — handles GP/Master etc.)
-  const base = extractBaseName(rawName);
-  if (base && base !== stripped) variants.add(base);
-
-  // Variant 2: strip strategy tail words from the end
-  for (const tail of STRATEGY_TAILS) {
-    const re = new RegExp(`\\s+${tail}\\s*$`, 'i');
-    const withoutTail = stripped.replace(re, '').trim();
-    if (withoutTail && withoutTail !== stripped && withoutTail.length >= 3) {
-      variants.add(withoutTail);
-      const withoutTailBase = stripLegal(withoutTail);
-      if (withoutTailBase && withoutTailBase !== withoutTail) {
-        variants.add(withoutTailBase);
-      }
-    }
-  }
-
-  // Variant 3: first two meaningful tokens
-  const tokens = stripped.split(/\s+/).filter(t => t.length >= 2);
-  if (tokens.length >= 3) {
-    variants.add(tokens.slice(0, 2).join(' '));
-  }
-
-  // Variant 4: first single distinctive token
-  const GENERIC = new Set([
-    'fund', 'funds', 'capital', 'ventures', 'venture', 'partners', 'partner',
-    'management', 'advisors', 'advisers', 'group', 'holdings', 'the',
-  ]);
-  if (tokens.length >= 2 && !GENERIC.has(tokens[0].toLowerCase())) {
-    variants.add(tokens[0]);
-  }
-
-  return Array.from(variants).filter(v => v.length >= 3);
+  return generateVariantsShared(rawName, { extraStripper: extractBaseName });
 }
 
 /**
