@@ -348,11 +348,26 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Produce the fund-holders CSV report for a tracked private company."
     )
-    parser.add_argument("--company", required=True, help="Company slug (e.g., anthropic)")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--company", help="Single company slug (e.g., anthropic)")
+    group.add_argument(
+        "--all-publishable",
+        action="store_true",
+        help=(
+            "Read the batch manifest at intelligence/out/batch_manifest.csv and "
+            "generate a CSV for every company with publishable=True. Loads "
+            "credentials once and reuses Supabase clients across companies."
+        ),
+    )
+    parser.add_argument(
+        "--manifest",
+        default=str(Path(__file__).resolve().parent / "out" / "batch_manifest.csv"),
+        help="Path to the batch manifest (used with --all-publishable)",
+    )
     parser.add_argument(
         "--output",
         default=None,
-        help="Output CSV path. Defaults to ./out/{company}_holders_{date}.csv (or _audit_ when --audit)",
+        help="Output CSV path (single-company mode only). Defaults to ./out/{company}_holders_{publication|audit}_{date}.csv",
     )
     parser.add_argument(
         "--audit",
@@ -367,9 +382,95 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _generate_csv_for_company(
+    nport, adv, formd, company_slug: str, *, audit: bool, output_path: Optional[Path] = None
+) -> tuple[Path, int, int]:
+    """Generate the holders CSV for a single company.
+
+    Returns (output_path, rows_written, advisers_resolved).
+    """
+    holders = fetch_holders(nport, company_slug, audit=audit)
+    if not holders:
+        return None, 0, 0
+
+    crds = [h["adviser_crd"] for h in holders if h.get("adviser_crd")]
+    adviser_details = fetch_adviser_details(adv, crds)
+    enriched_extras = fetch_enriched_manager_extras(formd, crds)
+    csv_rows = build_csv_rows(holders, adviser_details, enriched_extras)
+
+    from datetime import datetime, timezone
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    if output_path is None:
+        suffix = "audit" if audit else "publication"
+        output_path = (
+            Path(__file__).resolve().parent
+            / "out"
+            / f"{company_slug}_holders_{suffix}_{timestamp}.csv"
+        )
+    write_csv(csv_rows, output_path)
+    resolved = sum(1 for h in holders if h.get("adviser_crd"))
+    return output_path, len(csv_rows), resolved
+
+
+def _run_all_publishable(args: argparse.Namespace) -> int:
+    """Generate CSVs for every publishable company in the manifest.
+
+    Loads credentials + clients once and reuses them across companies.
+    Reads the manifest filtered to publishable=True.
+    """
+    import csv as _csv
+    manifest_path = Path(args.manifest)
+    if not manifest_path.exists():
+        print(f"ERROR: manifest not found at {manifest_path}")
+        return 1
+
+    with manifest_path.open() as f:
+        manifest_rows = [r for r in _csv.DictReader(f) if r.get("publishable") == "True"]
+    if not manifest_rows:
+        print("No publishable companies in the manifest.")
+        return 1
+
+    print(f"Generating publication CSVs for {len(manifest_rows)} companies...")
+    nport = create_nport_client()
+    adv = create_adv_client()
+    formd = create_formd_client()
+
+    successes = 0
+    failures = 0
+    total_rows_written = 0
+    for i, mrow in enumerate(manifest_rows, 1):
+        slug = mrow["slug"]
+        try:
+            out_path, rows, resolved = _generate_csv_for_company(
+                nport, adv, formd, slug, audit=args.audit
+            )
+            if out_path:
+                print(
+                    f"  [{i:>3d}/{len(manifest_rows)}] {slug:30s}  "
+                    f"{rows:>5d} rows ({resolved} resolved)  -> {out_path.name}"
+                )
+                successes += 1
+                total_rows_written += rows
+            else:
+                print(f"  [{i:>3d}/{len(manifest_rows)}] {slug:30s}  no rows (skipped)")
+                failures += 1
+        except Exception as exc:  # noqa: BLE001
+            failures += 1
+            print(f"  [{i:>3d}/{len(manifest_rows)}] {slug:30s}  ERROR: {exc}", file=sys.stderr)
+
+    print(
+        f"\nWrote {successes}/{len(manifest_rows)} CSVs "
+        f"({total_rows_written} total rows). {failures} failures."
+    )
+    return 0 if failures == 0 else 1
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
     load_credentials()
+
+    if args.all_publishable:
+        return _run_all_publishable(args)
 
     nport = create_nport_client()
     adv = create_adv_client()
