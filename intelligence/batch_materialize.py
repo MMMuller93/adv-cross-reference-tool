@@ -53,9 +53,13 @@ from materialize_holders import (  # type: ignore[import-not-found]
 
 
 LOW_RESOLUTION_THRESHOLD = 0.30   # below this, status=low_resolution
-MIN_EVIDENCE_FOR_PUBLISH = 3      # need at least this many evidence rows
+MIN_EVIDENCE_FOR_PUBLISH = 3      # need at least this many private-era evidence rows
 MIN_RESOLVED_FOR_PUBLISH = 2      # OR at least this many resolved advisers
-PUBLISH_LIFECYCLE_ALLOWED = {"private", None}  # public/acquired -> not auto-publishable
+# Lifecycle-aware: eligible-for-publication evidence is rows where the
+# company status at the evidence date was 'private' (we know it was private)
+# OR 'unknown' (no lifecycle event seeded — pragmatic default for unseeded
+# companies; once we seed an event the status flips to a known value).
+PUBLISH_ELIGIBLE_STATUSES = {"private", "unknown"}
 
 MANIFEST_COLUMNS = [
     "slug",
@@ -72,6 +76,10 @@ MANIFEST_COLUMNS = [
     "distinct_advisers",
     "resolution_rate",
     "suspicious_alias_count",
+    # Lifecycle-aware evidence counts (from v_intel_company_holders).
+    # eligible = status is 'private' or 'unknown' at the evidence date.
+    "eligible_evidence",
+    "public_era_evidence",
     "wall_clock_seconds",
     "error",
 ]
@@ -152,48 +160,81 @@ def classify_status(result: dict[str, Any]) -> tuple[str, list[str]]:
 def evaluate_publishable(
     result: dict[str, Any],
     flags: list[str],
-    lifecycle_status: Optional[str],
+    eligible_evidence: int,
 ) -> tuple[bool, str]:
-    """Apply the publication gate (Codex spec).
+    """Apply the publication gate (Codex 2026-05-18 spec — lifecycle-aware).
 
     A company is publishable iff:
-      - lifecycle is private (or NULL), NOT public/acquired
-      - no alias_review flag
       - no error
-      - has at least MIN_EVIDENCE_FOR_PUBLISH evidence rows
+      - has at least MIN_EVIDENCE_FOR_PUBLISH ELIGIBLE evidence rows
+        (status_at_evidence_date IN private/unknown)
         OR at least MIN_RESOLVED_FOR_PUBLISH advisers identified
       - resolution rate >= LOW_RESOLUTION_THRESHOLD
 
-    Returns (publishable: bool, reason: str). Reason describes why
-    NOT publishable when False; 'ok' when True.
+    Eligible-evidence count comes from v_intel_company_holders filtered to
+    status_at_evidence_date IN PUBLISH_ELIGIBLE_STATUSES. This replaces the
+    earlier static `lifecycle_status` gate. Companies that are CURRENTLY
+    public but had real private-era N-PORT history still publish — their
+    public-era rows are still in the CSV but labeled `was_private_at_
+    evidence_date=False`. Dana / CoreWeave / Squarespace post-2024 / etc.
+    will show zero eligible evidence and correctly fail this gate.
+
+    Returns (publishable, reason).
     """
-    if lifecycle_status not in PUBLISH_LIFECYCLE_ALLOWED:
-        return False, f"lifecycle_{lifecycle_status}"
     if "error" in flags:
         return False, "error"
 
-    nport_n = result.get("positions") or 0
-    pooled_n = result.get("pooled") or 0
     res_n = result.get("resolutions") or 0
     distinct_advisers = result.get("distinct_advisers") or 0
+    nport_n = result.get("positions") or 0
+    pooled_n = result.get("pooled") or 0
     total = nport_n + pooled_n
 
-    if total == 0:
-        return False, "no_evidence"
-    # Use DISTINCT advisers, not resolution rows, for the "min advisers"
-    # threshold — Codex flagged this. A company with 2 Form D rows both
-    # attributed to the same firm has only 1 distinct adviser.
-    if total < MIN_EVIDENCE_FOR_PUBLISH and distinct_advisers < MIN_RESOLVED_FOR_PUBLISH:
+    if eligible_evidence == 0:
+        if total == 0:
+            return False, "no_evidence"
+        # Has data but all of it is public-era — block from auto-publish.
+        return False, "no_private_era_evidence"
+
+    if eligible_evidence < MIN_EVIDENCE_FOR_PUBLISH and distinct_advisers < MIN_RESOLVED_FOR_PUBLISH:
         return False, "thin_evidence"
     if total > 0 and (res_n / total) < LOW_RESOLUTION_THRESHOLD:
         return False, "low_resolution"
     # alias_review is intentionally informational, not blocking. The
     # alias-hit-cap discards bad rows at the source, so when alias_review
-    # fires the remaining evidence is still clean. The flag tells the
-    # operator "one or more aliases were filtered — review them if you
-    # want better coverage." If alias_review + low_resolution co-occur,
-    # the low_resolution branch above blocks publication.
+    # fires the remaining evidence is still clean.
     return True, "ok"
+
+
+def count_lifecycle_eligible_evidence(nport_client, company_slug: str) -> tuple[int, int]:
+    """Return (eligible_count, public_era_count) by querying v_intel_company_holders.
+
+    eligible_count = rows where status_at_evidence_date IN PUBLISH_ELIGIBLE_STATUSES
+    public_era_count = rows where status_at_evidence_date NOT IN that set
+    """
+    # Count eligible (private or unknown at evidence date)
+    eligible = 0
+    response = (
+        nport_client.table("v_intel_company_holders")
+        .select("evidence_id", count="exact")
+        .eq("company_slug", company_slug)
+        .in_("status_at_evidence_date", list(PUBLISH_ELIGIBLE_STATUSES))
+        .limit(1)
+        .execute()
+    )
+    eligible = int(response.count or 0)
+
+    # Count public-era (everything that is NOT in the eligible set)
+    response = (
+        nport_client.table("v_intel_company_holders")
+        .select("evidence_id", count="exact")
+        .eq("company_slug", company_slug)
+        .not_.in_("status_at_evidence_date", list(PUBLISH_ELIGIBLE_STATUSES))
+        .limit(1)
+        .execute()
+    )
+    public_era = int(response.count or 0)
+    return eligible, public_era
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
@@ -273,13 +314,21 @@ def main(argv: Optional[list[str]] = None) -> int:
                     "distinct_advisers": 0,
                     "resolution_rate": 0,
                     "suspicious_alias_count": 0,
+                    "eligible_evidence": 0,
+                    "public_era_evidence": 0,
                     "wall_clock_seconds": round(elapsed, 1),
                     "error": str(result["error"])[:200],
                 }
                 errors += 1
             else:
                 primary, flags = classify_status(result)
-                publishable, reason = evaluate_publishable(result, flags, lifecycle)
+                # Lifecycle-aware evidence counts (Codex 2026-05-18 design).
+                # Queries v_intel_company_holders which uses
+                # company_status_at_date() to compute status per row.
+                eligible_evidence, public_era_evidence = count_lifecycle_eligible_evidence(
+                    nport, slug
+                )
+                publishable, reason = evaluate_publishable(result, flags, eligible_evidence)
                 nport_n = result.get("positions") or result.get("positions_pending") or 0
                 pooled_n = result.get("pooled") or result.get("pooled_pending") or 0
                 direct_n = result.get("direct") or result.get("direct_pending") or 0
@@ -302,6 +351,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                     "distinct_advisers": result.get("distinct_advisers") or 0,
                     "resolution_rate": round(rate, 3),
                     "suspicious_alias_count": len(susp),
+                    "eligible_evidence": eligible_evidence,
+                    "public_era_evidence": public_era_evidence,
                     "wall_clock_seconds": round(elapsed, 1),
                     "error": "",
                 }

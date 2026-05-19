@@ -247,6 +247,13 @@ def build_csv_rows(
             "value_usd": h.get("value_usd"),
             "evidence_date": h.get("evidence_date"),
             "accession_number": h.get("accession_number"),
+            # Lifecycle-aware labeling (from company_lifecycle_events).
+            # 'private', 'public', 'acquired_private', 'acquired_public_parent',
+            # or 'unknown' (no event seeded for this company at this date).
+            "status_at_evidence_date": h.get("status_at_evidence_date"),
+            # Convenience boolean for filtering: True only when the company was
+            # explicitly private on the evidence date. False for public/unknown.
+            "was_private_at_evidence_date": h.get("was_private_at_evidence_date"),
             "adviser_crd": crd,
             "adviser_resolution_method": h.get("adviser_resolution_method"),
             "adviser_name": adv_row.get("adviser_name") if adv_row else None,
@@ -284,6 +291,8 @@ CSV_COLUMNS = [
     "value_usd",
     "evidence_date",
     "accession_number",
+    "status_at_evidence_date",
+    "was_private_at_evidence_date",
     "adviser_crd",
     "adviser_resolution_method",
     "adviser_name",
