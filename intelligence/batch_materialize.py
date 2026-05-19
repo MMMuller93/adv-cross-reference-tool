@@ -206,68 +206,78 @@ def evaluate_publishable(
     return True, "ok"
 
 
-def count_lifecycle_eligible_evidence(
-    nport_client, company_slug: str
-) -> tuple[int, int, int]:
-    """Return (eligible_count, public_era_count, eligible_distinct_advisers).
+def preload_lifecycle_aggregates(nport_client) -> dict[str, dict[str, int]]:
+    """One-shot batch load of lifecycle aggregates for every company.
 
-    eligible_count = rows where status_at_evidence_date IN PUBLISH_ELIGIBLE_STATUSES
-    public_era_count = rows where status_at_evidence_date NOT IN that set
-    eligible_distinct_advisers = distinct adviser_crd values among eligible rows ONLY
-        (Codex sign-off blocker: counting distinct_advisers across ALL evidence
-        was a bug — Ginkgo had eligible=1 + 2 distinct advisers crossing public/
-        private era, slipping through the gate. The gate should require advisers
-        attached to PRIVATE-ERA holdings.)
+    Codex optimization: replaces the per-company query that was running
+    inside the materialize loop (was adding ~5s × 843 ≈ 70 min to the
+    batch). Instead we walk v_intel_company_holders once, group in Python,
+    and return {company_slug: {eligible, public_era, eligible_distinct_advisers}}.
+
+    Trade-off: holds ~30K rows in memory briefly. Negligible.
     """
-    # Count eligible (private or unknown at evidence date)
-    response = (
-        nport_client.table("v_intel_company_holders")
-        .select("evidence_id", count="exact")
-        .eq("company_slug", company_slug)
-        .in_("status_at_evidence_date", list(PUBLISH_ELIGIBLE_STATUSES))
-        .limit(1)
-        .execute()
-    )
-    eligible = int(response.count or 0)
+    aggregates: dict[str, dict] = {}
+    last_evid: dict[str, int] = {}
 
-    # Count public-era (everything that is NOT in the eligible set)
-    response = (
-        nport_client.table("v_intel_company_holders")
-        .select("evidence_id", count="exact")
-        .eq("company_slug", company_slug)
-        .not_.in_("status_at_evidence_date", list(PUBLISH_ELIGIBLE_STATUSES))
-        .limit(1)
-        .execute()
-    )
-    public_era = int(response.count or 0)
+    page_size = 1000
+    # We can't easily keyset by (slug, evidence_id) in one query because
+    # evidence_id is unique per source_type, not globally. So walk each
+    # source_type bucket separately.
+    for source_type in ("nport", "formd_pooled_vehicle"):
+        last_id = 0
+        while True:
+            response = (
+                nport_client.table("v_intel_company_holders")
+                .select("company_slug,evidence_id,status_at_evidence_date,adviser_crd")
+                .eq("source_type", source_type)
+                .gt("evidence_id", last_id)
+                .order("evidence_id")
+                .limit(page_size)
+                .execute()
+            )
+            batch = response.data or []
+            if not batch:
+                break
+            for row in batch:
+                slug = row.get("company_slug")
+                if not slug:
+                    continue
+                agg = aggregates.setdefault(slug, {
+                    "eligible": 0, "public_era": 0,
+                    "eligible_adviser_set": set(),
+                })
+                status = row.get("status_at_evidence_date")
+                if status in PUBLISH_ELIGIBLE_STATUSES:
+                    agg["eligible"] += 1
+                    crd = row.get("adviser_crd")
+                    if crd:
+                        agg["eligible_adviser_set"].add(str(crd))
+                else:
+                    agg["public_era"] += 1
+            last_id = int(batch[-1]["evidence_id"])
+            if len(batch) < page_size:
+                break
 
-    # Count distinct adviser CRDs among ELIGIBLE rows. Pull all eligible CRDs
-    # (small set per company) and dedupe in memory.
-    eligible_advisers: set[str] = set()
-    last_id = 0
-    while True:
-        response = (
-            nport_client.table("v_intel_company_holders")
-            .select("evidence_id,adviser_crd")
-            .eq("company_slug", company_slug)
-            .in_("status_at_evidence_date", list(PUBLISH_ELIGIBLE_STATUSES))
-            .not_.is_("adviser_crd", "null")
-            .gt("evidence_id", last_id)
-            .order("evidence_id")
-            .limit(1000)
-            .execute()
-        )
-        batch = response.data or []
-        if not batch:
-            break
-        for row in batch:
-            crd = row.get("adviser_crd")
-            if crd:
-                eligible_advisers.add(str(crd))
-        last_id = int(batch[-1]["evidence_id"])
-        if len(batch) < 1000:
-            break
-    return eligible, public_era, len(eligible_advisers)
+    # Finalize: replace set with count
+    finalized: dict[str, dict[str, int]] = {}
+    for slug, agg in aggregates.items():
+        finalized[slug] = {
+            "eligible": agg["eligible"],
+            "public_era": agg["public_era"],
+            "eligible_distinct_advisers": len(agg["eligible_adviser_set"]),
+        }
+    return finalized
+
+
+def get_lifecycle_aggregate(
+    aggregates: dict[str, dict[str, int]], company_slug: str
+) -> tuple[int, int, int]:
+    """Lookup from the preloaded aggregate. Returns (eligible, public_era,
+    eligible_distinct_advisers). Companies with no evidence get zeros."""
+    a = aggregates.get(company_slug)
+    if not a:
+        return 0, 0, 0
+    return a["eligible"], a["public_era"], a["eligible_distinct_advisers"]
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
@@ -321,6 +331,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     errors = 0
     flag_counts: dict[str, int] = {}
 
+    # ---------- Phase A: materialize every company ----------
+    # Materialize results are stashed; the publication gate is computed in
+    # phase B after the lifecycle aggregates are preloaded in a single pass.
+    # This replaces a per-company aggregate query (~5s × 843 ≈ 70 min) with
+    # one bulk query (~5s total). Codex 2026-05-19 recommendation.
+    materialize_results: list[dict[str, Any]] = []
+    print("\n=== Phase A: materializing all companies ===")
     for i, company in enumerate(company_rows, 1):
         slug = company["slug"]
         display_name = company.get("display_name") or slug
@@ -330,103 +347,90 @@ def main(argv: Optional[list[str]] = None) -> int:
             result = materialize_company(
                 nport, formd, adv_crds, slug, execute=args.execute
             )
-            elapsed = time.time() - start
-            if result.get("error"):
-                row = {
-                    "slug": slug,
-                    "display_name": display_name,
-                    "lifecycle_status": lifecycle,
-                    "status": "error",
-                    "flags": "error",
-                    "publishable": False,
-                    "publish_reason": "error",
-                    "nport_positions": 0,
-                    "formd_pooled": 0,
-                    "formd_direct_issuer": 0,
-                    "resolutions": 0,
-                    "distinct_advisers": 0,
-                    "resolution_rate": 0,
-                    "suspicious_alias_count": 0,
-                    "eligible_evidence": 0,
-                    "public_era_evidence": 0,
-                    "eligible_distinct_advisers": 0,
-                    "wall_clock_seconds": round(elapsed, 1),
-                    "error": str(result["error"])[:200],
-                }
-                errors += 1
-            else:
-                primary, flags = classify_status(result)
-                # Lifecycle-aware evidence counts (Codex 2026-05-18 design).
-                # Queries v_intel_company_holders which uses
-                # company_status_at_date() to compute status per row.
-                (eligible_evidence,
-                 public_era_evidence,
-                 eligible_distinct_advisers) = count_lifecycle_eligible_evidence(
-                    nport, slug
-                )
-                publishable, reason = evaluate_publishable(
-                    result, flags, eligible_evidence, eligible_distinct_advisers
-                )
-                nport_n = result.get("positions") or result.get("positions_pending") or 0
-                pooled_n = result.get("pooled") or result.get("pooled_pending") or 0
-                direct_n = result.get("direct") or result.get("direct_pending") or 0
-                res_n = result.get("resolutions") or result.get("resolutions_pending_total") or 0
-                susp = result.get("suspicious_aliases") or []
-                total = nport_n + pooled_n
-                rate = (res_n / total) if total else 0.0
-                row = {
-                    "slug": slug,
-                    "display_name": display_name,
-                    "lifecycle_status": lifecycle,
-                    "status": primary,
-                    "flags": "|".join(flags) if flags else "ok",
-                    "publishable": publishable,
-                    "publish_reason": reason,
-                    "nport_positions": nport_n,
-                    "formd_pooled": pooled_n,
-                    "formd_direct_issuer": direct_n,
-                    "resolutions": res_n,
-                    "distinct_advisers": result.get("distinct_advisers") or 0,
-                    "resolution_rate": round(rate, 3),
-                    "suspicious_alias_count": len(susp),
-                    "eligible_evidence": eligible_evidence,
-                    "public_era_evidence": public_era_evidence,
-                    "eligible_distinct_advisers": eligible_distinct_advisers,
-                    "wall_clock_seconds": round(elapsed, 1),
-                    "error": "",
-                }
-                successes += 1
-                flag_counts[primary] = flag_counts.get(primary, 0) + 1
         except Exception as exc:  # noqa: BLE001
-            elapsed = time.time() - start
+            result = {"error": str(exc)[:200]}
+        elapsed = time.time() - start
+        materialize_results.append({
+            "company": company,
+            "result": result,
+            "elapsed": elapsed,
+        })
+        if (i % 25 == 0) or (i == len(company_rows)):
+            print(f"  materialized {i}/{len(company_rows)} companies")
+
+    # ---------- Phase B: preload lifecycle aggregates ----------
+    print("\n=== Phase B: preloading lifecycle aggregates from v_intel_company_holders ===")
+    preload_start = time.time()
+    lifecycle_aggregates = preload_lifecycle_aggregates(nport)
+    print(f"  aggregates for {len(lifecycle_aggregates)} companies "
+          f"({time.time() - preload_start:.1f}s)")
+
+    # ---------- Phase C: evaluate publish gate + write manifest ----------
+    print("\n=== Phase C: evaluating publish gate + writing manifest ===")
+    for i, mres in enumerate(materialize_results, 1):
+        company = mres["company"]
+        result = mres["result"]
+        elapsed = mres["elapsed"]
+        slug = company["slug"]
+        display_name = company.get("display_name") or slug
+        lifecycle = company.get("lifecycle_status")
+
+        # Always look up lifecycle aggregate (zeros for no-evidence companies)
+        (eligible_evidence,
+         public_era_evidence,
+         eligible_distinct_advisers) = get_lifecycle_aggregate(
+            lifecycle_aggregates, slug
+        )
+
+        if result.get("error"):
             row = {
-                "slug": slug,
-                "display_name": display_name,
+                "slug": slug, "display_name": display_name,
                 "lifecycle_status": lifecycle,
-                "status": "error",
-                "flags": "error",
-                "publishable": False,
-                "publish_reason": "error",
-                "nport_positions": 0,
-                "formd_pooled": 0,
-                "formd_direct_issuer": 0,
-                "resolutions": 0,
-                "distinct_advisers": 0,
-                "resolution_rate": 0,
+                "status": "error", "flags": "error",
+                "publishable": False, "publish_reason": "error",
+                "nport_positions": 0, "formd_pooled": 0, "formd_direct_issuer": 0,
+                "resolutions": 0, "distinct_advisers": 0, "resolution_rate": 0,
                 "suspicious_alias_count": 0,
+                "eligible_evidence": eligible_evidence,
+                "public_era_evidence": public_era_evidence,
+                "eligible_distinct_advisers": eligible_distinct_advisers,
                 "wall_clock_seconds": round(elapsed, 1),
-                "error": str(exc)[:200],
+                "error": str(result["error"])[:200],
             }
             errors += 1
+        else:
+            primary, flags = classify_status(result)
+            publishable, reason = evaluate_publishable(
+                result, flags, eligible_evidence, eligible_distinct_advisers
+            )
+            nport_n = result.get("positions") or result.get("positions_pending") or 0
+            pooled_n = result.get("pooled") or result.get("pooled_pending") or 0
+            direct_n = result.get("direct") or result.get("direct_pending") or 0
+            res_n = result.get("resolutions") or result.get("resolutions_pending_total") or 0
+            susp = result.get("suspicious_aliases") or []
+            total = nport_n + pooled_n
+            rate = (res_n / total) if total else 0.0
+            row = {
+                "slug": slug, "display_name": display_name,
+                "lifecycle_status": lifecycle,
+                "status": primary, "flags": "|".join(flags) if flags else "ok",
+                "publishable": publishable, "publish_reason": reason,
+                "nport_positions": nport_n, "formd_pooled": pooled_n,
+                "formd_direct_issuer": direct_n,
+                "resolutions": res_n,
+                "distinct_advisers": result.get("distinct_advisers") or 0,
+                "resolution_rate": round(rate, 3),
+                "suspicious_alias_count": len(susp),
+                "eligible_evidence": eligible_evidence,
+                "public_era_evidence": public_era_evidence,
+                "eligible_distinct_advisers": eligible_distinct_advisers,
+                "wall_clock_seconds": round(elapsed, 1),
+                "error": "",
+            }
+            successes += 1
+            flag_counts[primary] = flag_counts.get(primary, 0) + 1
 
         append_manifest_row(manifest_path, row)
-        pub_label = "PUBLISH" if row["publishable"] else "skip"
-        print(
-            f"  [{i:>3d}/{len(company_rows)}] {slug:30s}  "
-            f"{row['status']:14s}  pub:{pub_label:7s}  "
-            f"nport={row['nport_positions']:>4d}  pooled={row['formd_pooled']:>4d}  "
-            f"resolved={row['resolution_rate']:.0%}  ({elapsed:.1f}s)"
-        )
 
     print(f"\nDone. {successes} succeeded, {errors} errored.")
     print(f"\nStatus distribution:")
