@@ -355,4 +355,117 @@ router.get('/companies/:slug/holders', async (req, res) => {
   }
 });
 
+// ----------------------------------------------------------------------------
+// CSV download endpoints
+// ----------------------------------------------------------------------------
+
+/**
+ * Escape a single value for inclusion in CSV. Wraps in double-quotes when the
+ * value contains a delimiter, quote, or newline, and doubles any internal
+ * quotes per RFC 4180. Nulls/undefineds become empty cells.
+ */
+function csvEscape(value) {
+  if (value === null || value === undefined) return '';
+  const str = String(value);
+  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+}
+
+function rowsToCsv(headers, rows, accessors) {
+  const lines = [headers.map(csvEscape).join(',')];
+  for (const row of rows) {
+    lines.push(accessors.map(fn => csvEscape(fn(row))).join(','));
+  }
+  return lines.join('\r\n') + '\r\n';
+}
+
+async function fetchHolderRowsForCsv(slug, evidenceType, { audit }) {
+  const rows = await paginateHolders(deps.nportClient, slug, evidenceType);
+  const crds = Array.from(new Set(rows.map(r => r.adviser_crd).filter(Boolean)));
+  const adviserDetails = await fetchAdviserDetails(deps.advClient, crds);
+  const filtered = audit
+    ? rows
+    : rows.filter(r => r.status_at_evidence_date === 'private' || r.status_at_evidence_date === 'unknown');
+  return { rows: filtered, adviserDetails };
+}
+
+router.get('/companies/:slug/holders/nport.csv', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const { slug } = req.params;
+    const audit = req.query.audit === '1' || req.query.audit === 'true';
+    const { rows, adviserDetails } = await fetchHolderRowsForCsv(slug, 'nport', { audit });
+    const sorted = rows.slice().sort((a, b) => {
+      const av = a.value_usd ? parseFloat(a.value_usd) : 0;
+      const bv = b.value_usd ? parseFloat(b.value_usd) : 0;
+      return bv - av;
+    });
+    const headers = [
+      'evidence_id', 'registrant_cik', 'series_id', 'issuer_title',
+      'value_usd', 'evidence_date', 'accession_number',
+      'adviser_crd', 'adviser_name', 'adviser_method',
+      'status_at_evidence_date', 'was_private_at_evidence_date',
+    ];
+    const accessors = [
+      r => r.evidence_id,
+      r => r.evidence_cik,
+      r => r.evidence_series_id,
+      r => r.evidence_label,
+      r => r.value_usd ? parseFloat(r.value_usd) : '',
+      r => r.evidence_date,
+      r => r.accession_number,
+      r => r.adviser_crd || '',
+      r => (adviserDetails[r.adviser_crd] || {}).adviser_name || '',
+      r => r.adviser_resolution_method || '',
+      r => r.status_at_evidence_date,
+      r => r.was_private_at_evidence_date,
+    ];
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${slug}-nport-holders.csv"`);
+    res.send(rowsToCsv(headers, sorted, accessors));
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+router.get('/companies/:slug/holders/formd.csv', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const { slug } = req.params;
+    const audit = req.query.audit === '1' || req.query.audit === 'true';
+    const { rows, adviserDetails } = await fetchHolderRowsForCsv(slug, 'formd_pooled_vehicle', { audit });
+    const sorted = rows.slice().sort((a, b) => {
+      const av = a.value_usd ? parseFloat(a.value_usd) : 0;
+      const bv = b.value_usd ? parseFloat(b.value_usd) : 0;
+      return bv - av;
+    });
+    const headers = [
+      'evidence_id', 'filer_cik', 'filer_entityname', 'value_usd',
+      'filing_date', 'accession_number',
+      'adviser_crd', 'adviser_name', 'adviser_method',
+      'status_at_evidence_date', 'was_private_at_evidence_date',
+    ];
+    const accessors = [
+      r => r.evidence_id,
+      r => r.evidence_cik,
+      r => r.evidence_label,
+      r => r.value_usd ? parseFloat(r.value_usd) : '',
+      r => r.evidence_date,
+      r => r.accession_number,
+      r => r.adviser_crd || '',
+      r => (adviserDetails[r.adviser_crd] || {}).adviser_name || '',
+      r => r.adviser_resolution_method || '',
+      r => r.status_at_evidence_date,
+      r => r.was_private_at_evidence_date,
+    ];
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${slug}-formd-holders.csv"`);
+    res.send(rowsToCsv(headers, sorted, accessors));
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
 module.exports = router;

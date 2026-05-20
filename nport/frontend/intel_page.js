@@ -413,78 +413,303 @@ function CollapsibleSection({ title, count, defaultOpen = false, children }) {
   );
 }
 
-function NportTable({ rows }) {
-  if (!rows.length) return <p className="text-sm text-slate-500">No private-era N-PORT holdings.</p>;
+/**
+ * Generic paginated/sortable/filterable table with optional CSV download.
+ *
+ * columns: [{
+ *   key: stable identifier (string)
+ *   label: header text
+ *   align: 'left' | 'right' (default 'left')
+ *   accessor: row -> raw sortable value (used for sort + filter + default render)
+ *   render: row -> ReactNode (display; falls back to accessor's value)
+ *   cellClassName: tailwind className for the <td>
+ *   sortable: false to disable sorting on this column (default true)
+ * }]
+ *
+ * defaultSort: { key, direction: 'asc' | 'desc' } applied on mount
+ * csvUrl: when present, renders a Download CSV button that opens the URL
+ */
+function PaginatedTable({ rows, columns, csvUrl, emptyText, defaultSort, pageSize = 50 }) {
+  const [filter, setFilter] = React.useState('');
+  const [sort, setSort] = React.useState(defaultSort || null);
+  const [page, setPage] = React.useState(0);
+
+  if (!rows || !rows.length) {
+    return <p className="text-sm text-slate-500">{emptyText || 'No rows.'}</p>;
+  }
+
+  const colAccessor = (col, row) => {
+    if (col.accessor) return col.accessor(row);
+    return row[col.key];
+  };
+
+  // Filter (case-insensitive substring across ALL columns' raw values)
+  const q = filter.trim().toLowerCase();
+  const filtered = !q ? rows : rows.filter(r =>
+    columns.some(c => {
+      const v = colAccessor(c, r);
+      return v != null && String(v).toLowerCase().includes(q);
+    })
+  );
+
+  // Sort (numeric vs string aware; nulls sort last)
+  const sorted = !sort ? filtered : filtered.slice().sort((a, b) => {
+    const col = columns.find(c => c.key === sort.key);
+    if (!col) return 0;
+    const av = colAccessor(col, a);
+    const bv = colAccessor(col, b);
+    let cmp;
+    if (av == null && bv == null) cmp = 0;
+    else if (av == null) cmp = 1;
+    else if (bv == null) cmp = -1;
+    else if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+    else cmp = String(av).localeCompare(String(bv));
+    return sort.direction === 'desc' ? -cmp : cmp;
+  });
+
+  const total = sorted.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(page, totalPages - 1);
+  const pageRows = sorted.slice(safePage * pageSize, (safePage + 1) * pageSize);
+
+  const toggleSort = (key) => {
+    setPage(0);
+    setSort(s => {
+      if (!s || s.key !== key) return { key, direction: 'desc' };
+      if (s.direction === 'desc') return { key, direction: 'asc' };
+      return null; // tri-state: desc -> asc -> none
+    });
+  };
+
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-      <table className="w-full text-sm">
-        <thead className="bg-slate-50 text-xs uppercase text-slate-500 tracking-wide">
-          <tr>
-            <th className="px-3 py-2 text-left font-semibold">Holding</th>
-            <th className="px-3 py-2 text-left font-semibold">Manager</th>
-            <th className="px-3 py-2 text-right font-semibold">Value</th>
-            <th className="px-3 py-2 text-left font-semibold">As-of</th>
-            <th className="px-3 py-2 text-left font-semibold">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.slice(0, 200).map((r, i) => (
-            <tr key={i} className="border-t border-slate-100">
-              <td className="px-3 py-2 font-mono text-xs text-slate-700">{r.issuer_title}</td>
-              <td className="px-3 py-2 text-slate-900">{r.adviser_name || <span className="text-slate-400 italic">unidentified</span>}</td>
-              <td className="px-3 py-2 text-right font-mono">{fmtUsdShort(r.value_usd)}</td>
-              <td className="px-3 py-2 text-xs text-slate-500">{fmtDate(r.evidence_date)}</td>
-              <td className="px-3 py-2 text-xs">
-                <span className={r.status_at_evidence_date === 'private'
-                  ? 'text-slate-600' : 'text-amber-700'}>
-                  {fmtStatus(r.status_at_evidence_date)}
-                </span>
-              </td>
+    <div className="rounded-lg border border-slate-200 bg-white">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-3 py-2">
+        <input
+          type="text"
+          value={filter}
+          onChange={e => { setFilter(e.target.value); setPage(0); }}
+          placeholder="Filter…"
+          className="w-64 rounded border border-slate-200 px-2 py-1 text-sm focus:outline-none focus:border-slate-400"
+        />
+        <div className="flex items-center gap-3 text-xs text-slate-500">
+          <span>
+            {fmtInt(total)} {total === 1 ? 'row' : 'rows'}
+            {q ? ` (filtered from ${fmtInt(rows.length)})` : ''}
+          </span>
+          {csvUrl && (
+            <a
+              href={csvUrl}
+              className="rounded border border-slate-300 bg-white px-2 py-1 font-medium text-slate-700 hover:bg-slate-50"
+              download
+            >
+              Download CSV
+            </a>
+          )}
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-xs uppercase text-slate-500 tracking-wide">
+            <tr>
+              {columns.map(c => {
+                const sortable = c.sortable !== false;
+                const isSorted = sort && sort.key === c.key;
+                return (
+                  <th
+                    key={c.key}
+                    onClick={sortable ? () => toggleSort(c.key) : undefined}
+                    className={
+                      `px-3 py-2 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'} ` +
+                      (sortable ? 'cursor-pointer select-none hover:text-slate-700' : '')
+                    }
+                  >
+                    {c.label}
+                    {isSorted && (
+                      <span className="ml-1 text-slate-400">
+                        {sort.direction === 'desc' ? '↓' : '↑'}
+                      </span>
+                    )}
+                  </th>
+                );
+              })}
             </tr>
-          ))}
-        </tbody>
-      </table>
-      {rows.length > 200 && (
-        <div className="px-3 py-2 text-xs text-slate-500 border-t border-slate-100 bg-slate-50">
-          Showing first 200 of {fmtInt(rows.length)} rows. Full CSV is at intelligence/out/.
+          </thead>
+          <tbody>
+            {pageRows.map((r, i) => (
+              <tr key={i} className="border-t border-slate-100">
+                {columns.map(c => {
+                  const content = c.render ? c.render(r) : colAccessor(c, r);
+                  return (
+                    <td key={c.key} className={`px-3 py-2 ${c.cellClassName || ''}`}>
+                      {content == null || content === '' ? <span className="text-slate-300">—</span> : content}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination footer */}
+      {totalPages > 1 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          <span>
+            Showing {fmtInt(safePage * pageSize + 1)}–
+            {fmtInt(Math.min((safePage + 1) * pageSize, total))} of {fmtInt(total)}
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage(0)}
+              disabled={safePage === 0}
+              className="rounded border border-slate-200 bg-white px-2 py-1 disabled:opacity-40 hover:bg-slate-100"
+              aria-label="First page"
+            >
+              ‹‹
+            </button>
+            <button
+              onClick={() => setPage(p => Math.max(0, p - 1))}
+              disabled={safePage === 0}
+              className="rounded border border-slate-200 bg-white px-2 py-1 disabled:opacity-40 hover:bg-slate-100"
+              aria-label="Previous page"
+            >
+              ‹
+            </button>
+            <span className="px-2">Page {safePage + 1} of {totalPages}</span>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+              disabled={safePage === totalPages - 1}
+              className="rounded border border-slate-200 bg-white px-2 py-1 disabled:opacity-40 hover:bg-slate-100"
+              aria-label="Next page"
+            >
+              ›
+            </button>
+            <button
+              onClick={() => setPage(totalPages - 1)}
+              disabled={safePage === totalPages - 1}
+              className="rounded border border-slate-200 bg-white px-2 py-1 disabled:opacity-40 hover:bg-slate-100"
+              aria-label="Last page"
+            >
+              ››
+            </button>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-function FormDTable({ rows }) {
-  if (!rows.length) return <p className="text-sm text-slate-500">No private-era Form D pooled-vehicle filings.</p>;
+function NportTable({ rows, slug, audit }) {
+  const columns = [
+    {
+      key: 'issuer_title',
+      label: 'Holding',
+      accessor: r => r.issuer_title,
+      cellClassName: 'font-mono text-xs text-slate-700',
+    },
+    {
+      key: 'adviser_name',
+      label: 'Manager',
+      accessor: r => r.adviser_name,
+      cellClassName: 'text-slate-900',
+      render: r => r.adviser_name
+        ? r.adviser_name
+        : <span className="text-slate-400 italic">unidentified</span>,
+    },
+    {
+      key: 'value_usd',
+      label: 'Value',
+      align: 'right',
+      accessor: r => r.value_usd || 0,
+      cellClassName: 'text-right font-mono',
+      render: r => fmtUsdShort(r.value_usd),
+    },
+    {
+      key: 'evidence_date',
+      label: 'As-of',
+      accessor: r => r.evidence_date,
+      cellClassName: 'text-xs text-slate-500',
+      render: r => fmtDate(r.evidence_date),
+    },
+    {
+      key: 'status_at_evidence_date',
+      label: 'Status',
+      accessor: r => r.status_at_evidence_date,
+      cellClassName: 'text-xs',
+      render: r => (
+        <span className={r.status_at_evidence_date === 'private' ? 'text-slate-600' : 'text-amber-700'}>
+          {fmtStatus(r.status_at_evidence_date)}
+        </span>
+      ),
+    },
+  ];
+  const csvUrl = slug
+    ? `/api/intel/companies/${encodeURIComponent(slug)}/holders/nport.csv${audit ? '?audit=1' : ''}`
+    : null;
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-      <table className="w-full text-sm">
-        <thead className="bg-slate-50 text-xs uppercase text-slate-500 tracking-wide">
-          <tr>
-            <th className="px-3 py-2 text-left font-semibold">Filer</th>
-            <th className="px-3 py-2 text-left font-semibold">Adviser</th>
-            <th className="px-3 py-2 text-right font-semibold">Offering</th>
-            <th className="px-3 py-2 text-left font-semibold">Filed</th>
-            <th className="px-3 py-2 text-left font-semibold">Method</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.slice(0, 200).map((r, i) => (
-            <tr key={i} className="border-t border-slate-100">
-              <td className="px-3 py-2 text-xs text-slate-700">{r.filer_entityname}</td>
-              <td className="px-3 py-2 text-slate-900">{r.adviser_name || <span className="text-slate-400 italic">unbridged</span>}</td>
-              <td className="px-3 py-2 text-right font-mono">{fmtUsdShort(r.value_usd)}</td>
-              <td className="px-3 py-2 text-xs text-slate-500">{fmtDate(r.filing_date)}</td>
-              <td className="px-3 py-2 text-xs text-slate-500">{r.adviser_method || '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {rows.length > 200 && (
-        <div className="px-3 py-2 text-xs text-slate-500 border-t border-slate-100 bg-slate-50">
-          Showing first 200 of {fmtInt(rows.length)} rows.
-        </div>
-      )}
-    </div>
+    <PaginatedTable
+      rows={rows}
+      columns={columns}
+      csvUrl={csvUrl}
+      defaultSort={{ key: 'value_usd', direction: 'desc' }}
+      emptyText="No private-era N-PORT holdings."
+    />
+  );
+}
+
+function FormDTable({ rows, slug, audit }) {
+  const columns = [
+    {
+      key: 'filer_entityname',
+      label: 'Filer',
+      accessor: r => r.filer_entityname,
+      cellClassName: 'text-xs text-slate-700',
+    },
+    {
+      key: 'adviser_name',
+      label: 'Adviser',
+      accessor: r => r.adviser_name,
+      cellClassName: 'text-slate-900',
+      render: r => r.adviser_name
+        ? r.adviser_name
+        : <span className="text-slate-400 italic">unbridged</span>,
+    },
+    {
+      key: 'value_usd',
+      label: 'Offering',
+      align: 'right',
+      accessor: r => r.value_usd || 0,
+      cellClassName: 'text-right font-mono',
+      render: r => fmtUsdShort(r.value_usd),
+    },
+    {
+      key: 'filing_date',
+      label: 'Filed',
+      accessor: r => r.filing_date,
+      cellClassName: 'text-xs text-slate-500',
+      render: r => fmtDate(r.filing_date),
+    },
+    {
+      key: 'adviser_method',
+      label: 'Method',
+      accessor: r => r.adviser_method,
+      cellClassName: 'text-xs text-slate-500',
+    },
+  ];
+  const csvUrl = slug
+    ? `/api/intel/companies/${encodeURIComponent(slug)}/holders/formd.csv${audit ? '?audit=1' : ''}`
+    : null;
+  return (
+    <PaginatedTable
+      rows={rows}
+      columns={columns}
+      csvUrl={csvUrl}
+      defaultSort={{ key: 'value_usd', direction: 'desc' }}
+      emptyText="No private-era Form D pooled-vehicle filings."
+    />
   );
 }
 
@@ -633,12 +858,12 @@ function IntelPage({ slug }) {
 
       {/* N-PORT holdings */}
       <CollapsibleSection title="N-PORT registered-fund holdings" count={nport_holders.length}>
-        <NportTable rows={nport_holders} />
+        <NportTable rows={nport_holders} slug={company.slug} audit={summary.audit_mode} />
       </CollapsibleSection>
 
       {/* Form D pooled vehicles */}
       <CollapsibleSection title="Form D pooled vehicles" count={formd_holders.length}>
-        <FormDTable rows={formd_holders} />
+        <FormDTable rows={formd_holders} slug={company.slug} audit={summary.audit_mode} />
       </CollapsibleSection>
 
       {/* Lifecycle events */}
