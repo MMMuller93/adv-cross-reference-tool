@@ -172,7 +172,7 @@ def save_cache(cache: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 def brave_search(query: str) -> Optional[list[dict[str, Any]]]:
-    api_key = os.environ.get("BRAVE_API_KEY")
+    api_key = os.environ.get("BRAVE_API_KEY") or os.environ.get("BRAVE_SEARCH_API_KEY")
     if not api_key:
         return None
     url = "https://api.search.brave.com/res/v1/web/search?" + urllib.parse.urlencode({
@@ -195,7 +195,7 @@ def brave_search(query: str) -> Optional[list[dict[str, Any]]]:
 
 def google_cse_search(query: str) -> Optional[list[dict[str, Any]]]:
     api_key = os.environ.get("GOOGLE_API_KEY")
-    cx = os.environ.get("GOOGLE_CSE_ID")
+    cx = os.environ.get("GOOGLE_CSE_ID") or os.environ.get("GOOGLE_CX")
     if not api_key or not cx:
         return None
     url = "https://www.googleapis.com/customsearch/v1?" + urllib.parse.urlencode({
@@ -400,6 +400,14 @@ def main(argv: Optional[list[str]] = None) -> int:
             call_count += 1
             time.sleep(args.delay_ms / 1000.0)
 
+            if result.get("linkedin_url"):
+                src = result.get("source") or "search"
+                conf = result.get("confidence")
+                print(f"  ✓ {person['name']:30s} ({person['role']:10s} @ {person['firm'][:30]}) "
+                      f"-> {result['linkedin_url']} [{conf}, {src}]")
+            else:
+                print(f"  · {person['name']:30s} ({person['role']:10s} @ {person['firm'][:30]}) -> no match")
+
             if args.execute and result.get("linkedin_url"):
                 write_enrichment_row(nport, {
                     "adviser_crd": person["crd"],
@@ -412,8 +420,6 @@ def main(argv: Optional[list[str]] = None) -> int:
                     "raw_search_hit": result.get("raw_hit"),
                 })
                 written += 1
-                print(f"  + {person['name']} ({person['role']} @ {person['firm']}) "
-                      f"-> {result['linkedin_url']} [{result['confidence']}]")
         save_cache(cache)
 
     print(f"\nDone. calls={call_count} written={written} skipped(cache)={skipped}")
