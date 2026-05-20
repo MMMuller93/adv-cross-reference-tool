@@ -52,6 +52,19 @@ const firstInitial = (name) => {
   return ch ? ch.toUpperCase() : '?';
 };
 
+/**
+ * Build an EDGAR archive index URL for a specific filing.
+ *   cik       e.g. '0000044201' or '44201'
+ *   accession e.g. '0001193125-26-182055'
+ * Returns: https://www.sec.gov/Archives/edgar/data/44201/000119312526182055/
+ */
+const edgarFilingUrl = (cik, accession) => {
+  if (!cik || !accession) return null;
+  const cikInt = String(cik).replace(/^0+/, '') || '0';
+  const accNoDashes = String(accession).replace(/-/g, '');
+  return `https://www.sec.gov/Archives/edgar/data/${cikInt}/${accNoDashes}/`;
+};
+
 // --- adviser list row (left pane) -------------------------------------------
 
 function AdviserListRow({ adv, selected, onClick }) {
@@ -355,28 +368,40 @@ function AdviserDetailPanel({ adv, holdings, companyName }) {
               </span>
             </div>
             <div className="space-y-1.5 text-sm">
-              {[...(holdings.nport || []).map(h => ({ ...h, _kind: 'nport', _label: h.issuer_title, _date: h.evidence_date })),
-                ...(holdings.formd || []).map(h => ({ ...h, _kind: 'formd', _label: h.filer_entityname, _date: h.filing_date }))]
+              {[...(holdings.nport || []).map(h => ({ ...h, _kind: 'nport', _label: h.issuer_title, _date: h.evidence_date, _cik: h.registrant_cik })),
+                ...(holdings.formd || []).map(h => ({ ...h, _kind: 'formd', _label: h.filer_entityname, _date: h.filing_date, _cik: h.filer_cik }))]
                 .sort((a, b) => (b.value_usd || 0) - (a.value_usd || 0))
-                .map((h, i) => (
-                  <div key={i} className="flex gap-2 items-baseline">
-                    <span className={
-                      'text-[9px] uppercase tracking-widest font-semibold w-12 shrink-0 ' +
-                      (h._kind === 'nport' ? 'text-slate-500' : 'text-amber-700')
-                    }>
-                      {h._kind === 'nport' ? 'N-PORT' : 'Form D'}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[12px] text-slate-700 truncate" title={h._label}>{h._label}</div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">{fmtDate(h._date)}</div>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <div className="font-mono text-[12px] font-semibold text-slate-900 tabular-nums">
-                        {fmtUsdShort(h.value_usd)}
+                .map((h, i) => {
+                  const url = edgarFilingUrl(h._cik, h.accession_number);
+                  return (
+                    <div key={i} className="flex gap-2 items-baseline">
+                      <span className={
+                        'text-[9px] uppercase tracking-widest font-semibold w-12 shrink-0 ' +
+                        (h._kind === 'nport' ? 'text-slate-500' : 'text-amber-700')
+                      }>
+                        {h._kind === 'nport' ? 'N-PORT' : 'Form D'}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[12px] text-slate-700 truncate" title={h._label}>{h._label}</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          {fmtDate(h._date)}
+                          {url && (
+                            <a href={url} target="_blank" rel="noopener noreferrer"
+                               className="ml-1.5 text-slate-500 hover:text-slate-900"
+                               title={`EDGAR filing ${h.accession_number}`}>
+                              ↗
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="font-mono text-[12px] font-semibold text-slate-900 tabular-nums">
+                          {fmtUsdShort(h.value_usd)}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
             </div>
           </div>
         )}
@@ -716,6 +741,24 @@ function NportTable({ rows, slug, audit }) {
         </span>
       ),
     },
+    {
+      key: 'source',
+      label: 'Source',
+      sortable: false,
+      accessor: r => r.accession_number || '',
+      cellClassName: 'text-xs',
+      render: r => {
+        const url = edgarFilingUrl(r.registrant_cik, r.accession_number);
+        if (!url) return null;
+        return (
+          <a href={url} target="_blank" rel="noopener noreferrer"
+             className="text-slate-500 hover:text-slate-900"
+             title={`EDGAR filing ${r.accession_number}`}>
+            EDGAR ↗
+          </a>
+        );
+      },
+    },
   ];
   const csvUrl = slug
     ? `/api/intel/companies/${encodeURIComponent(slug)}/holders/nport.csv${audit ? '?audit=1' : ''}`
@@ -768,6 +811,24 @@ function FormDTable({ rows, slug, audit }) {
       label: 'Method',
       accessor: r => r.adviser_method,
       cellClassName: 'text-xs text-slate-500',
+    },
+    {
+      key: 'source',
+      label: 'Source',
+      sortable: false,
+      accessor: r => r.accession_number || '',
+      cellClassName: 'text-xs',
+      render: r => {
+        const url = edgarFilingUrl(r.filer_cik, r.accession_number);
+        if (!url) return null;
+        return (
+          <a href={url} target="_blank" rel="noopener noreferrer"
+             className="text-slate-500 hover:text-slate-900"
+             title={`EDGAR filing ${r.accession_number}`}>
+            EDGAR ↗
+          </a>
+        );
+      },
     },
   ];
   const csvUrl = slug
