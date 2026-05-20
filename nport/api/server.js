@@ -56,6 +56,7 @@ function buildApp() {
   app.use('/api/intel', intelRoutes);
 
   app.get('/company/:slug', (_req, res) => res.sendFile(frontendIndex));
+  app.get('/intel/search', (_req, res) => res.sendFile(frontendIndex));
   app.get('/intel/:slug', (_req, res) => res.sendFile(frontendIndex));
   app.get('/intel/adviser/:crd', (_req, res) => res.sendFile(frontendIndex));
   app.get('/fund/:cik', (_req, res) => res.sendFile(frontendIndex));

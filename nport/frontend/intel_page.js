@@ -914,6 +914,11 @@ function IntelPage({ slug }) {
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
+      {/* Top bar with global search */}
+      <div className="flex justify-end mb-4">
+        <GlobalSearchBar />
+      </div>
+
       {/* Company header */}
       <header className="mb-8 pb-6 border-b border-slate-200">
         <div className="flex items-start justify-between gap-6 flex-wrap">
@@ -1105,8 +1110,13 @@ function AdviserPage({ crd }) {
     <div className="max-w-6xl mx-auto px-6 py-6">
       <a href="/" className="text-sm text-slate-500 hover:text-slate-900">← Back</a>
 
+      {/* Top bar with search */}
+      <div className="flex justify-end mt-2 mb-2">
+        <GlobalSearchBar />
+      </div>
+
       {/* Header */}
-      <div className="mt-3 mb-6">
+      <div className="mt-1 mb-6">
         <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900">
           {adviser.name || '(unidentified firm)'}
         </h1>
@@ -1241,14 +1251,175 @@ function AdviserPage({ crd }) {
   );
 }
 
+// --- global search ----------------------------------------------------------
+
+function GlobalSearchBar({ initialQuery = '' }) {
+  const [q, setQ] = React.useState(initialQuery);
+  const submit = (e) => {
+    if (e) e.preventDefault();
+    const term = q.trim();
+    if (term.length < 2) return;
+    window.location.href = `/intel/search?q=${encodeURIComponent(term)}`;
+  };
+  return (
+    <form onSubmit={submit} className="flex items-center gap-2">
+      <input
+        type="search"
+        value={q}
+        onChange={e => setQ(e.target.value)}
+        placeholder="Search companies, advisers, funds, filings…"
+        className="w-72 rounded border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:border-slate-500"
+      />
+      <button type="submit" className="rounded border border-slate-300 bg-white px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50">
+        Search
+      </button>
+    </form>
+  );
+}
+
+function SearchPage({ initialQuery }) {
+  const [q, setQ] = React.useState(initialQuery || '');
+  const [data, setData] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!initialQuery || initialQuery.length < 2) return;
+    runSearch(initialQuery);
+    // eslint-disable-next-line
+  }, []);
+
+  function runSearch(term) {
+    setLoading(true);
+    setError(null);
+    fetch(`/api/intel/search?q=${encodeURIComponent(term)}&limit=25`)
+      .then(r => r.ok ? r.json() : r.json().then(b => Promise.reject(b)))
+      .then(d => { setData(d); setLoading(false); })
+      .catch(e => { setError(e && e.error ? e.error : 'Search failed'); setLoading(false); });
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    const term = q.trim();
+    if (term.length < 2) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('q', term);
+    window.history.pushState({}, '', url.toString());
+    runSearch(term);
+  }
+
+  const typeLabels = {
+    company: 'Company',
+    adviser: 'Adviser',
+    adv_fund: 'ADV fund',
+    formd_filing: 'Form D',
+  };
+  const typeColors = {
+    company: 'bg-slate-800 text-white',
+    adviser: 'bg-slate-200 text-slate-800',
+    adv_fund: 'bg-blue-100 text-blue-800',
+    formd_filing: 'bg-amber-100 text-amber-900',
+  };
+
+  return (
+    <div className="max-w-5xl mx-auto px-6 py-6">
+      <a href="/" className="text-sm text-slate-500 hover:text-slate-900">← Back</a>
+
+      <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900 mt-3 mb-5">
+        Search
+      </h1>
+
+      <form onSubmit={handleSubmit} className="flex items-center gap-2 mb-6">
+        <input
+          type="search"
+          value={q}
+          onChange={e => setQ(e.target.value)}
+          autoFocus
+          placeholder="Search companies, advisers, funds, filings…"
+          className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:border-slate-500"
+        />
+        <button type="submit" className="rounded border border-slate-300 bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+          Search
+        </button>
+      </form>
+
+      {loading && <p className="text-sm text-slate-500">Searching…</p>}
+      {error && <p className="text-sm text-red-700">{error}</p>}
+
+      {data && (
+        <>
+          <div className="mb-4 text-xs text-slate-500">
+            {data.total === 0
+              ? `No results for "${data.query}"`
+              : `${fmtInt(data.total)} ${data.total === 1 ? 'result' : 'results'} for "${data.query}"`}
+            {data.by_source && (
+              <span className="ml-2">
+                · companies: {data.by_source.companies}
+                · advisers: {data.by_source.advisers}
+                · ADV funds: {data.by_source.adv_funds}
+                · Form D: {data.by_source.formd_filings}
+              </span>
+            )}
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
+            {data.results.map((r, i) => {
+              const inner = (
+                <>
+                  <span className={`inline-block text-[9px] uppercase tracking-widest font-semibold px-1.5 py-0.5 rounded ${typeColors[r.type] || 'bg-slate-100 text-slate-700'}`}>
+                    {typeLabels[r.type] || r.type}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-slate-900 truncate">{r.label}</div>
+                    {r.sublabel && <div className="text-[11px] text-slate-500 truncate mt-0.5">{r.sublabel}</div>}
+                  </div>
+                  {r.url && (
+                    <span className="text-slate-400 shrink-0 text-sm">›</span>
+                  )}
+                </>
+              );
+              const rowClass = 'flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition-colors';
+              if (r.url && r.external) {
+                return (
+                  <a key={i} href={r.url} target="_blank" rel="noopener noreferrer" className={rowClass}>
+                    {inner}
+                  </a>
+                );
+              } else if (r.url) {
+                return (
+                  <a key={i} href={r.url} className={rowClass}>
+                    {inner}
+                  </a>
+                );
+              } else {
+                return (
+                  <div key={i} className={rowClass + ' cursor-default'}>
+                    {inner}
+                  </div>
+                );
+              }
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // --- bootstrap --------------------------------------------------------------
 
 window.mountIntelRouter = function () {
   const path = window.location.pathname;
+  const searchMatch = path === '/intel/search';
   const adviserMatch = path.match(/^\/intel\/adviser\/([^\/]+)/);
   const companyMatch = path.match(/^\/intel\/([^\/]+)/);
   const root = document.getElementById('root');
   if (!root) return false;
+  if (searchMatch) {
+    const params = new URLSearchParams(window.location.search);
+    const initialQuery = params.get('q') || '';
+    ReactDOM.createRoot(root).render(<SearchPage initialQuery={initialQuery} />);
+    return true;
+  }
   if (adviserMatch) {
     const crd = decodeURIComponent(adviserMatch[1]);
     ReactDOM.createRoot(root).render(<AdviserPage crd={crd} />);

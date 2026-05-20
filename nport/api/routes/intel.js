@@ -360,6 +360,149 @@ router.get('/companies/:slug/holders', async (req, res) => {
 });
 
 // ----------------------------------------------------------------------------
+// Global search across tracked companies + advisers + ADV funds + Form D
+// filings. Returns a unified, ranked result list.
+// ----------------------------------------------------------------------------
+
+router.get('/search', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) {
+      return res.json({ query: q, total: 0, results: [], note: 'min 2 chars' });
+    }
+    // Limits per source; concatenate at the end.
+    const PER_SOURCE = parseInt(req.query.limit, 10) || 25;
+    const like = `%${q.replace(/[%_]/g, m => '\\' + m)}%`;
+
+    // 1. Tracked private companies (highest priority — top of results)
+    const companiesP = deps.nportClient
+      .from('private_companies')
+      .select('slug,display_name,sector,lifecycle_status,is_public,is_acquired')
+      .ilike('display_name', like)
+      .limit(PER_SOURCE);
+
+    // 2. Advisers (advisers_enriched by adviser_name)
+    const advisersP = deps.advClient
+      .from('advisers_enriched')
+      .select('crd,adviser_name,total_aum,phone_number')
+      .ilike('adviser_name', like)
+      .limit(PER_SOURCE);
+
+    // 3. ADV registered funds (funds_enriched by fund_name)
+    const fundsP = deps.advClient
+      .from('funds_enriched')
+      .select('reference_id,fund_name,fund_type,adviser_crd,gross_asset_value')
+      .ilike('fund_name', like)
+      .limit(PER_SOURCE);
+
+    // 4. Form D filings by entityname (filter to non-amendments)
+    const formdP = deps.formdClient
+      .from('form_d_filings')
+      .select('accessionnumber,entityname,cik,filing_date,totalofferingamount')
+      .ilike('entityname', like)
+      .neq('isamendment', 'true')
+      .order('filing_date', { ascending: false })
+      .limit(PER_SOURCE);
+
+    const [companiesRes, advisersRes, fundsRes, formdRes] = await Promise.all([
+      companiesP, advisersP, fundsP, formdP,
+    ]);
+
+    const results = [];
+
+    // Score helper: exact-prefix match ranks higher than substring.
+    const qLower = q.toLowerCase();
+    const score = (text) => {
+      if (!text) return 0;
+      const t = text.toLowerCase();
+      if (t === qLower) return 100;
+      if (t.startsWith(qLower)) return 50;
+      return 10;
+    };
+
+    for (const row of (companiesRes.data || [])) {
+      const status = row.lifecycle_status || (row.is_public ? 'public' : 'private');
+      results.push({
+        type: 'company',
+        id: row.slug,
+        label: row.display_name,
+        sublabel: `${row.sector ? row.sector + ' • ' : ''}${status}`,
+        url: `/intel/${encodeURIComponent(row.slug)}`,
+        rank: score(row.display_name) + 30, // companies prioritized
+      });
+    }
+    for (const row of (advisersRes.data || [])) {
+      const aum = row.total_aum
+        ? '$' + Number(row.total_aum).toLocaleString(undefined, { maximumFractionDigits: 0 })
+        : 'AUM —';
+      results.push({
+        type: 'adviser',
+        id: String(row.crd),
+        label: row.adviser_name,
+        sublabel: `CRD ${row.crd} • ${aum}`,
+        url: `/intel/adviser/${encodeURIComponent(row.crd)}`,
+        rank: score(row.adviser_name) + 20,
+      });
+    }
+    for (const row of (fundsRes.data || [])) {
+      const gav = row.gross_asset_value
+        ? '$' + Number(row.gross_asset_value).toLocaleString(undefined, { maximumFractionDigits: 0 })
+        : null;
+      const advLink = row.adviser_crd ? ` • adv CRD ${row.adviser_crd}` : '';
+      results.push({
+        type: 'adv_fund',
+        id: String(row.reference_id || row.fund_name),
+        label: row.fund_name,
+        sublabel: `${row.fund_type || 'ADV fund'}${advLink}${gav ? ' • ' + gav : ''}`,
+        url: row.adviser_crd ? `/intel/adviser/${encodeURIComponent(row.adviser_crd)}` : null,
+        rank: score(row.fund_name) + 10,
+      });
+    }
+    for (const row of (formdRes.data || [])) {
+      const amt = row.totalofferingamount
+        ? '$' + Number(row.totalofferingamount).toLocaleString(undefined, { maximumFractionDigits: 0 })
+        : null;
+      results.push({
+        type: 'formd_filing',
+        id: row.accessionnumber,
+        label: row.entityname,
+        sublabel: `Form D • ${row.filing_date || ''}${amt ? ' • ' + amt : ''}`,
+        url: edgarFilingUrlServer(row.cik, row.accessionnumber),
+        external: true,
+        rank: score(row.entityname),
+      });
+    }
+
+    // Rank desc then label asc as tiebreaker
+    results.sort((a, b) => b.rank - a.rank || a.label.localeCompare(b.label));
+
+    res.json({
+      query: q,
+      total: results.length,
+      by_source: {
+        companies: (companiesRes.data || []).length,
+        advisers: (advisersRes.data || []).length,
+        adv_funds: (fundsRes.data || []).length,
+        formd_filings: (formdRes.data || []).length,
+      },
+      results,
+    });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// Same shape as frontend's edgarFilingUrl helper — duplicated server-side
+// for the search response (avoids the frontend having to know CIK semantics).
+function edgarFilingUrlServer(cik, accession) {
+  if (!cik || !accession) return null;
+  const cikInt = String(cik).replace(/^0+/, '') || '0';
+  const accNoDashes = String(accession).replace(/-/g, '');
+  return `https://www.sec.gov/Archives/edgar/data/${cikInt}/${accNoDashes}/`;
+}
+
+// ----------------------------------------------------------------------------
 // Adviser-centric endpoint — "all the funds adviser CRD X holds across every
 // tracked private company, plus firm metadata."
 // ----------------------------------------------------------------------------
