@@ -57,6 +57,7 @@ function buildApp() {
 
   app.get('/company/:slug', (_req, res) => res.sendFile(frontendIndex));
   app.get('/intel/:slug', (_req, res) => res.sendFile(frontendIndex));
+  app.get('/intel/adviser/:crd', (_req, res) => res.sendFile(frontendIndex));
   app.get('/fund/:cik', (_req, res) => res.sendFile(frontendIndex));
   app.get('/fund/:cik/:series_id', (_req, res) => res.sendFile(frontendIndex));
   app.get('/admin/unresolved', (_req, res) => res.sendFile(frontendIndex));

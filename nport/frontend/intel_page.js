@@ -129,7 +129,15 @@ function AdviserDetailPanel({ adv }) {
           <h2 className="font-serif text-lg font-semibold text-slate-900 tracking-tight leading-tight truncate">
             {adv.name || '(unidentified)'}
           </h2>
-          <div className="text-[10px] font-mono text-slate-500 mt-0.5">CRD {adv.crd}</div>
+          <div className="text-[10px] font-mono text-slate-500 mt-0.5">
+            CRD {adv.crd}
+            {adv.crd && (
+              <a href={`/intel/adviser/${encodeURIComponent(adv.crd)}`}
+                 className="ml-2 text-slate-600 hover:text-slate-900 hover:underline normal-case font-sans">
+                View full profile →
+              </a>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
           {adv.website && (
@@ -620,9 +628,9 @@ function NportTable({ rows, slug, audit }) {
       label: 'Manager',
       accessor: r => r.adviser_name,
       cellClassName: 'text-slate-900',
-      render: r => r.adviser_name
-        ? r.adviser_name
-        : <span className="text-slate-400 italic">unidentified</span>,
+      render: r => r.adviser_name && r.adviser_crd
+        ? <a href={`/intel/adviser/${encodeURIComponent(r.adviser_crd)}`} className="text-slate-900 hover:text-slate-700 hover:underline">{r.adviser_name}</a>
+        : (r.adviser_name || <span className="text-slate-400 italic">unidentified</span>),
     },
     {
       key: 'value_usd',
@@ -678,9 +686,9 @@ function FormDTable({ rows, slug, audit }) {
       label: 'Adviser',
       accessor: r => r.adviser_name,
       cellClassName: 'text-slate-900',
-      render: r => r.adviser_name
-        ? r.adviser_name
-        : <span className="text-slate-400 italic">unbridged</span>,
+      render: r => r.adviser_name && r.adviser_crd
+        ? <a href={`/intel/adviser/${encodeURIComponent(r.adviser_crd)}`} className="text-slate-900 hover:text-slate-700 hover:underline">{r.adviser_name}</a>
+        : (r.adviser_name || <span className="text-slate-400 italic">unbridged</span>),
     },
     {
       key: 'value_usd',
@@ -886,14 +894,246 @@ function IntelPage({ slug }) {
   );
 }
 
+// --- adviser-centric page (all funds held by adviser across all companies) ---
+
+function AdviserPage({ crd }) {
+  const [data, setData] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  const [audit, setAudit] = React.useState(false);
+
+  React.useEffect(() => {
+    setData(null);
+    setError(null);
+    const url = `/api/intel/advisers/${encodeURIComponent(crd)}${audit ? '?audit=1' : ''}`;
+    fetch(url)
+      .then(r => r.ok ? r.json() : r.json().then(b => Promise.reject(b)))
+      .then(setData)
+      .catch(e => setError(e && e.error ? e.error : 'Failed to load'));
+  }, [crd, audit]);
+
+  if (error) {
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-10">
+        <a href="/" className="text-sm text-slate-500 hover:text-slate-900">← Back</a>
+        <h1 className="font-serif text-2xl font-semibold text-slate-900 mt-4">CRD {crd}</h1>
+        <p className="mt-3 text-sm text-red-700">{error}</p>
+      </div>
+    );
+  }
+  if (!data) {
+    return <div className="max-w-5xl mx-auto px-6 py-10 text-sm text-slate-400">Loading…</div>;
+  }
+
+  const { adviser, summary, companies } = data;
+
+  const companyColumns = [
+    {
+      key: 'display_name',
+      label: 'Company',
+      accessor: r => r.display_name,
+      render: r => (
+        <a
+          href={`/intel/${encodeURIComponent(r.slug)}`}
+          className="font-serif italic font-semibold text-slate-900 hover:text-slate-700"
+        >
+          {r.display_name}
+        </a>
+      ),
+    },
+    {
+      key: 'sector',
+      label: 'Sector',
+      accessor: r => r.sector,
+      cellClassName: 'text-xs text-slate-500',
+    },
+    {
+      key: 'lifecycle_status',
+      label: 'Status',
+      accessor: r => r.lifecycle_status,
+      cellClassName: 'text-xs',
+      render: r => (
+        <span className={r.lifecycle_status === 'private' ? 'text-slate-600' : 'text-amber-700'}>
+          {fmtStatus(r.lifecycle_status)}
+        </span>
+      ),
+    },
+    {
+      key: 'evidence_count',
+      label: 'Funds',
+      align: 'right',
+      accessor: r => r.evidence_count,
+      cellClassName: 'text-right font-mono text-slate-700 tabular-nums',
+      render: r => fmtInt(r.nport_holdings.length + r.formd_holdings.length),
+    },
+    {
+      key: 'total_value_usd',
+      label: 'Total held',
+      align: 'right',
+      accessor: r => r.total_value_usd,
+      cellClassName: 'text-right font-mono font-semibold text-slate-900 tabular-nums',
+      render: r => fmtUsdShort(r.total_value_usd),
+    },
+  ];
+
+  const hasContact = adviser.phone || adviser.website || adviser.cco_name || adviser.signatory_name;
+
+  return (
+    <div className="max-w-6xl mx-auto px-6 py-6">
+      <a href="/" className="text-sm text-slate-500 hover:text-slate-900">← Back</a>
+
+      {/* Header */}
+      <div className="mt-3 mb-6">
+        <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900">
+          {adviser.name || '(unidentified firm)'}
+        </h1>
+        <div className="text-xs font-mono text-slate-500 mt-1">CRD {adviser.crd}</div>
+        <div className="flex flex-wrap items-center gap-1.5 mt-3">
+          {adviser.website && (
+            <a href={normalizeHref(adviser.website)} target="_blank" rel="noopener noreferrer"
+               className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
+              Website ↗
+            </a>
+          )}
+          <a href={`https://adviserinfo.sec.gov/firm/summary/${adviser.crd}`} target="_blank" rel="noopener noreferrer"
+             className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
+            IAPD ↗
+          </a>
+          {adviser.form_adv_url && (
+            <a href={adviser.form_adv_url} target="_blank" rel="noopener noreferrer"
+               className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
+              Form ADV ↗
+            </a>
+          )}
+          {adviser.linkedin_company_url && (
+            <a href={adviser.linkedin_company_url} target="_blank" rel="noopener noreferrer"
+               className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
+              LinkedIn ↗
+            </a>
+          )}
+        </div>
+      </div>
+
+      {/* Headline stats */}
+      <div className="nport-metric-strip mb-6">
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Total AUM</div>
+          <div className="font-mono text-lg font-semibold text-slate-900 tabular-nums mt-1">{fmtUsdShort(adviser.total_aum)}</div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Tracked companies</div>
+          <div className="font-mono text-lg font-semibold text-slate-900 tabular-nums mt-1">{fmtInt(summary.distinct_companies)}</div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Evidence rows</div>
+          <div className="font-mono text-lg font-semibold text-slate-900 tabular-nums mt-1">{fmtInt(summary.total_evidence_count)}</div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Total held</div>
+          <div className="font-mono text-lg font-semibold text-slate-900 tabular-nums mt-1">{fmtUsdShort(summary.total_value_usd)}</div>
+        </div>
+      </div>
+
+      {/* Audit mode toggle */}
+      <div className="flex justify-end mb-3">
+        <label className="text-xs text-slate-500 flex items-center gap-2">
+          <input type="checkbox" checked={audit} onChange={e => setAudit(e.target.checked)} />
+          Show audit mode (include public-era rows)
+        </label>
+      </div>
+
+      {/* Contact + Principals */}
+      {(hasContact || (adviser.owners && adviser.owners.length)) && (
+        <section className="nport-panel mb-6">
+          <div className="nport-panel-header">
+            <h2 className="font-serif text-lg font-semibold text-slate-900">Firm details</h2>
+          </div>
+          <div className="px-5 py-4 grid md:grid-cols-2 gap-5 text-sm">
+            {hasContact && (
+              <div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Contact</div>
+                <div className="space-y-1.5">
+                  {adviser.phone && (
+                    <div className="flex gap-2"><span className="text-slate-500 w-20 shrink-0">Phone</span><span className="font-mono text-[12px] text-slate-700">{adviser.phone}</span></div>
+                  )}
+                  {adviser.website && (
+                    <div className="flex gap-2"><span className="text-slate-500 w-20 shrink-0">Website</span>
+                      <a href={normalizeHref(adviser.website)} target="_blank" rel="noopener noreferrer" className="font-mono text-[12px] text-slate-700 hover:text-slate-900 underline break-all">{adviser.website}</a>
+                    </div>
+                  )}
+                  {adviser.cco_name && (
+                    <div className="flex gap-2"><span className="text-slate-500 w-20 shrink-0">CCO</span>
+                      <div className="min-w-0">
+                        <span className="text-slate-900">{adviser.cco_name}</span>
+                        {adviser.cco_email && <a href={`mailto:${adviser.cco_email}`} className="ml-2 text-[12px] font-mono text-slate-600 hover:text-slate-900 break-all">{adviser.cco_email}</a>}
+                      </div>
+                    </div>
+                  )}
+                  {adviser.signatory_name && adviser.signatory_name !== adviser.cco_name && (
+                    <div className="flex gap-2"><span className="text-slate-500 w-20 shrink-0">Signatory</span>
+                      <div className="min-w-0">
+                        <span className="text-slate-900">{adviser.signatory_name}</span>
+                        {adviser.signatory_title && <span className="text-[11px] text-slate-500 ml-1.5">({adviser.signatory_title})</span>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            {adviser.owners && adviser.owners.length > 0 && (
+              <div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Principals / Owners</div>
+                <ul className="space-y-1">
+                  {adviser.owners.map((name, i) => (
+                    <li key={i} className="text-sm text-slate-900">{name}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Companies held */}
+      <section className="nport-panel">
+        <div className="nport-panel-header flex items-center justify-between">
+          <h2 className="font-serif text-lg font-semibold text-slate-900">
+            Companies held <span className="text-slate-400 text-sm font-normal ml-1">({fmtInt(companies.length)})</span>
+          </h2>
+        </div>
+        <div className="p-3">
+          <PaginatedTable
+            rows={companies}
+            columns={companyColumns}
+            defaultSort={{ key: 'total_value_usd', direction: 'desc' }}
+            emptyText="No private-era holdings recorded for this adviser."
+          />
+        </div>
+      </section>
+
+      <footer className="mt-12 pt-6 border-t border-slate-200 text-xs text-slate-500">
+        Fund Holders Intel V1.1 • Adviser drill-down • Click a company name to see all its holders.
+      </footer>
+    </div>
+  );
+}
+
 // --- bootstrap --------------------------------------------------------------
 
 window.mountIntelRouter = function () {
-  const match = window.location.pathname.match(/^\/intel\/([^\/]+)/);
-  if (!match) return false;
-  const slug = decodeURIComponent(match[1]);
+  const path = window.location.pathname;
+  const adviserMatch = path.match(/^\/intel\/adviser\/([^\/]+)/);
+  const companyMatch = path.match(/^\/intel\/([^\/]+)/);
   const root = document.getElementById('root');
   if (!root) return false;
-  ReactDOM.createRoot(root).render(<IntelPage slug={slug} />);
-  return true;
+  if (adviserMatch) {
+    const crd = decodeURIComponent(adviserMatch[1]);
+    ReactDOM.createRoot(root).render(<AdviserPage crd={crd} />);
+    return true;
+  }
+  if (companyMatch) {
+    const slug = decodeURIComponent(companyMatch[1]);
+    ReactDOM.createRoot(root).render(<IntelPage slug={slug} />);
+    return true;
+  }
+  return false;
 };

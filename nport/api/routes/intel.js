@@ -360,6 +360,172 @@ router.get('/companies/:slug/holders', async (req, res) => {
 });
 
 // ----------------------------------------------------------------------------
+// Adviser-centric endpoint — "all the funds adviser CRD X holds across every
+// tracked private company, plus firm metadata."
+// ----------------------------------------------------------------------------
+
+router.get('/advisers/:crd', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const crdParam = String(req.params.crd || '').trim();
+    if (!crdParam) {
+      return res.status(400).json({ error: 'crd required', code: 'MISSING_CRD' });
+    }
+
+    // 1. Adviser firm metadata (advisers_enriched). We may not have the firm
+    //    in advisers_enriched if it's pure-Form-D — handle that with a 404.
+    const details = await fetchAdviserDetails(deps.advClient, [crdParam]);
+    const advDetail = details[crdParam];
+    const extras = await fetchEnrichedExtras(deps.formdClient, [crdParam]);
+    const extra = extras[crdParam] || {};
+    if (!advDetail && !extra) {
+      return notFound(res, `Adviser CRD ${crdParam} not found`, 'ADVISER_NOT_FOUND');
+    }
+
+    // 2. All holdings for this CRD across every tracked company.
+    //    Keyset-paginate the view.
+    const allRows = [];
+    let lastId = 0;
+    while (true) {
+      const { data, error } = await deps.nportClient
+        .from('v_intel_company_holders')
+        .select('*')
+        .eq('adviser_crd', crdParam)
+        .gt('evidence_id', lastId)
+        .order('evidence_id')
+        .limit(1000);
+      if (error) throw error;
+      const batch = data || [];
+      if (!batch.length) break;
+      allRows.push(...batch);
+      lastId = parseInt(batch[batch.length - 1].evidence_id, 10);
+      if (batch.length < 1000) break;
+    }
+
+    // 3. Look up display names + lifecycle for every company that appears
+    //    in this adviser's holdings.
+    const companySlugs = Array.from(new Set(allRows.map(r => r.company_slug).filter(Boolean)));
+    const companyMeta = {};
+    if (companySlugs.length) {
+      for (let i = 0; i < companySlugs.length; i += 200) {
+        const chunk = companySlugs.slice(i, i + 200);
+        const { data, error } = await deps.nportClient
+          .from('private_companies')
+          .select('slug,display_name,sector,lifecycle_status,is_public,is_acquired,primary_domain,latest_known_valuation_usd')
+          .in('slug', chunk);
+        if (error) throw error;
+        for (const row of (data || [])) companyMeta[row.slug] = row;
+      }
+    }
+
+    // 4. Bucket holdings by company + source type. Filter to private/unknown
+    //    rows unless ?audit=1.
+    const audit = req.query.audit === '1' || req.query.audit === 'true';
+    const byCompany = {};
+    for (const r of allRows) {
+      if (!audit && !(r.status_at_evidence_date === 'private' || r.status_at_evidence_date === 'unknown')) {
+        continue;
+      }
+      const slug = r.company_slug;
+      if (!byCompany[slug]) {
+        const c = companyMeta[slug] || {};
+        byCompany[slug] = {
+          slug,
+          display_name: c.display_name || slug,
+          sector: c.sector || null,
+          lifecycle_status: c.lifecycle_status || null,
+          is_public: c.is_public || false,
+          is_acquired: c.is_acquired || false,
+          primary_domain: c.primary_domain || null,
+          latest_known_valuation_usd: c.latest_known_valuation_usd || null,
+          total_value_usd: 0,
+          evidence_count: 0,
+          nport_holdings: [],
+          formd_holdings: [],
+        };
+      }
+      const v = r.value_usd ? parseFloat(r.value_usd) : 0;
+      byCompany[slug].evidence_count += 1;
+      if (Number.isFinite(v)) byCompany[slug].total_value_usd += v;
+
+      const evidence = {
+        evidence_id: r.evidence_id,
+        registrant_or_filer_cik: r.evidence_cik,
+        series_id: r.evidence_series_id,
+        label: r.evidence_label,
+        value_usd: Number.isFinite(v) ? v : null,
+        evidence_date: r.evidence_date,
+        accession_number: r.accession_number,
+        adviser_method: r.adviser_resolution_method,
+        status_at_evidence_date: r.status_at_evidence_date,
+        was_private_at_evidence_date: r.was_private_at_evidence_date,
+      };
+      if (r.source_type === 'nport') {
+        byCompany[slug].nport_holdings.push(evidence);
+      } else if (r.source_type === 'formd_pooled_vehicle') {
+        byCompany[slug].formd_holdings.push(evidence);
+      }
+    }
+
+    const companies = Object.values(byCompany)
+      .sort((a, b) => b.total_value_usd - a.total_value_usd);
+
+    // 5. Roll up summary
+    const summary = {
+      distinct_companies: companies.length,
+      total_value_usd: companies.reduce((acc, c) => acc + c.total_value_usd, 0),
+      total_evidence_count: companies.reduce((acc, c) => acc + c.evidence_count, 0),
+      audit_mode: audit,
+    };
+
+    // 6. Adviser block (normalized names mirror /companies/:slug/holders)
+    const adviser = advDetail ? {
+      crd: crdParam,
+      name: advDetail.adviser_name || null,
+      total_aum: advDetail.total_aum || null,
+      phone: advDetail.phone_number || null,
+      website: pickCanonicalDomain(advDetail.primary_website, advDetail.other_websites),
+      cco_name: normalizeName(advDetail.cco_name),
+      cco_email: advDetail.cco_email || null,
+      signatory_name: normalizeName(advDetail.signatory_name),
+      signatory_title: advDetail.signatory_title || null,
+      owner_full_legal_name: advDetail.owner_full_legal_name || null,
+      owners: normalizeOwnersList(advDetail.owner_full_legal_name),
+      owner_title_or_status: advDetail.owner_title_or_status || null,
+      ownership_amount: advDetail.ownership_amount || null,
+      control_person_name: normalizeName(advDetail.control_person_name),
+      regulatory_contact_name: normalizeName(advDetail.regulatory_contact_name),
+      regulatory_contact_email: advDetail.regulatory_contact_email || null,
+      form_adv_url: advDetail.form_adv_url || null,
+      linkedin_company_url: extra.linkedin_company_url || null,
+      team_members: teamMembersToText(extra.team_members) || null,
+      alt_contact_email: extra.primary_contact_email || null,
+      twitter_handle: extra.twitter_handle || null,
+    } : {
+      crd: crdParam,
+      name: null,
+      total_aum: null,
+      phone: null,
+      website: null,
+      cco_name: null,
+      cco_email: null,
+      signatory_name: null,
+      owners: [],
+      form_adv_url: null,
+      linkedin_company_url: extra.linkedin_company_url || null,
+      team_members: teamMembersToText(extra.team_members) || null,
+      alt_contact_email: extra.primary_contact_email || null,
+      twitter_handle: extra.twitter_handle || null,
+      not_in_advisers_enriched: true,
+    };
+
+    res.json({ adviser, summary, companies });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// ----------------------------------------------------------------------------
 // CSV download endpoints
 // ----------------------------------------------------------------------------
 
