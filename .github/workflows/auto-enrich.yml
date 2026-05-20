@@ -1,10 +1,14 @@
-# Auto-Enrichment & Compliance Detection Workflow
-# Based on "Implementation Summary: Enrichment Engine v2 & Discrepancy Detector"
-# Runs daily to:
-# 1. Enrich new managers with contact info (websites, emails, Twitter, team members)
-# 2. Detect compliance issues (overdue ADV, VC exemption violations, fund type mismatches)
+# Auto-Enrichment Workflow
+# Runs daily to enrich new managers with contact info (websites, emails,
+# Twitter, team members) via the enrichment engine.
+#
+# Compliance detection step is PAUSED as of 2026-05-20. The detector has
+# known logic gaps and is deprioritized pending a broader rebuild. The
+# matcher path improved when searchAdvByName was wired in (commit 3472334),
+# but other detector logic gaps remain. To re-enable: uncomment the
+# "Run compliance detection" step below.
 
-name: Daily Enrichment & Compliance Scan
+name: Daily Enrichment
 
 on:
   schedule:
@@ -57,17 +61,21 @@ jobs:
           # AI Classification (GPT-4o-mini for validation and parsing)
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-      # Step 2: Run compliance discrepancy detection
-      - name: Run compliance detection
-        run: |
-          echo "=== DISCREPANCY DETECTOR ==="
-          echo "Checks: Overdue ADV, VC exemption violations, fund type mismatches, exemption mismatches"
-          node detect_compliance_issues.js
-        env:
-          ADV_URL: https://ezuqwwffjgfzymqxsctq.supabase.co
-          ADV_SERVICE_KEY: ${{ secrets.ADV_SERVICE_KEY }}
-          FORMD_URL: https://ltdalxkhbbhmkimmogyq.supabase.co
-          FORMD_SERVICE_KEY: ${{ secrets.FORMD_SERVICE_KEY }}
+      # Step 2: Run compliance discrepancy detection — PAUSED 2026-05-20.
+      # Detector has known logic gaps (deprioritized pending broader rebuild).
+      # See workflow header comment for context. To re-enable: uncomment the
+      # block below.
+      #
+      # - name: Run compliance detection
+      #   run: |
+      #     echo "=== DISCREPANCY DETECTOR ==="
+      #     echo "Checks: Overdue ADV, VC exemption violations, fund type mismatches, exemption mismatches"
+      #     node detect_compliance_issues.js
+      #   env:
+      #     ADV_URL: https://ezuqwwffjgfzymqxsctq.supabase.co
+      #     ADV_SERVICE_KEY: ${{ secrets.ADV_SERVICE_KEY }}
+      #     FORMD_URL: https://ltdalxkhbbhmkimmogyq.supabase.co
+      #     FORMD_SERVICE_KEY: ${{ secrets.FORMD_SERVICE_KEY }}
 
       - name: Report summary
         if: always()
@@ -76,7 +84,6 @@ jobs:
           echo "=== WORKFLOW COMPLETE ==="
           echo "Timestamp: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           echo ""
+          echo "Compliance detection step is PAUSED (see workflow header)."
           echo "Next steps:"
           echo "- Check enriched_managers table for new contact data"
-          echo "- Check compliance_issues table for new detections"
-          echo "- Review Intelligence Radar in UI for alerts"
