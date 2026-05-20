@@ -19,6 +19,7 @@ const router = express.Router();
 
 const nportClientModule = require('../db/nport_client');
 const crossSource = require('../db/cross_source');
+const { normalizeName, normalizeOwnersList } = require('../lib/name_normalizer');
 
 const deps = {
   nportClient: nportClientModule.nportClient,
@@ -253,15 +254,18 @@ router.get('/companies/:slug/holders', async (req, res) => {
           total_aum: adv.total_aum || null,
           phone: adv.phone_number || null,
           website: pickCanonicalDomain(adv.primary_website, adv.other_websites),
-          cco_name: adv.cco_name || null,
+          cco_name: normalizeName(adv.cco_name),
           cco_email: adv.cco_email || null,
-          signatory_name: adv.signatory_name || null,
+          signatory_name: normalizeName(adv.signatory_name),
           signatory_title: adv.signatory_title || null,
+          // Raw owner blob kept for backwards-compat; new `owners` array is
+          // the parsed/normalized list the frontend should use.
           owner_full_legal_name: adv.owner_full_legal_name || null,
+          owners: normalizeOwnersList(adv.owner_full_legal_name),
           owner_title_or_status: adv.owner_title_or_status || null,
           ownership_amount: adv.ownership_amount || null,
-          control_person_name: adv.control_person_name || null,
-          regulatory_contact_name: adv.regulatory_contact_name || null,
+          control_person_name: normalizeName(adv.control_person_name),
+          regulatory_contact_name: normalizeName(adv.regulatory_contact_name),
           regulatory_contact_email: adv.regulatory_contact_email || null,
           form_adv_url: adv.form_adv_url || null,
           linkedin_company_url: extras.linkedin_company_url || null,

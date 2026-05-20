@@ -107,7 +107,12 @@ function AdviserDetailPanel({ adv }) {
     );
   }
 
-  const owners = (adv.owner_full_legal_name || '').split(';').map(s => s.trim()).filter(Boolean);
+  // Backend pre-normalizes owners (LAST, FIRST, NMN -> 'First Last') and
+  // returns them as adv.owners array. Fall back to legacy split for older
+  // payloads.
+  const owners = Array.isArray(adv.owners) && adv.owners.length
+    ? adv.owners
+    : (adv.owner_full_legal_name || '').split(';').map(s => s.trim()).filter(Boolean);
   const titles = (adv.owner_title_or_status || '').split(';').map(s => s.trim()).filter(Boolean);
   const principals = owners.map((name, i) => ({ name, title: titles[i] || '' }));
 
