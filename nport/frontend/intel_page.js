@@ -98,7 +98,7 @@ function AdviserListRow({ adv, selected, onClick }) {
 
 // --- adviser detail panel (right pane) --------------------------------------
 
-function AdviserDetailPanel({ adv }) {
+function AdviserDetailPanel({ adv, holdings, companyName }) {
   if (!adv) {
     return (
       <div className="flex items-center justify-center h-64 text-sm text-slate-400 italic px-6 text-center">
@@ -344,6 +344,42 @@ function AdviserDetailPanel({ adv }) {
             </div>
           </div>
         )}
+
+        {/* Holdings in this company — N-PORT + Form D, sorted by value desc */}
+        {holdings && ((holdings.nport && holdings.nport.length) || (holdings.formd && holdings.formd.length)) && (
+          <div className="border-t border-slate-100 pt-4">
+            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">
+              Holdings{companyName ? ` in ${companyName}` : ''}
+              <span className="ml-1 text-slate-400 font-normal">
+                ({fmtInt((holdings.nport || []).length + (holdings.formd || []).length)})
+              </span>
+            </div>
+            <div className="space-y-1.5 text-sm">
+              {[...(holdings.nport || []).map(h => ({ ...h, _kind: 'nport', _label: h.issuer_title, _date: h.evidence_date })),
+                ...(holdings.formd || []).map(h => ({ ...h, _kind: 'formd', _label: h.filer_entityname, _date: h.filing_date }))]
+                .sort((a, b) => (b.value_usd || 0) - (a.value_usd || 0))
+                .map((h, i) => (
+                  <div key={i} className="flex gap-2 items-baseline">
+                    <span className={
+                      'text-[9px] uppercase tracking-widest font-semibold w-12 shrink-0 ' +
+                      (h._kind === 'nport' ? 'text-slate-500' : 'text-amber-700')
+                    }>
+                      {h._kind === 'nport' ? 'N-PORT' : 'Form D'}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12px] text-slate-700 truncate" title={h._label}>{h._label}</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">{fmtDate(h._date)}</div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="font-mono text-[12px] font-semibold text-slate-900 tabular-nums">
+                        {fmtUsdShort(h.value_usd)}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -351,13 +387,31 @@ function AdviserDetailPanel({ adv }) {
 
 // --- adviser list+detail wrapper --------------------------------------------
 
-function AdviserListDetail({ advisers }) {
+function AdviserListDetail({ advisers, nportHolders, formdHolders, companyName }) {
   // Identified advisers only — null-CRD rows live in the source tables below
   const identified = useMemoI(
     () => (advisers || []).filter(a => a.crd && a.crd !== 'null'),
     [advisers]
   );
   const [selectedCrd, setSelectedCrd] = useStateI(identified[0] ? identified[0].crd : null);
+
+  // Per-CRD holdings — index once, look up per selection.
+  const holdingsByCrd = useMemoI(() => {
+    const map = {};
+    for (const r of (nportHolders || [])) {
+      const key = String(r.adviser_crd || '');
+      if (!key) continue;
+      if (!map[key]) map[key] = { nport: [], formd: [] };
+      map[key].nport.push(r);
+    }
+    for (const r of (formdHolders || [])) {
+      const key = String(r.adviser_crd || '');
+      if (!key) continue;
+      if (!map[key]) map[key] = { nport: [], formd: [] };
+      map[key].formd.push(r);
+    }
+    return map;
+  }, [nportHolders, formdHolders]);
 
   // If the data refreshes (audit toggle, slug change), re-seed selection
   useEffectI(() => {
@@ -399,7 +453,11 @@ function AdviserListDetail({ advisers }) {
 
       {/* RIGHT: detail */}
       <div className="lg:w-2/5 w-full rounded-lg border border-slate-200 bg-white overflow-hidden lg:max-h-[640px] lg:overflow-y-auto">
-        <AdviserDetailPanel adv={selected} />
+        <AdviserDetailPanel
+          adv={selected}
+          holdings={selected ? (holdingsByCrd[String(selected.crd)] || { nport: [], formd: [] }) : null}
+          companyName={companyName}
+        />
       </div>
     </div>
   );
@@ -866,7 +924,12 @@ function IntelPage({ slug }) {
       {/* Advisers — primary section (two-pane list + detail) */}
       <section className="mb-10">
         <h2 className="font-serif text-2xl font-semibold text-slate-900 mb-4">Adviser firms</h2>
-        <AdviserListDetail advisers={advisers} />
+        <AdviserListDetail
+          advisers={advisers}
+          nportHolders={nport_holders}
+          formdHolders={formd_holders}
+          companyName={company.display_name}
+        />
       </section>
 
       {/* N-PORT holdings */}
