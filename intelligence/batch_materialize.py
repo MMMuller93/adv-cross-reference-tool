@@ -293,6 +293,21 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--slug", action="append", help="Process only specific slug(s); repeatable")
     parser.add_argument("--resume", action="store_true", help="Skip slugs already in manifest")
     parser.add_argument("--execute", action="store_true", help="Materialize for real (default: dry-run)")
+    parser.add_argument(
+        "--with-iapd",
+        action="store_true",
+        help=(
+            "After Phase A, also run the IAPD bridge to resolve unbridged Form D "
+            "filers (iapd_bridge.bridge_company). Off by default because Playwright "
+            "scraping is slow on a cold cache; turn on for full coverage runs."
+        ),
+    )
+    parser.add_argument(
+        "--iapd-delay-ms",
+        type=int,
+        default=2500,
+        help="Delay between IAPD scraper queries (default 2500ms; only used with --with-iapd).",
+    )
     return parser.parse_args(argv)
 
 
@@ -357,6 +372,45 @@ def main(argv: Optional[list[str]] = None) -> int:
         })
         if (i % 25 == 0) or (i == len(company_rows)):
             print(f"  materialized {i}/{len(company_rows)} companies")
+
+    # ---------- Phase A.5: IAPD bridge unbridged Form D filers ----------
+    # Optional, off by default. When --with-iapd is set, scrape SEC IAPD
+    # (adviserinfo.sec.gov) for any Form D filer that isn't in
+    # cross_reference_matches, and write an intel_adviser_resolution row
+    # when we find a unique CRD match in advisers_enriched. Slow on cold
+    # cache (~2.5s per unique candidate); fast after that since the
+    # iapd_cache.json persists between runs.
+    if args.with_iapd and args.execute:
+        print("\n=== Phase A.5: IAPD bridge for unbridged filers ===")
+        try:
+            # Local import — the iapd_bridge module spawns Playwright via
+            # subprocess; only load it when we're actually going to use it.
+            from iapd_bridge import bridge_company  # type: ignore
+        except ImportError:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from iapd_bridge import bridge_company  # type: ignore
+        bridge_summary_by_slug: dict[str, dict[str, Any]] = {}
+        for i, mres in enumerate(materialize_results, 1):
+            slug = mres["company"]["slug"]
+            try:
+                summary = bridge_company(
+                    nport, adv_crds, slug,
+                    execute=True,
+                    delay_ms=args.iapd_delay_ms,
+                    max_candidates_per_run=None,
+                )
+                bridge_summary_by_slug[slug] = summary
+            except Exception as exc:  # noqa: BLE001
+                bridge_summary_by_slug[slug] = {"error": str(exc)[:200]}
+            if (i % 25 == 0) or (i == len(materialize_results)):
+                print(f"  iapd-bridged {i}/{len(materialize_results)} companies")
+        # Stash on each result so Phase C can pick up the summary if it wants.
+        for mres in materialize_results:
+            mres["iapd_summary"] = bridge_summary_by_slug.get(mres["company"]["slug"])
+    elif args.with_iapd and not args.execute:
+        print("\n  --with-iapd set but --execute is off; skipping IAPD phase "
+              "(bridge writes to intel_adviser_resolution and only runs "
+              "during execute runs).")
 
     # ---------- Phase B: preload lifecycle aggregates ----------
     print("\n=== Phase B: preloading lifecycle aggregates from v_intel_company_holders ===")
