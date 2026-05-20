@@ -53,6 +53,30 @@ const firstInitial = (name) => {
 };
 
 /**
+ * Render a person's name with an inline LinkedIn icon link when we've
+ * enriched it. `personEnrichment` is the per-firm map returned by the
+ * API ({ normalizedName: { linkedin_url, inferred_title, confidence } }).
+ *
+ * Returns React fragments inline (not a separate component) so it can be
+ * dropped into existing layouts without re-wrapping.
+ */
+const renderPersonWithLinkedIn = (name, personEnrichment) => {
+  if (!name) return null;
+  const enr = personEnrichment && personEnrichment[name];
+  if (!enr || !enr.linkedin_url) return name;
+  return (
+    <>
+      {name}
+      <a href={enr.linkedin_url} target="_blank" rel="noopener noreferrer"
+         className="ml-1 text-[10px] text-blue-700 hover:text-blue-900"
+         title={enr.inferred_title ? `${enr.inferred_title} (LinkedIn)` : 'LinkedIn'}>
+        in↗
+      </a>
+    </>
+  );
+};
+
+/**
  * Build an EDGAR archive index URL for a specific filing.
  *   cik       e.g. '0000044201' or '44201'
  *   accession e.g. '0001193125-26-182055'
@@ -241,7 +265,7 @@ function AdviserDetailPanel({ adv, holdings, companyName }) {
                 <div className="flex gap-2">
                   <span className="text-slate-500 w-20 shrink-0">CCO</span>
                   <div className="min-w-0">
-                    <span className="text-slate-900">{adv.cco_name}</span>
+                    <span className="text-slate-900">{renderPersonWithLinkedIn(adv.cco_name, adv.person_enrichment)}</span>
                     {adv.cco_email && (
                       <a
                         href={`mailto:${adv.cco_email}`}
@@ -257,7 +281,7 @@ function AdviserDetailPanel({ adv, holdings, companyName }) {
                 <div className="flex gap-2">
                   <span className="text-slate-500 w-20 shrink-0">Signatory</span>
                   <div className="min-w-0">
-                    <span className="text-slate-900">{adv.signatory_name}</span>
+                    <span className="text-slate-900">{renderPersonWithLinkedIn(adv.signatory_name, adv.person_enrichment)}</span>
                     {adv.signatory_title && (
                       <span className="text-[11px] text-slate-500 ml-1.5">({adv.signatory_title})</span>
                     )}
@@ -280,7 +304,7 @@ function AdviserDetailPanel({ adv, holdings, companyName }) {
             <ul className="text-sm space-y-1">
               {principals.map((p, i) => (
                 <li key={i} className="text-slate-700">
-                  <span className="font-medium text-slate-900">{p.name}</span>
+                  <span className="font-medium text-slate-900">{renderPersonWithLinkedIn(p.name, adv.person_enrichment)}</span>
                   {p.title && <span className="text-[11px] text-slate-500 ml-2">{p.title}</span>}
                 </li>
               ))}
@@ -1218,7 +1242,9 @@ function AdviserPage({ crd }) {
                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Principals / Owners</div>
                 <ul className="space-y-1">
                   {adviser.owners.map((name, i) => (
-                    <li key={i} className="text-sm text-slate-900">{name}</li>
+                    <li key={i} className="text-sm text-slate-900">
+                      {renderPersonWithLinkedIn(name, adviser.person_enrichment)}
+                    </li>
                   ))}
                 </ul>
               </div>

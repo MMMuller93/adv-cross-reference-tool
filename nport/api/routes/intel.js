@@ -147,6 +147,38 @@ async function fetchAdviserDetails(advClient, crds) {
   return out;
 }
 
+async function fetchPersonEnrichment(nportClient, crds) {
+  // Returns { [crd]: { [normalized_name]: { linkedin_url, inferred_title, confidence } } }
+  // Reads v_intel_person_enrichment (migration 007). Returns {} if the table/
+  // view doesn't exist yet — the migration may not be applied.
+  if (!crds || crds.length === 0) return {};
+  const unique = Array.from(new Set(crds.map(c => String(c).trim()).filter(Boolean)));
+  const out = {};
+  for (let i = 0; i < unique.length; i += 100) {
+    const chunk = unique.slice(i, i + 100);
+    const { data, error } = await nportClient
+      .from('v_intel_person_enrichment')
+      .select('adviser_crd,normalized_name,linkedin_url,inferred_title,confidence,role_hint')
+      .in('adviser_crd', chunk);
+    if (error) {
+      // Pre-migration: log once and bail. Don't fail the whole intel request.
+      console.warn('[INTEL] v_intel_person_enrichment unavailable:', error.message);
+      return out;
+    }
+    for (const row of (data || [])) {
+      const crd = String(row.adviser_crd);
+      if (!out[crd]) out[crd] = {};
+      out[crd][row.normalized_name] = {
+        linkedin_url: row.linkedin_url,
+        inferred_title: row.inferred_title,
+        confidence: row.confidence,
+        role_hint: row.role_hint,
+      };
+    }
+  }
+  return out;
+}
+
 async function fetchEnrichedExtras(formdClient, crds) {
   if (!formdClient || !crds || crds.length === 0) return {};
   const unique = Array.from(new Set(crds.map(c => String(c).trim()).filter(Boolean)));
@@ -237,6 +269,7 @@ router.get('/companies/:slug/holders', async (req, res) => {
     const crds = Array.from(new Set(allRows.map(r => r.adviser_crd).filter(Boolean)));
     const adviserDetails = await fetchAdviserDetails(deps.advClient, crds);
     const enrichedExtras = await fetchEnrichedExtras(deps.formdClient, crds);
+    const personEnrichment = await fetchPersonEnrichment(deps.nportClient, crds);
 
     // 6. Build adviser rollup: one entry per distinct CRD, with total $ value
     //    and evidence count across both source types
@@ -267,6 +300,10 @@ router.get('/companies/:slug/holders', async (req, res) => {
           control_person_name: normalizeName(adv.control_person_name),
           regulatory_contact_name: normalizeName(adv.regulatory_contact_name),
           regulatory_contact_email: adv.regulatory_contact_email || null,
+          // Per-person LinkedIn / title enrichment, keyed by normalized name.
+          // Populated by intelligence/enrich_people.py; empty {} when the
+          // table is unmigrated or no rows exist for this firm yet.
+          person_enrichment: personEnrichment[key] || {},
           form_adv_url: adv.form_adv_url || null,
           linkedin_company_url: extras.linkedin_company_url || null,
           team_members: teamMembersToText(extras.team_members) || null,
@@ -521,6 +558,8 @@ router.get('/advisers/:crd', async (req, res) => {
     const advDetail = details[crdParam];
     const extras = await fetchEnrichedExtras(deps.formdClient, [crdParam]);
     const extra = extras[crdParam] || {};
+    const personEnrichmentMap = await fetchPersonEnrichment(deps.nportClient, [crdParam]);
+    const personEnrichmentForCrd = personEnrichmentMap[crdParam] || {};
     if (!advDetail && !extra) {
       return notFound(res, `Adviser CRD ${crdParam} not found`, 'ADVISER_NOT_FOUND');
     }
@@ -644,6 +683,7 @@ router.get('/advisers/:crd', async (req, res) => {
       team_members: teamMembersToText(extra.team_members) || null,
       alt_contact_email: extra.primary_contact_email || null,
       twitter_handle: extra.twitter_handle || null,
+      person_enrichment: personEnrichmentForCrd,
     } : {
       crd: crdParam,
       name: null,
@@ -659,6 +699,7 @@ router.get('/advisers/:crd', async (req, res) => {
       team_members: teamMembersToText(extra.team_members) || null,
       alt_contact_email: extra.primary_contact_email || null,
       twitter_handle: extra.twitter_handle || null,
+      person_enrichment: personEnrichmentForCrd,
       not_in_advisers_enriched: true,
     };
 
