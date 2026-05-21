@@ -294,7 +294,8 @@ def _name_tokens_match(snippet: str, person_name: str) -> bool:
 
 
 def find_linkedin_for_person(person_name: str, firm_name: str, role_hint: Optional[str] = None,
-                             cache: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+                             cache: Optional[dict[str, Any]] = None,
+                             force: bool = False) -> dict[str, Any]:
     """Search the web for a LinkedIn profile matching this person at this firm.
 
     Returns: {
@@ -306,7 +307,7 @@ def find_linkedin_for_person(person_name: str, firm_name: str, role_hint: Option
     }
     """
     cache_key = f"{firm_name}::{person_name}"
-    if cache and cache_key in cache:
+    if cache is not None and cache_key in cache and not force:
         return cache[cache_key]
 
     # Brave's index doesn't reliably honor `site:linkedin.com/in` (LinkedIn
@@ -498,14 +499,20 @@ def main(argv: Optional[list[str]] = None) -> int:
                 return 0
             cache_key = f"{person['firm']}::{person['name']}"
             cached = cache.get(cache_key)
+            # On cache hit we still consider writing to the DB — earlier
+            # dry-runs populate the cache, and skipping cached entries
+            # entirely meant a subsequent --execute run never wrote them.
+            # We only skip the search call itself, not the write path.
             if cached and not args.force:
+                result = cached
                 skipped += 1
-                continue
-            result = find_linkedin_for_person(
-                person["name"], person["firm"], person["role"], cache=cache
-            )
-            call_count += 1
-            time.sleep(args.delay_ms / 1000.0)
+            else:
+                result = find_linkedin_for_person(
+                    person["name"], person["firm"], person["role"],
+                    cache=cache, force=args.force,
+                )
+                call_count += 1
+                time.sleep(args.delay_ms / 1000.0)
 
             if result.get("linkedin_url"):
                 src = result.get("source") or "search"

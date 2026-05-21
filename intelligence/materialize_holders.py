@@ -132,15 +132,16 @@ SHORT_ALIAS_ALLOWLIST: set[str] = set()
 #
 # Verification protocol before adding: pull the word-boundary universe for
 # the alias and confirm precision is ~100% (i.e., every hit is a real SPV
-# for that company). SpaceX SPACEX universe = 143 rows, 100% precision
-# (2026-05-19, all CGF2021/Koru/HII/Inflection/MWAM/etc. SpaceX SPVs).
+# for that company). DO NOT pre-add aliases that have not actually hit the
+# cap — Codex 2026-05-20 flagged the pre-emptive list as unsafe (an alias
+# that grows past 100 hits without a re-verification pass could publish
+# false positives). Add aliases only after they fire the cap AND their
+# universe has been audited.
 TRUSTED_LONG_ALIASES: set[str] = {
     "SPACEX",      # 143 rows, all real SpaceX SPVs (verified 2026-05-19)
-    "ANTHROPIC",   # current count low; pre-emptive in case it grows
-    "OPENAI",      # current count low; pre-emptive
-    "DATABRICKS",
-    "STRIPE",
-    "FIGMA",
+    # ANTHROPIC, OPENAI, DATABRICKS, STRIPE, FIGMA: pre-emptive entries
+    # removed per Codex review. Re-add only after they hit the cap +
+    # verification pass confirms 100% precision.
 }
 
 

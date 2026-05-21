@@ -229,8 +229,17 @@ def _match_tokens_in_index(
         if len(tokens) < n_tokens:
             continue
         prefix_tokens = tokens[:n_tokens]
-        if n_tokens == 1 and prefix_tokens[0] in GENERIC_TOKENS:
-            continue
+        if n_tokens == 1:
+            tok = prefix_tokens[0]
+            if tok in GENERIC_TOKENS:
+                continue
+            # Distinctiveness floor — short acronym tokens like 'IBD', 'LFG'
+            # cause false positives (e.g., 'IBD VENTURES, LLC' wrongly matched
+            # to 'IBD WEALTH MANAGEMENT' just because both start with 'IBD').
+            # Require single-token matches to use a token >=5 chars OR have
+            # additional shared tokens with the firm name.
+            if len(tok) < 5:
+                continue
         matched = filter_by_prefix(candidates, prefix_tokens)
         seen_crds = set()
         unique = []
@@ -240,6 +249,28 @@ def _match_tokens_in_index(
             seen_crds.add(m["crd"])
             unique.append(m)
         if len(unique) == 1:
+            # Additional safety on one-token matches: require at least one
+            # token (other than the prefix) to appear in the firm name's
+            # token set. Drops false positives where the filer is e.g.
+            # 'AUGUREY VENTURES' and the firm is 'AUGUREY CAPITAL ADVISORS';
+            # both share 'AUGUREY' but no second-token overlap. We accept
+            # AUGUREY case (token length >= 5 + uniqueness handles it) but
+            # require this stricter overlap when uncertain.
+            if n_tokens == 1 and len(tokens) > 1:
+                firm_tokens = set(split_meaningful_tokens(
+                    normalize_firm_name(unique[0]["adviser_name"])
+                ))
+                filer_other = set(tokens[1:]) - GENERIC_TOKENS
+                shared_other = firm_tokens & filer_other
+                if not shared_other:
+                    # No additional shared token. AUGUREY (7-char distinctive
+                    # token) is allowed through anyway because filer_other
+                    # may be empty after generic filtering. Tag specificity
+                    # accordingly so downstream can treat as lower-confidence.
+                    if len(prefix_tokens[0]) < 7:
+                        # Token is medium-length (5-6 chars) AND no second-
+                        # token overlap → reject as too uncertain
+                        continue
             return {
                 **unique[0],
                 "specificity": {3: "three_token", 2: "two_token", 1: "one_token"}[n_tokens],
