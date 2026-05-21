@@ -1490,27 +1490,22 @@ app.get('/api/funds/new-managers', async (req, res) => {
     // Without this, a single-token variant like "TMS" can wrongly match
     // "TMS Capital Management" (TMS Angels false-positive regression that
     // the v3 enrichment pipeline already protects against).
+    // EMERGENCY REVERT 2026-05-22: variant-ladder iteration over 57K advisers
+    // × 1949 managers × ~4 variants caused >20s request times → production HTTP 000.
+    // Reverted to single-pass match (try parsedName only). Hash3-class shorter-variant
+    // matches will NOT resolve via this endpoint until the proper fix lands (token-
+    // inverted index on the adviser cache, ~30-45 min effort, queued as immediate
+    // follow-up). v3 enrichment + lib/adv_lookup.js searchAdvByName still do
+    // variant laddering — only this hot-path endpoint is reverted.
     const findAdviserMatch = (parsedName, opts = {}) => {
-      const variants = nameVariants.generateVariants(parsedName, { extraStripper: parseFundName });
-      const tries = [parsedName, ...variants];
-      const seen = new Set();
-      for (const v of tries) {
-        if (!v || seen.has(v.toLowerCase())) continue;
-        seen.add(v.toLowerCase());
-        const adv = tryAdviserMatch(v);
-        if (!adv) continue;
-
-        // Gate against acronym FPs. Build a checkAdvDatabase-shaped result
-        // for the gate (it expects {found, adviser_name}).
-        const gate = passesStricterCrdGate(
-          { found: true, adviser_name: adv.adviser_name },
-          parsedName,
-          { matchedVariant: v, relatedNames: opts.relatedNames || null }
-        );
-        if (gate.pass) return adv;
-        // Rejected as FP — try next variant
-      }
-      return null;
+      const adv = tryAdviserMatch(parsedName);
+      if (!adv) return null;
+      const gate = passesStricterCrdGate(
+        { found: true, adviser_name: adv.adviser_name },
+        parsedName,
+        { matchedVariant: parsedName, relatedNames: opts.relatedNames || null }
+      );
+      return gate.pass ? adv : null;
     };
 
     // Process all managers in memory (no API calls)
