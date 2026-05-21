@@ -354,10 +354,37 @@ function AdviserDetailPanel({ adv, holdings, companyName }) {
                   </a>
                 </div>
               )}
-              {adv.team_members && (
+              {adv.team_members && Array.isArray(adv.team_members) && adv.team_members.length > 0 && (
+                <div className="border-t border-slate-100 pt-3 mt-3">
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">
+                    Team ({adv.team_members.length})
+                  </div>
+                  <ul className="space-y-1.5">
+                    {adv.team_members.map((m, i) => (
+                      <li key={i} className="text-[12px] flex items-baseline gap-2 flex-wrap">
+                        <span className="text-slate-900 font-medium">{m.name}</span>
+                        {m.title && <span className="text-[10px] text-slate-500">{m.title}</span>}
+                        {m.linkedin && (
+                          <a href={m.linkedin} target="_blank" rel="noopener noreferrer"
+                             className="text-[10px] text-blue-700 hover:text-blue-900 font-medium"
+                             title="LinkedIn">in↗</a>
+                        )}
+                        {m.email && (
+                          <a href={`mailto:${m.email}`}
+                             className="font-mono text-[10px] text-slate-600 hover:text-slate-900 break-all">
+                            {m.email}
+                          </a>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {/* Legacy stringified team_members fallback for older API payloads */}
+              {(!Array.isArray(adv.team_members) && adv.team_members_text) && (
                 <div className="flex gap-2">
                   <span className="text-slate-500 w-20 shrink-0">Team</span>
-                  <span className="text-slate-700">{adv.team_members}</span>
+                  <span className="text-slate-700">{adv.team_members_text}</span>
                 </div>
               )}
             </div>

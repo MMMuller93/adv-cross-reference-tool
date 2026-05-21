@@ -243,22 +243,70 @@ async function fetchEnrichedExtras(formdClient, crds) {
   return out;
 }
 
-function teamMembersToText(value) {
+/**
+ * Normalize PFR's enrichment_engine_v2 team_members payload into a
+ * structured array the frontend can render person-by-person.
+ *
+ * Each element: { name, title, linkedin, email }. Drops empty entries
+ * and entries whose name was rejected by the same heuristics the
+ * Python enrichment_validator uses (corporate strings, header-style
+ * all-caps blobs, etc.).
+ *
+ * Returns null if no usable members remain.
+ */
+function teamMembersToStructured(value, firmName) {
   if (!value) return null;
-  if (typeof value === 'string') return value;
+  let arr;
   if (Array.isArray(value)) {
-    const parts = value.map((m) => {
-      if (m && typeof m === 'object') {
-        const name = m.name || '';
-        const role = m.role || m.title || '';
-        if (name && role) return `${name} (${role})`;
-        return name || role || '';
-      }
-      return String(m || '');
-    }).filter(Boolean);
-    return parts.length ? parts.join('; ') : null;
+    arr = value;
+  } else if (typeof value === 'string') {
+    // Legacy stringified form — try to JSON.parse, otherwise split on ';'
+    try {
+      const parsed = JSON.parse(value);
+      arr = Array.isArray(parsed) ? parsed : null;
+    } catch {
+      arr = value.split(';').map(s => ({ name: s.trim() }));
+    }
   }
-  return String(value);
+  if (!Array.isArray(arr)) return null;
+
+  // Reject blatantly-corporate name strings the engine sometimes emits
+  // (e.g., 'Capital Research Management (...long description...)').
+  const isLikelyCorporate = (name) => {
+    if (!name) return true;
+    const upper = name.toUpperCase();
+    const corp = /\b(INC|INC\.|LLC|LP|L\.P\.|CORP|CORPORATION|HOLDINGS|TRUST|FUND|FUNDS|MANAGEMENT|ADVISORS|ADVISERS|PARTNERS|ASSOCIATES|GROUP|COMPANY|CO\.?|LTD|LIMITED)\b/;
+    if (corp.test(upper) && name.split(' ').length >= 3) return true;
+    // 4+ token ALL CAPS without lower → looks like a header
+    if (name.split(' ').length >= 4 && !/[a-z]/.test(name)) return true;
+    return false;
+  };
+
+  const out = [];
+  const seenNames = new Set();
+  for (const m of arr) {
+    if (!m || typeof m !== 'object') continue;
+    const name = (m.name || '').trim();
+    if (!name) continue;
+    if (isLikelyCorporate(name)) continue;
+    const key = name.toLowerCase();
+    if (seenNames.has(key)) continue;
+    seenNames.add(key);
+    out.push({
+      name,
+      title: (m.role || m.title || '').trim() || null,
+      linkedin: m.linkedin || m.linkedin_url || null,
+      email: m.email || null,
+    });
+  }
+  return out.length ? out : null;
+}
+
+// Kept for callers that want the legacy joined-string form.
+function teamMembersToText(value) {
+  const structured = teamMembersToStructured(value);
+  if (!structured) return null;
+  return structured.map(m => m.title ? `${m.name} (${m.title})` : m.name).join('; ');
 }
 
 // ----------------------------------------------------------------------------
@@ -347,7 +395,11 @@ router.get('/companies/:slug/holders', async (req, res) => {
           person_enrichment: personEnrichment[key] || {},
           form_adv_url: adv.form_adv_url || null,
           linkedin_company_url: extras.linkedin_company_url || null,
-          team_members: teamMembersToText(extras.team_members) || null,
+          // Structured: array of {name, title, linkedin, email}. The frontend
+          // renders per-person LinkedIn icons + emails from this. Kept the
+          // back-compat text form on team_members_text for older consumers.
+          team_members: teamMembersToStructured(extras.team_members),
+          team_members_text: teamMembersToText(extras.team_members) || null,
           alt_contact_email: extras.primary_contact_email || null,
           twitter_handle: extras.twitter_handle || null,
           evidence_count: 0,
@@ -721,7 +773,8 @@ router.get('/advisers/:crd', async (req, res) => {
       regulatory_contact_email: advDetail.regulatory_contact_email || null,
       form_adv_url: advDetail.form_adv_url || null,
       linkedin_company_url: extra.linkedin_company_url || null,
-      team_members: teamMembersToText(extra.team_members) || null,
+      team_members: teamMembersToStructured(extra.team_members),
+      team_members_text: teamMembersToText(extra.team_members) || null,
       alt_contact_email: extra.primary_contact_email || null,
       twitter_handle: extra.twitter_handle || null,
       person_enrichment: personEnrichmentForCrd,
@@ -737,7 +790,8 @@ router.get('/advisers/:crd', async (req, res) => {
       owners: [],
       form_adv_url: null,
       linkedin_company_url: extra.linkedin_company_url || null,
-      team_members: teamMembersToText(extra.team_members) || null,
+      team_members: teamMembersToStructured(extra.team_members),
+      team_members_text: teamMembersToText(extra.team_members) || null,
       alt_contact_email: extra.primary_contact_email || null,
       twitter_handle: extra.twitter_handle || null,
       person_enrichment: personEnrichmentForCrd,
