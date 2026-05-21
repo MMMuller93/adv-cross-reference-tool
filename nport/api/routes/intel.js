@@ -54,12 +54,22 @@ function serverError(res, err, code = 'INTERNAL_ERROR') {
 }
 
 // Domain skip-list for canonical-website selection (matches POC3's selector).
+// Codex 2026-05-20 — added discord.gg/discord.com (firms file these as
+// 'primary_website' on Form ADV; SEC data is dirty). Also pinterest,
+// vimeo, slideshare, glassdoor — same class of issue.
 const SOCIAL_HOSTS = new Set([
-  'facebook.com', 'instagram.com', 'linkedin.com', 'twitter.com', 'x.com',
-  'youtube.com', 'reddit.com', 'threads.net', 'tiktok.com', 'mastodon.social',
-  'bsky.app', 'medium.com', 'substack.com', 'wordpress.com', 'blogspot.com',
-  'wix.com', 'squarespace.com', 'github.com', 'github.io', 'glassdoor.com',
-  'indeed.com', 'crunchbase.com', 'sec.gov', 'edgar.gov', 'secinfo.com',
+  'facebook.com', 'fb.com', 'instagram.com', 'linkedin.com',
+  'twitter.com', 'x.com',
+  'youtube.com', 'youtu.be', 'vimeo.com',
+  'reddit.com', 'threads.net', 'tiktok.com', 'mastodon.social',
+  'bsky.app', 'pinterest.com', 'slideshare.net',
+  'medium.com', 'substack.com', 'wordpress.com', 'blogspot.com',
+  'wix.com', 'squarespace.com',
+  'github.com', 'github.io', 'gitlab.com',
+  'glassdoor.com', 'indeed.com',
+  'crunchbase.com', 'pitchbook.com', 'tracxn.com', 'cbinsights.com',
+  'sec.gov', 'edgar.gov', 'secinfo.com', 'adviserinfo.sec.gov',
+  'discord.gg', 'discord.com',
   'plynk.com',
 ]);
 
@@ -82,8 +92,38 @@ function isSocial(url) {
   return false;
 }
 
-function pickCanonicalDomain(primary, others) {
-  if (primary && !isSocial(primary)) return primary;
+// Normalize a URL for display: lowercase scheme + host, preserve path/query.
+// Drops 'www.' and trailing slash on bare-host URLs for tidiness.
+function normalizeUrlForDisplay(url) {
+  if (!url) return url;
+  try {
+    const u = new URL(String(url).trim());
+    const scheme = u.protocol.toLowerCase().replace(':', '');
+    const host = u.hostname.toLowerCase();
+    let path = u.pathname || '';
+    if (path === '/') path = '';
+    const tail = (u.search || '') + (u.hash || '');
+    return `${scheme}://${host}${path}${tail}`;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Pick the best website for an adviser, in order:
+ *   1. enriched_managers.website_url (validator-cleaned; preferred)
+ *   2. advisers_enriched.primary_website (if not in SOCIAL_HOSTS)
+ *   3. first non-social entry in advisers_enriched.other_websites
+ *   4. null
+ *
+ * Returns null instead of a social/aggregator URL — better to show
+ * nothing than to point users at a Discord invite.
+ */
+function pickCanonicalDomain(primary, others, enrichedWebsite) {
+  if (enrichedWebsite && !isSocial(enrichedWebsite)) {
+    return normalizeUrlForDisplay(enrichedWebsite);
+  }
+  if (primary && !isSocial(primary)) return normalizeUrlForDisplay(primary);
   const list = [];
   if (Array.isArray(others)) {
     list.push(...others);
@@ -94,9 +134,10 @@ function pickCanonicalDomain(primary, others) {
     else if (others.trim()) list.push(others.trim());
   }
   for (const url of list) {
-    if (url && !isSocial(url)) return url;
+    if (url && !isSocial(url)) return normalizeUrlForDisplay(url);
   }
-  return primary || null;
+  // Everything is social — return null rather than a Discord invite.
+  return null;
 }
 
 // Keyset-paginated fetch from v_intel_company_holders for one source_type.
@@ -286,7 +327,7 @@ router.get('/companies/:slug/holders', async (req, res) => {
           name: adv.adviser_name || null,
           total_aum: adv.total_aum || null,
           phone: adv.phone_number || null,
-          website: pickCanonicalDomain(adv.primary_website, adv.other_websites),
+          website: pickCanonicalDomain(adv.primary_website, adv.other_websites, extras.website_url),
           cco_name: normalizeName(adv.cco_name),
           cco_email: adv.cco_email || null,
           signatory_name: normalizeName(adv.signatory_name),
@@ -666,7 +707,7 @@ router.get('/advisers/:crd', async (req, res) => {
       name: advDetail.adviser_name || null,
       total_aum: advDetail.total_aum || null,
       phone: advDetail.phone_number || null,
-      website: pickCanonicalDomain(advDetail.primary_website, advDetail.other_websites),
+      website: pickCanonicalDomain(advDetail.primary_website, advDetail.other_websites, extra.website_url),
       cco_name: normalizeName(advDetail.cco_name),
       cco_email: advDetail.cco_email || null,
       signatory_name: normalizeName(advDetail.signatory_name),
