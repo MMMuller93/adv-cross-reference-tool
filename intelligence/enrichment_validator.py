@@ -119,28 +119,326 @@ def firm_acronym(firm_name: str) -> str:
     return acro
 
 
+def _split_into_chunks(haystack: str) -> list[str]:
+    """Split a URL/handle/slug into recognizable word chunks.
+
+    Steps:
+      1. Split on non-alphabetic characters (digits, punctuation, separators).
+      2. For each resulting span, split on camelCase / PascalCase boundaries.
+      3. Lowercase. Drop empty.
+
+    Examples:
+      'westernasset'   -> ['westernasset']
+      'WesternAsset'   -> ['western', 'asset']
+      'manhattan-west' -> ['manhattan', 'west']
+      'augury_invest'  -> ['augury', 'invest']
+      'jpmorgan'       -> ['jpmorgan']
+      'JPMorgan'       -> ['jp', 'morgan']
+      'fidelity.com'   -> ['fidelity', 'com']
+    """
+    if not haystack:
+        return []
+    # 1. Split on any non-alphanumeric run. Keep digits inside chunks so that
+    # firm prefixes like 'E1', 'A3' survive (without this, 'e1.vc' became
+    # ['e', 'vc'] and the firm 'E1 Ventures' couldn't match itself).
+    spans = re.split(r'[^A-Za-z0-9]+', haystack)
+    chunks: list[str] = []
+    for span in spans:
+        if not span:
+            continue
+        # 2. Split camelCase: insert split point before any uppercase that
+        # follows a lowercase letter.
+        parts = re.findall(r'[A-Z]?[a-z]+[0-9]*|[A-Z]+(?=[A-Z][a-z]|$|[^A-Za-z])|[0-9]+', span)
+        if not parts:
+            chunks.append(span.lower())
+        else:
+            for p in parts:
+                if p:
+                    chunks.append(p.lower())
+    return chunks
+
+
+def _token_matches_chunk(token: str, chunk: str) -> bool:
+    """A firm-name token 'matches' a haystack chunk when:
+      - token == chunk (exact word match), OR
+      - fuzzy: edit-distance <= 1 (token and chunk same length ±1) for
+        tokens >= 5 chars (catches 'augurey' vs 'augury').
+    Note: prefix-coverage is INTENTIONALLY removed here. Prefix matches
+    are handled by the iterative-peel logic in _chunk_consumed_by_firm,
+    which can correctly distinguish 'west' as prefix of 'westernasset'
+    (leaves 'ernasset' un-consumable) vs 'fidelity' as prefix of
+    'fidelityinvestments' (leaves 'investments' which IS consumable).
+    """
+    if not token or not chunk:
+        return False
+    if token == chunk:
+        return True
+    if len(token) >= 5 and abs(len(token) - len(chunk)) <= 1:
+        if _edit_distance_at_most_1(token, chunk):
+            return True
+    return False
+
+
+# Generic word-parts that can be peeled off a chunk during consumption.
+# These are 'firm filler' tokens that often appear concatenated with the
+# brand in squished handles ('FidelityInvestments', 'StarbridgeVC',
+# 'AuguryInvesting').
+GENERIC_PEELABLES = (
+    'investments', 'investment', 'investing', 'invest',
+    # Common abbreviated forms — '@nuveeninv', '@xyzmgmt' etc.
+    'inv', 'invs', 'mgmt', 'mgr', 'mgrs', 'cap', 'sec', 'svc', 'svcs',
+    'capital', 'management', 'managers', 'partners', 'partner',
+    'advisors', 'advisers', 'advisor', 'adviser', 'advisory',
+    'ventures', 'venture',
+    'fund', 'funds',
+    'holdings', 'holding',
+    'group',
+    'associates',
+    'services', 'service',
+    'wealth',
+    'asset', 'assets',
+    'global', 'us', 'usa', 'inc', 'corp', 'corporation', 'llc', 'lp',
+    'company', 'co',
+    'com', 'net', 'org', 'io', 'vc',
+)
+
+
+def _consume_prefix(remainder: str, candidates) -> Optional[str]:
+    """Try to strip any candidate (firm token or generic peelable) as a
+    prefix of remainder. Returns the new remainder if anything was
+    stripped, else None.
+    """
+    # Try longest candidate first so 'investments' wins over 'invest'.
+    for cand in sorted(candidates, key=len, reverse=True):
+        if not cand:
+            continue
+        if remainder.startswith(cand):
+            return remainder[len(cand):]
+        # Fuzzy: token >= 5 chars, distance-1 match against a prefix of
+        # remainder of the same length.
+        if len(cand) >= 5 and len(remainder) >= len(cand) - 1:
+            for k in (len(cand) - 1, len(cand), len(cand) + 1):
+                if k > len(remainder):
+                    continue
+                if _edit_distance_at_most_1(cand, remainder[:k]):
+                    return remainder[k:]
+    return None
+
+
+def _chunk_consumed_by_firm(chunk: str, tokens: list[str]) -> bool:
+    """Iteratively peel firm tokens (with fuzzy) and known generic
+    peelables from a chunk. If everything (or all but <= 2 chars of
+    plural/noise) consumes, the chunk talks about this firm.
+
+    Examples (tokens=['fidelity', 'research']):
+      'fidelityinvestments' → strip 'fidelity' → 'investments' → strip generic → '' ✓
+      'fidelity'            → strip 'fidelity' → '' ✓
+      'fmr'                 → no firm token prefix, no generic → False (caller may fall back to acronym)
+
+    Examples (tokens=['manhattan', 'west']):
+      'manhattanwest'   → strip 'manhattan' → 'west' → strip firm token 'west' → '' ✓
+      'westernasset'    → strip 'west' → 'ernasset' → no firm/generic prefix → False ✓
+      'midwest'         → no firm-token prefix ('mid' isn't one) → False ✓
+    """
+    if not chunk:
+        return True
+    if not tokens:
+        return False
+    remainder = chunk
+    saw_firm_token = False
+    while remainder:
+        # Prefer firm-token peels (they 'identify' the firm)
+        new_remainder = _consume_prefix(remainder, tokens)
+        if new_remainder is not None:
+            saw_firm_token = True
+            remainder = new_remainder
+            continue
+        # Then generic peels
+        new_remainder = _consume_prefix(remainder, GENERIC_PEELABLES)
+        if new_remainder is not None:
+            remainder = new_remainder
+            continue
+        break
+    # Match if we consumed at least one firm token AND the chunk is fully
+    # (or all-but-noise) reduced.
+    return saw_firm_token and len(remainder) <= 2
+
+
+def _firm_token_variants(firm_name: str, tokens: list[str]) -> list[str]:
+    """Augment firm tokens with a 'compound' variant: leading short tokens
+    glued onto the first long token. Examples:
+      J.P. Morgan          -> raw ['j','p','morgan'] → compound 'jpmorgan'
+      A.B.C. Capital       -> raw ['a','b','c','capital'] → compound 'abccapital'
+      D.E. Shaw            -> raw ['d','e','shaw'] → compound 'deshaw'
+
+    Uses the RAW firm-name split (not filtered tokens) so 1-letter abbrev
+    parts that firm_tokens dropped (e.g., the 'P' in 'J.P. Morgan') are
+    still included in the compound.
+    """
+    out = list(tokens)
+    raw = [t.lower() for t in re.split(r'[\s,.()&/]+', firm_name or '') if t]
+    raw = [t for t in raw if t not in {'the', 'a', 'an'}]
+    if len(raw) >= 2 and len(raw[0]) <= 2:
+        compound = ''
+        idx = 0
+        while idx < len(raw) and len(raw[idx]) <= 2:
+            compound += raw[idx]
+            idx += 1
+        if idx < len(raw) and raw[idx] not in ACRONYM_SKIP_TOKENS:
+            compound += raw[idx]
+        if compound and len(compound) >= 3 and compound not in out:
+            out.append(compound)
+    return out
+
+
+def _edit_distance_at_most_1(a: str, b: str) -> bool:
+    """True iff Levenshtein distance between a and b is <= 1. Faster than
+    full Levenshtein because we only need a small bound."""
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
+        return False
+    # Make a the shorter one
+    if len(a) > len(b):
+        a, b = b, a
+    # Find first mismatch
+    i = 0
+    while i < len(a) and a[i] == b[i]:
+        i += 1
+    if i == len(a):
+        # All of a matches; b has one extra char appended → distance 1 (or 0)
+        return len(b) - len(a) <= 1
+    # Either replacement (same length) or insertion (b is longer by 1)
+    if len(a) == len(b):
+        # Replacement at position i; rest must match
+        return a[i + 1:] == b[i + 1:]
+    else:
+        # Insertion in b at position i; rest of a must match b shifted by 1
+        return a[i:] == b[i + 1:]
+
+
 def _contains_firm_signal(haystack: str, firm_name: str) -> bool:
-    """True iff haystack contains a firm-name token OR the firm acronym
-    OR a fuzzy substring of a token.
+    """True iff the haystack contains a recognizable form of the firm's name.
+
+    Three-tier match:
+      1. Direct chunk match — split haystack into chunks (camelCase +
+         non-alpha), check if any chunk equals or fuzzy-matches a firm
+         token. Tracks how many *distinct* firm tokens hit some chunk.
+      2. Iterative peel — for chunks that don't directly match, try
+         consuming them by stripping firm tokens AND generic peelables
+         off the front. Catches squished handles like 'manhattanwest',
+         'fidelityinvestments', 'auguryinvesting'.
+      3. Acronym fallback — NYLIM-style. Acronym appears as a chunk or
+         as a prefix of one.
+
+    Distinct-token coverage rule: for firms with 2+ tokens (Manhattan
+    West, New York Life), at least 2 distinct tokens must hit somewhere;
+    for single-token firms (AUGUREY, FIDELITY), 1 hit is enough. Iterative
+    peel of a single chunk DOES count multiple tokens if it peels them.
     """
     if not haystack or not firm_name:
         return False
-    h = haystack.lower()
-    tokens = firm_tokens(firm_name)
-    # Exact token match
-    if any(t in h for t in tokens):
+    chunks = _split_into_chunks(haystack)
+    if not chunks:
+        return False
+    base_tokens = firm_tokens(firm_name)
+    tokens = _firm_token_variants(firm_name, base_tokens)
+
+    # Track which BASE tokens (not variants) have been observed
+    matched_base_tokens: set[str] = set()
+    for c in chunks:
+        # Direct chunk match (exact or fuzzy)
+        for t in base_tokens:
+            if _token_matches_chunk(t, c):
+                matched_base_tokens.add(t)
+        # Compound match for J.P. Morgan style — when a compound variant
+        # (e.g., 'jpmorgan') matches a chunk, credit every base token that
+        # appears as a substring of the compound. This matters because the
+        # required-token-count check is on base_tokens, but the compound
+        # is what actually shows up in URLs/handles.
+        for v in tokens:
+            if v not in base_tokens and _token_matches_chunk(v, c):
+                for bt in base_tokens:
+                    if bt and bt in v:
+                        matched_base_tokens.add(bt)
+        # Iterative peel — if chunk fully consumes via firm tokens (+ generics),
+        # all firm tokens peeled count toward coverage
+        consumed_tokens = _peel_and_collect_tokens(c, tokens, base_tokens)
+        matched_base_tokens.update(consumed_tokens)
+
+    required = 2 if len(base_tokens) >= 2 else 1
+    # For 2+ token firms, satisfy if >=2 distinct tokens observed
+    if len(matched_base_tokens) >= required:
         return True
-    # Acronym match (>= 3 chars to avoid noisy short acronyms)
+    # Brand-token rule: when the FIRST base token (the brand identifier) is
+    # distinctive enough (>= 5 chars) AND it matched, that's enough even
+    # for multi-token firms. Catches 'fidelity.com' for Fidelity Mgmt &
+    # Research Co (where 'research' never appears in real URLs/handles).
+    if base_tokens and len(base_tokens[0]) >= 5 and base_tokens[0] in matched_base_tokens:
+        return True
+    # Special case: single-chunk haystack that fully consumes via firm tokens
+    # alone is also a match (one chunk that 'IS' the firm)
+    if len(chunks) == 1 and base_tokens:
+        all_consumed = _chunk_consumed_by_firm(chunks[0], tokens)
+        if all_consumed:
+            return True
+
+    # Acronym fallback — for 4+ char acronyms (distinctive enough), match
+    # if the acronym appears as a chunk OR as a prefix of any chunk. No
+    # coverage requirement: an acronym prefix is a strong signal regardless
+    # of what trails it (e.g., '@nylimanagement' starts with the firm's
+    # 'NYLIM' acronym and the rest is the unrolled word 'management' that
+    # overlapped the 'M' in the acronym).
     acro = firm_acronym(firm_name)
-    if len(acro) >= 3 and acro in h:
-        return True
-    # Fuzzy: any 5+ char prefix of a token (catches 'augury' from 'augurey')
-    for t in tokens:
-        if len(t) >= 5:
-            for n in range(5, len(t) + 1):
-                if t[:n] in h or h.startswith(t[:n]):
-                    return True
+    if len(acro) >= 4:
+        for c in chunks:
+            if c == acro or c.startswith(acro):
+                return True
+    elif len(acro) == 3:
+        # Stricter rule for 3-char acronyms — they're more collision-prone.
+        # Require exact chunk match.
+        for c in chunks:
+            if c == acro:
+                return True
     return False
+
+
+def _peel_and_collect_tokens(chunk: str, tokens: list[str], base_tokens: list[str]) -> set[str]:
+    """Run the iterative peel and return the BASE tokens that were
+    consumed during the process. Caller uses this to count distinct
+    tokens covered without requiring a full clean peel.
+    """
+    if not chunk or not tokens:
+        return set()
+    remainder = chunk
+    consumed: set[str] = set()
+    while remainder:
+        new_remainder = _consume_prefix(remainder, tokens)
+        if new_remainder is not None:
+            # Figure out which base token was consumed
+            consumed_len = len(remainder) - len(new_remainder)
+            consumed_text = remainder[:consumed_len]
+            for bt in base_tokens:
+                if bt == consumed_text or _edit_distance_at_most_1(bt, consumed_text):
+                    consumed.add(bt)
+            # Also: when a compound token like 'jpmorgan' is consumed, credit
+            # every base token that appears as a substring.
+            for bt in base_tokens:
+                if bt and bt in consumed_text:
+                    consumed.add(bt)
+            remainder = new_remainder
+            continue
+        new_remainder = _consume_prefix(remainder, GENERIC_PEELABLES)
+        if new_remainder is not None:
+            remainder = new_remainder
+            continue
+        break
+    # Only return the consumed set if the chunk reduced cleanly (≤ 2 chars
+    # of noise). Otherwise partial peeling could falsely credit 'west' for
+    # 'westernasset'.
+    if len(remainder) > 2:
+        return set()
+    return consumed
 
 
 def validate_website(url: Optional[str], firm_name: str) -> tuple[Optional[str], Optional[str]]:

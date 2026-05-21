@@ -177,6 +177,98 @@ function summary(d) {
   return bits.length ? bits.join(' ') : '(no signals)';
 }
 
+
+// ----------------------------------------------------------------------------
+// LinkedIn short-name fallback. PFR's engine searches with the full firm
+// name ('FIDELITY MANAGEMENT & RESEARCH COMPANY LLC') which is too specific
+// — LinkedIn has no page with that exact name. When the engine returns no
+// LinkedIn (or one that fails our plausibility validator), retry with the
+// core brand name ('Fidelity Investments').
+// ----------------------------------------------------------------------------
+
+const FIRM_NAME_SUFFIX_RE = /,?\s*(LLC|L\.L\.C\.?|LP|L\.P\.?|INC\.?|CORP\.?|CORPORATION|CO\.?|LTD\.?|LIMITED|PLC|GMBH|AG|SA|NV|BV)\s*\.?\s*$/i;
+const FIRM_GENERIC_TRAIL_RE = /\s+(MANAGEMENT|MANAGERS|PARTNERS|ADVISORS|ADVISERS|ADVISORY|FUND|FUNDS|CAPITAL|HOLDINGS|GROUP|ASSOCIATES|SERVICES|SECURITIES|TRUST|BANK|ASSET|ASSETS|GLOBAL|VENTURES|VENTURE|RESEARCH|COMPANY|INVESTMENTS|INVESTMENT)\s*$/i;
+
+function shortenFirmName(name) {
+  // Iteratively strip entity suffix and one trailing generic word per pass.
+  let s = (name || '').trim();
+  for (let i = 0; i < 5; i++) {
+    const before = s;
+    s = s.replace(FIRM_NAME_SUFFIX_RE, '').trim().replace(/,\s*$/, '').trim();
+    s = s.replace(FIRM_GENERIC_TRAIL_RE, '').trim();
+    if (s === before) break;
+  }
+  return s;
+}
+
+function brandVariantsForFirm(name) {
+  // Returns a small list of short-name variants to try.
+  // 'FIDELITY MANAGEMENT & RESEARCH COMPANY LLC' →
+  //   ['Fidelity', 'Fidelity Management', 'Fidelity Investments']
+  if (!name) return [];
+  const tokens = String(name).replace(/[.,&]/g, ' ').split(/\s+/).filter(Boolean);
+  const firstToken = tokens[0];
+  if (!firstToken) return [];
+
+  const out = new Set();
+  const shortened = shortenFirmName(name);
+  if (shortened) out.add(shortened);
+  if (tokens.length >= 2) out.add(`${firstToken} ${tokens[1]}`);
+  out.add(firstToken);
+  // Add 'Brand Investments' / 'Brand Capital' as a common LinkedIn naming
+  // convention for fund managers ('Fidelity Investments').
+  out.add(`${firstToken} Investments`);
+  return [...out].filter(s => s && s.length >= 3);
+}
+
+// Re-run PFR's searchLinkedIn helper using the SHORT brand variants.
+// The engine's normal pass uses the full firm name from advisers_enriched
+// ('FIDELITY MANAGEMENT & RESEARCH COMPANY LLC') which is too specific —
+// LinkedIn's page is 'Fidelity Investments'. Searching with the brand-only
+// variants finds the real page.
+async function findLinkedInByShortName(firmName) {
+  const { searchLinkedIn } = require('/Users/Miles/projects/PrivateFundsRadar/enrichment/enrichment_engine_v2');
+  const variants = brandVariantsForFirm(firmName);
+  console.log(`  short-name LinkedIn fallback. Variants: ${variants.join(' | ')}`);
+
+  const { spawnSync } = require('child_process');
+  const venvPython = '/Users/Miles/projects/PrivateFundsRadar-fund-holders-intel/.venv/bin/python';
+
+  for (const variant of variants) {
+    let url;
+    try {
+      url = await searchLinkedIn(variant);
+    } catch (e) {
+      console.warn(`    searchLinkedIn('${variant}') threw: ${e.message}`);
+      continue;
+    }
+    if (!url) {
+      continue;
+    }
+    // Validate via the same Python validator as the post-cleanup pass
+    // (single source of truth).
+    const result = spawnSync(venvPython, ['-c',
+      "import sys\n" +
+      "sys.path.insert(0, '/Users/Miles/projects/PrivateFundsRadar-fund-holders-intel/intelligence')\n" +
+      "from enrichment_validator import validate_linkedin_company_url\n" +
+      "url, firm = sys.argv[1], sys.argv[2]\n" +
+      "cleaned, reason = validate_linkedin_company_url(url, firm)\n" +
+      "print(cleaned if cleaned else 'REJECT:' + (reason or ''))\n",
+      url, firmName,
+    ], { encoding: 'utf8' });
+    const out = (result.stdout || '').trim();
+    if (out && !out.startsWith('REJECT:')) {
+      console.log(`  ✓ short-name match (variant="${variant}"): ${out}`);
+      return out;
+    } else {
+      console.log(`    rejected url=${url} (variant="${variant}"): ${out}`);
+    }
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  console.log('  short-name fallback: no valid LinkedIn found');
+  return null;
+}
+
 async function main() {
   const args = parseArgs();
   if (!args.company) {
@@ -209,6 +301,18 @@ async function main() {
     try {
       const enrichmentData = await enrichManager(firmName, { skipValidation: false });
       console.log(`  -> ${summary(enrichmentData)} (confidence=${enrichmentData.confidence_score})`);
+      // FIX 2: short-name LinkedIn fallback. PFR's engine searches with
+      // the full firm name ('FIDELITY MANAGEMENT & RESEARCH COMPANY LLC')
+      // which is too specific — LinkedIn page is 'Fidelity Investments'.
+      // If the engine returned no linkedin_company_url, retry with short
+      // brand variants. (If the engine returned a wrong LinkedIn, the
+      // Python validator will null it during the post-cleanup pass.)
+      if (!enrichmentData.linkedin_company_url) {
+        const fallback = await findLinkedInByShortName(firmName);
+        if (fallback) {
+          enrichmentData.linkedin_company_url = fallback;
+        }
+      }
       if (!enrichmentData.website_url && !enrichmentData.linkedin_company_url
           && !(enrichmentData.team_members || []).length) {
         empty++;
