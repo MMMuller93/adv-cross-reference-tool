@@ -171,7 +171,7 @@ def save_cache(cache: dict[str, Any]) -> None:
 # Search clients (Brave first, Google fallback)
 # ---------------------------------------------------------------------------
 
-def brave_search(query: str) -> Optional[list[dict[str, Any]]]:
+def brave_search(query: str, _retries: int = 2) -> Optional[list[dict[str, Any]]]:
     api_key = os.environ.get("BRAVE_API_KEY") or os.environ.get("BRAVE_SEARCH_API_KEY")
     if not api_key:
         return None
@@ -188,6 +188,13 @@ def brave_search(query: str) -> Optional[list[dict[str, Any]]]:
         hits = (data.get("web") or {}).get("results") or []
         return [{"url": h.get("url"), "title": h.get("title"), "snippet": h.get("description")}
                 for h in hits]
+    except urllib.error.HTTPError as e:
+        if e.code == 429 and _retries > 0:
+            # Brave free tier is 1 req/sec. Backoff and try again.
+            time.sleep(2.5)
+            return brave_search(query, _retries - 1)
+        print(f"  brave search failed: HTTP {e.code} {e.reason}", file=sys.stderr)
+        return None
     except Exception as e:
         print(f"  brave search failed: {e}", file=sys.stderr)
         return None
@@ -219,6 +226,73 @@ LINKEDIN_PROFILE_RE = re.compile(r"^https?://(?:[a-z]+\.)?linkedin\.com/in/[A-Za
                                  re.IGNORECASE)
 
 
+def _name_variants(person_name: str) -> list[str]:
+    """Generate likely-LinkedIn name forms from a Form ADV full name.
+    'Edward Douglas Perks' -> ['Edward Douglas Perks', 'Edward Perks', 'Ed Perks']
+    'Robert W. Sharps'     -> ['Robert W. Sharps', 'Robert Sharps', 'Bob Sharps']
+    """
+    if not person_name:
+        return []
+    tokens = person_name.strip().split()
+    if len(tokens) < 2:
+        return [person_name]
+    first = tokens[0]
+    last = tokens[-1]
+    variants = [person_name, f"{first} {last}"]
+    # Common short-form first names (very limited; expand as needed).
+    short_first = {
+        "Edward": "Ed", "Robert": "Bob", "Richard": "Rick", "William": "Bill",
+        "Michael": "Mike", "Christopher": "Chris", "Daniel": "Dan",
+        "Anthony": "Tony", "James": "Jim", "Joseph": "Joe", "Stephen": "Steve",
+        "Steven": "Steve", "Thomas": "Tom", "Charles": "Charlie",
+        "Matthew": "Matt", "Patrick": "Pat", "Andrew": "Andy",
+        "Benjamin": "Ben", "Nicholas": "Nick", "Jonathan": "Jon",
+    }
+    if first in short_first:
+        variants.append(f"{short_first[first]} {last}")
+    return list(dict.fromkeys(variants))  # dedupe, preserve order
+
+
+def _url_slug_matches_name(url: str, person_name: str) -> bool:
+    """Reject LinkedIn URLs whose /in/<slug>/ slug doesn't contain any of the
+    person's name tokens. Catches false positives where the snippet mentions
+    the person but the linked profile is someone else (e.g., 'Lindsey Oshita'
+    matched a profile slugged 'amelialee').
+    """
+    if not url:
+        return False
+    import re as _re
+    m = _re.search(r"linkedin\.com/(?:in|pub)/([^/?#]+)", url, _re.IGNORECASE)
+    if not m:
+        return False
+    slug = m.group(1).lower().replace("-", " ").replace("_", " ")
+    tokens = [t.lower() for t in person_name.split() if len(t) > 2]
+    return any(tok in slug for tok in tokens)
+
+
+def _name_tokens_match(snippet: str, person_name: str) -> bool:
+    """Softer person match: snippet contains the first name AND last name
+    as separate words, in any order. Survives 'Ed Perks CFA' vs 'Edward
+    Douglas Perks'.
+    """
+    if not snippet or not person_name:
+        return False
+    s = snippet.lower()
+    tokens = person_name.lower().split()
+    if len(tokens) < 2:
+        return tokens[0] in s
+    last = tokens[-1]
+    first_candidates = [tokens[0]]
+    short_first = {"edward": "ed", "robert": "bob", "richard": "rick",
+                   "william": "bill", "michael": "mike", "christopher": "chris",
+                   "daniel": "dan", "anthony": "tony", "james": "jim",
+                   "joseph": "joe", "stephen": "steve", "steven": "steve",
+                   "thomas": "tom", "charles": "charlie", "matthew": "matt"}
+    if tokens[0] in short_first:
+        first_candidates.append(short_first[tokens[0]])
+    return last in s and any(fc in s for fc in first_candidates)
+
+
 def find_linkedin_for_person(person_name: str, firm_name: str, role_hint: Optional[str] = None,
                              cache: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """Search the web for a LinkedIn profile matching this person at this firm.
@@ -235,23 +309,56 @@ def find_linkedin_for_person(person_name: str, firm_name: str, role_hint: Option
     if cache and cache_key in cache:
         return cache[cache_key]
 
-    query = f'"{person_name}" "{firm_name}" site:linkedin.com/in'
-    hits = brave_search(query) or google_cse_search(query) or []
-    source = "brave" if os.environ.get("BRAVE_API_KEY") else ("google" if os.environ.get("GOOGLE_API_KEY") else None)
+    # Brave's index doesn't reliably honor `site:linkedin.com/in` (LinkedIn
+    # blocks most crawlers, so its profile pages are sparsely indexed). We
+    # query softer and filter results to LinkedIn URLs in Python instead.
+    #
+    # Multi-query, multi-variant strategy: try the formal name first, then
+    # variants ('Ed Perks' for 'Edward Douglas Perks'). The variant that
+    # finds a LinkedIn URL plus firm context wins.
+    variants = _name_variants(person_name)
+    firm_short = firm_name.split(",")[0].split(" Inc")[0].split(" LLC")[0].strip()  # 'FRANKLIN ADVISERS, INC.' -> 'FRANKLIN ADVISERS'
+
+    queries: list[str] = []
+    for v in variants:
+        queries.append(f'"{v}" "{firm_short}" LinkedIn')
+    for v in variants:
+        queries.append(f'{v} {firm_short} linkedin.com')
+
+    source = "brave" if (os.environ.get("BRAVE_API_KEY") or os.environ.get("BRAVE_SEARCH_API_KEY")) else (
+        "google" if os.environ.get("GOOGLE_API_KEY") else None)
 
     best = None
-    for hit in hits:
-        url = hit.get("url") or ""
-        if not LINKEDIN_PROFILE_RE.match(url):
-            continue
-        snippet = (hit.get("snippet") or "") + " " + (hit.get("title") or "")
-        person_match = person_name.lower() in snippet.lower()
-        firm_match = firm_name.lower() in snippet.lower()
-        if person_match and firm_match:
-            best = {"hit": hit, "confidence": "high"}
+    for qi, query in enumerate(queries):
+        if qi > 0:
+            time.sleep(1.2)  # avoid Brave free-tier 1-req/sec 429
+        hits = brave_search(query) or google_cse_search(query) or []
+        for hit in hits:
+            url = hit.get("url") or ""
+            url_lower = url.lower()
+            # Accept profile URLs but reject directory/posts/pulse pages.
+            if "linkedin.com/in/" not in url_lower and "linkedin.com/pub/" not in url_lower:
+                continue
+            if "linkedin.com/pub/dir/" in url_lower:
+                continue
+            if "/pulse/" in url_lower or "/posts/" in url_lower or "/activity-" in url_lower:
+                continue
+            # Hard reject if the LinkedIn slug doesn't share any name token —
+            # the snippet may mention the person but the linked profile is
+            # someone else.
+            if not _url_slug_matches_name(url, person_name):
+                continue
+            snippet = (hit.get("snippet") or "") + " " + (hit.get("title") or "") + " " + url
+            person_ok = _name_tokens_match(snippet, person_name)
+            firm_tokens = [t.lower() for t in firm_short.split() if len(t) > 3]
+            firm_ok = any(t in snippet.lower() for t in firm_tokens)
+            if person_ok and firm_ok:
+                best = {"hit": hit, "confidence": "high"}
+                break
+            if person_ok and not best:
+                best = {"hit": hit, "confidence": "medium"}
+        if best and best["confidence"] == "high":
             break
-        if person_match and not best:
-            best = {"hit": hit, "confidence": "medium"}
 
     result: dict[str, Any] = {
         "linkedin_url": None,
