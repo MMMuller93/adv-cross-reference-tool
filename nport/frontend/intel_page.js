@@ -1083,6 +1083,10 @@ function AdviserPage({ crd }) {
   const [data, setData] = React.useState(null);
   const [error, setError] = React.useState(null);
   const [audit, setAudit] = React.useState(false);
+  // Expandable section state — must come before early returns
+  // (React hooks rules: same hooks in same order every render).
+  const [ownersExpanded, setOwnersExpanded] = React.useState(false);
+  const [spExpanded, setSpExpanded] = React.useState(false);
 
   React.useEffect(() => {
     setData(null);
@@ -1107,7 +1111,7 @@ function AdviserPage({ crd }) {
     return <div className="max-w-5xl mx-auto px-6 py-10 text-sm text-slate-400">Loading…</div>;
   }
 
-  const { adviser, summary, companies } = data;
+  const { adviser, summary, companies, service_providers: serviceProviders } = data;
 
   const companyColumns = [
     {
@@ -1269,18 +1273,104 @@ function AdviserPage({ crd }) {
             )}
             {adviser.owners && adviser.owners.length > 0 && (
               <div>
-                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Principals / Owners</div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">
+                  Principals / Owners ({(adviser.owners_detail || adviser.owners).length})
+                </div>
                 <ul className="space-y-1">
-                  {adviser.owners.map((name, i) => (
+                  {(adviser.owners_detail && adviser.owners_detail.length > 0
+                    ? adviser.owners_detail.slice(0, 5)
+                    : adviser.owners.slice(0, 5).map(name => ({ name, title: null, ownership_amount: null, owner_type: null }))
+                  ).map((o, i) => (
                     <li key={i} className="text-sm text-slate-900">
-                      {renderPersonWithLinkedIn(name, adviser.person_enrichment)}
+                      {renderPersonWithLinkedIn(o.name, adviser.person_enrichment)}
+                      {(o.title || o.ownership_amount) && (
+                        <div className="text-[10px] text-slate-500 mt-0.5">
+                          {o.title}{o.title && o.ownership_amount && ' · '}
+                          {o.ownership_amount && (<span className="font-mono">{o.ownership_amount}</span>)}
+                          {o.owner_type && o.owner_type !== 'Direct' && (
+                            <span className="ml-1 text-[9px] uppercase tracking-widest text-slate-400">({o.owner_type})</span>
+                          )}
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>
+                {(adviser.owners_detail || adviser.owners).length > 5 && (
+                  <button onClick={() => setOwnersExpanded(!ownersExpanded)}
+                          className="mt-2 text-[11px] text-slate-600 hover:text-slate-900">
+                    {ownersExpanded ? 'Show less' : `Show all ${(adviser.owners_detail || adviser.owners).length}`}
+                  </button>
+                )}
+                {ownersExpanded && (
+                  <ul className="space-y-1 mt-2 pt-2 border-t border-slate-100">
+                    {(adviser.owners_detail || adviser.owners.map(name => ({ name }))).slice(5).map((o, i) => (
+                      <li key={i} className="text-sm text-slate-900">
+                        {renderPersonWithLinkedIn(o.name, adviser.person_enrichment)}
+                        {(o.title || o.ownership_amount) && (
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            {o.title}{o.title && o.ownership_amount && ' · '}
+                            {o.ownership_amount && (<span className="font-mono">{o.ownership_amount}</span>)}
+                            {o.owner_type && o.owner_type !== 'Direct' && (
+                              <span className="ml-1 text-[9px] uppercase tracking-widest text-slate-400">({o.owner_type})</span>
+                            )}
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             )}
           </div>
         </section>
+      )}
+
+      {/* Service Providers — aggregated from the firm's funds_enriched rows */}
+      {serviceProviders && (
+        (serviceProviders.auditors.length || serviceProviders.administrators.length ||
+         serviceProviders.custodians.length || serviceProviders.prime_brokers.length) ? (
+          <section className="nport-panel mb-6">
+            <button onClick={() => setSpExpanded(!spExpanded)}
+                    className="w-full nport-panel-header flex items-center justify-between hover:bg-slate-50 transition-colors">
+              <h2 className="font-serif text-lg font-semibold text-slate-900">
+                Service Providers
+                <span className="text-slate-400 text-sm font-normal ml-2">
+                  ({serviceProviders.auditors.length + serviceProviders.administrators.length +
+                    serviceProviders.custodians.length + serviceProviders.prime_brokers.length} distinct, aggregated across firm's funds)
+                </span>
+              </h2>
+              <span className={'text-slate-400 ' + (spExpanded ? 'rotate-180' : '')}>▾</span>
+            </button>
+            {spExpanded && (
+              <div className="px-5 py-4 grid md:grid-cols-2 gap-x-6 gap-y-5 text-sm">
+                {serviceProviders.auditors.length > 0 && (
+                  <div>
+                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Auditors ({serviceProviders.auditors.length})</div>
+                    <ul className="space-y-0.5">{serviceProviders.auditors.map((n, i) => <li key={i} className="text-[12px] text-slate-700">{n}</li>)}</ul>
+                  </div>
+                )}
+                {serviceProviders.administrators.length > 0 && (
+                  <div>
+                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Administrators ({serviceProviders.administrators.length})</div>
+                    <ul className="space-y-0.5">{serviceProviders.administrators.map((n, i) => <li key={i} className="text-[12px] text-slate-700">{n}</li>)}</ul>
+                  </div>
+                )}
+                {serviceProviders.custodians.length > 0 && (
+                  <div>
+                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Custodians ({serviceProviders.custodians.length})</div>
+                    <ul className="space-y-0.5">{serviceProviders.custodians.map((n, i) => <li key={i} className="text-[12px] text-slate-700">{n}</li>)}</ul>
+                  </div>
+                )}
+                {serviceProviders.prime_brokers.length > 0 && (
+                  <div>
+                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Prime Brokers ({serviceProviders.prime_brokers.length})</div>
+                    <ul className="space-y-0.5">{serviceProviders.prime_brokers.map((n, i) => <li key={i} className="text-[12px] text-slate-700">{n}</li>)}</ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        ) : null
       )}
 
       {/* Companies held */}

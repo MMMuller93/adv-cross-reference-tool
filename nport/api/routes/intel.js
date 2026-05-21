@@ -173,6 +173,7 @@ async function fetchAdviserDetails(advClient, crds) {
     'other_websites', 'cco_name', 'cco_email', 'signatory_name',
     'signatory_title', 'form_adv_url',
     'owner_full_legal_name', 'owner_title_or_status', 'ownership_amount',
+    'direct_or_indirect_owner',
     'control_person_name', 'regulatory_contact_name', 'regulatory_contact_email',
   ].join(',');
   const out = {};
@@ -187,6 +188,111 @@ async function fetchAdviserDetails(advClient, crds) {
   }
   return out;
 }
+
+/**
+ * Build an owners-with-titles array from the parallel semicolon-separated
+ * Form ADV columns. Mirrors PFR's AdviserDetailView logic.
+ *
+ * Input fields (all may have ';' delimiters):
+ *   owner_full_legal_name      'OESTREICHER, DAVID, NMN;Sharps, Robert, W;...'
+ *   owner_title_or_status      'CHIEF LEGAL OFFICER;PRESIDENT;...'
+ *   ownership_amount           '5% or less;10% to 25%;...'
+ *   direct_or_indirect_owner   'D;D;I;...'
+ *
+ * Returns [{name, title, ownership_amount, owner_type}, ...]. Names are
+ * normalized via normalizeName so 'OESTREICHER, DAVID, NMN' becomes
+ * 'David Oestreicher'.
+ */
+function parseOwnersWithDetails(adv) {
+  if (!adv) return [];
+  const split = (s) => (s ? String(s).split(';').map(t => t.trim()) : []);
+  const names = split(adv.owner_full_legal_name || adv.owner_legal_name);
+  const titles = split(adv.owner_title_or_status);
+  const amounts = split(adv.ownership_amount);
+  const types = split(adv.direct_or_indirect_owner);
+  // Use the longest array so we don't accidentally truncate
+  const n = Math.max(names.length, titles.length, amounts.length, types.length);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const rawName = names[i] || '';
+    if (!rawName) continue;
+    const normalized = normalizeName(rawName) || rawName;
+    out.push({
+      name: normalized,
+      title: titles[i] || null,
+      ownership_amount: amounts[i] || null,
+      owner_type: types[i] === 'D' ? 'Direct' : (types[i] === 'I' ? 'Indirect' : (types[i] || null)),
+    });
+  }
+  return out;
+}
+
+
+/**
+ * Aggregate service providers across an adviser's funds. Mirrors PFR's
+ * AdviserDetailView serviceProviders memo: walks funds_enriched rows for
+ * the CRD, splits each provider field on ';', dedupes case-insensitively.
+ *
+ * Returns: { auditors: [...], administrators: [...], custodians: [...],
+ *            prime_brokers: [...] }
+ */
+async function fetchServiceProviders(advClient, crd) {
+  if (!crd) return null;
+  // Real funds_enriched column names (verified 2026-05-21):
+  //   auditing_firm_name, administrator_name, custodians, prime_broker_name
+  const cols = 'auditing_firm_name,administrator_name,custodians,prime_broker_name';
+  // Pull funds for this CRD. Keyset-paginate in case the firm has >1000 funds.
+  const sets = {
+    auditors: new Map(),
+    administrators: new Map(),
+    custodians: new Map(),
+    prime_brokers: new Map(),
+  };
+  let lastRef = 0;
+  for (let i = 0; i < 50; i++) {
+    const { data, error } = await advClient
+      .from('funds_enriched')
+      .select('reference_id,' + cols)
+      .eq('adviser_entity_crd', crd)
+      .gt('reference_id', lastRef)
+      .order('reference_id')
+      .limit(1000);
+    if (error) {
+      console.warn('[INTEL] funds_enriched fetch failed:', error.message);
+      return null;
+    }
+    if (!data || data.length === 0) break;
+    const splitSemi = (s) => (s ? String(s).split(';').map(t => t.trim()).filter(Boolean) : []);
+    for (const row of data) {
+      for (const name of splitSemi(row.auditing_firm_name)) {
+        sets.auditors.set(name.toLowerCase(), name);
+      }
+      for (const name of splitSemi(row.administrator_name)) {
+        sets.administrators.set(name.toLowerCase(), name);
+      }
+      for (const name of splitSemi(row.custodians)) {
+        // Skip boolean-flag escapes that occasionally land in this column
+        if (name && name.length > 1 && !'YyNn'.includes(name)) {
+          sets.custodians.set(name.toLowerCase(), name);
+        }
+      }
+      for (const name of splitSemi(row.prime_broker_name)) {
+        if (name && name.length > 1 && !'YyNn'.includes(name)) {
+          sets.prime_brokers.set(name.toLowerCase(), name);
+        }
+      }
+    }
+    if (data.length < 1000) break;
+    lastRef = data[data.length - 1].reference_id;
+  }
+  return {
+    auditors: [...sets.auditors.values()],
+    administrators: [...sets.administrators.values()],
+    custodians: [...sets.custodians.values()],
+    prime_brokers: [...sets.prime_brokers.values()],
+  };
+}
+
 
 async function fetchPersonEnrichment(nportClient, crds) {
   // Returns { [crd]: { [normalized_name]: { linkedin_url, inferred_title, confidence } } }
@@ -813,6 +919,13 @@ router.get('/advisers/:crd', async (req, res) => {
     const extra = extras[crdParam] || {};
     const personEnrichmentMap = await fetchPersonEnrichment(deps.nportClient, [crdParam]);
     const personEnrichmentForCrd = personEnrichmentMap[crdParam] || {};
+    // PFR-parity: owners with titles + amounts + direct/indirect, and
+    // service providers aggregated across this firm's funds. Both
+    // computed in parallel — fast and independent.
+    const [ownersWithDetails, serviceProviders] = await Promise.all([
+      Promise.resolve(parseOwnersWithDetails(advDetail || {})),
+      fetchServiceProviders(deps.advClient, crdParam),
+    ]);
     if (!advDetail && !extra) {
       return notFound(res, `Adviser CRD ${crdParam} not found`, 'ADVISER_NOT_FOUND');
     }
@@ -926,6 +1039,8 @@ router.get('/advisers/:crd', async (req, res) => {
       signatory_title: advDetail.signatory_title || null,
       owner_full_legal_name: advDetail.owner_full_legal_name || null,
       owners: normalizeOwnersList(advDetail.owner_full_legal_name),
+      // Detailed owners: each with name + title + ownership_amount + direct/indirect
+      owners_detail: ownersWithDetails,
       owner_title_or_status: advDetail.owner_title_or_status || null,
       ownership_amount: advDetail.ownership_amount || null,
       control_person_name: normalizeName(advDetail.control_person_name),
@@ -958,7 +1073,7 @@ router.get('/advisers/:crd', async (req, res) => {
       not_in_advisers_enriched: true,
     };
 
-    res.json({ adviser, summary, companies });
+    res.json({ adviser, summary, companies, service_providers: serviceProviders });
   } catch (err) {
     return serverError(res, err);
   }
