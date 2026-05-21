@@ -5067,10 +5067,10 @@ function App() {
                                           <div className="font-semibold text-gray-900 mb-2 text-[11px] uppercase tracking-wide">Contact</div>
                                           <div className="flex flex-wrap gap-2">
                                               {/* Website Button */}
-                                              {(manager.enrichment_data?.website || manager.adv_data?.primary_website) ? (
+                                              {(manager.enrichment_data?.website || manager.adv_data?.website) ? (
                                                 <a
                                                   href={(() => {
-                                                    const website = manager.enrichment_data?.website || manager.adv_data?.primary_website;
+                                                    const website = manager.enrichment_data?.website || manager.adv_data?.website;
                                                     return website.startsWith('http') ? website : `https://${website}`;
                                                   })()}
                                                   target="_blank"
