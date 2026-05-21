@@ -46,12 +46,15 @@ function deriveEnrichmentStatus(decisions) {
  * Map v3-style status to the legacy enrichment_status values that server.js
  * and the existing CHECK constraint expect.
  *
- * Legacy values: auto_enriched | needs_manual_review | no_data_found | manually_verified
+ * Valid legacy values: auto_enriched | candidates_only | no_data_found | manually_verified
  *
  * Mapping:
- *   - Any website or linkedin field is verified → auto_enriched (passes the server.js firebreak)
- *   - Some field verified but no website/linkedin anchor → needs_manual_review
- *   - Nothing verified → no_data_found
+ *   - Any website or linkedin field is verified → auto_enriched
+ *   - Some evidence exists but no website/linkedin anchor → candidates_only (auto-retry eligible)
+ *   - Nothing useful found → no_data_found
+ *
+ * NOTE: needs_manual_review is intentionally NOT written — that status dead-queues rows
+ * with no auto-retry path. candidates_only rows are re-enriched automatically.
  */
 function deriveLegacyEnrichmentStatus(decisions) {
   const websiteDecision = decisions['website_url'];
@@ -64,13 +67,13 @@ function deriveLegacyEnrichmentStatus(decisions) {
     return 'auto_enriched';
   }
 
-  // Check if any other field is verified
-  const anyVerified = Object.values(decisions)
+  // Some evidence exists but no verified anchor — keep in auto-retry queue
+  const anyEvidence = Object.values(decisions)
     .flat()
-    .some(d => d && d.status === 'verified');
+    .some(d => d && (d.status === 'verified' || d.status === 'candidate'));
 
-  if (anyVerified) {
-    return 'needs_manual_review';
+  if (anyEvidence) {
+    return 'candidates_only';
   }
 
   return 'no_data_found';

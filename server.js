@@ -1382,6 +1382,7 @@ app.get('/api/funds/new-managers', async (req, res) => {
     const { extractBaseName: parseFundName } = require('./lib/adv_lookup');
     const nameVariants = require('./lib/name_variants');
     const { passesStricterCrdGate } = require('./lib/name_matcher');
+    const { buildPublicView } = require('./enrichment/v3/publish/public_view');
 
     // Token-subset matcher. Production bug 2026-05-11 (multiple): the previous
     // bidirectional `startsWith` matched on very short adviser_entity_legal_name
@@ -1520,36 +1521,16 @@ app.get('/api/funds/new-managers', async (req, res) => {
       // Check enriched_managers lookup
       const enrichedData = enrichedManagersMap[manager.series_master_llc.toLowerCase()];
       if (enrichedData) {
-        // Anchor-gated publish: only ship enrichment fields when we can verify the company identity.
-        // Anchor = (website_url OR linkedin_company_url is non-null) AND status is 'auto_enriched'.
-        // Without an anchor every enrichment field is suppressed — the row falls back to Form D info only.
-        const hasAnchor = (enrichedData.website_url || enrichedData.linkedin_company_url) &&
-                          enrichedData.enrichment_status === 'auto_enriched';
-
-        if (hasAnchor) {
-          enrichedManager.enrichment_data = {
-            website: enrichedData.website_url || enrichedData.website,
-            fund_type: enrichedData.fund_type,
-            investment_stage: enrichedData.investment_stage,
-            linkedin: enrichedData.linkedin_company_url || enrichedData.linkedin_url,
-            twitter: enrichedData.twitter_handle,
-            email: enrichedData.primary_contact_email,
-            is_published: enrichedData.is_published,
-            confidence: enrichedData.confidence_score,
-            team_members: enrichedData.team_members || [],
-            portfolio_companies: enrichedData.portfolio_companies || [],
-            enrichment_status: enrichedData.enrichment_status
-          };
-        } else {
-          // Suppressed by anchor gate — surface only status metadata, no identity fields.
-          enrichedManager.enrichment_data = {
-            enrichment_status: enrichedData.enrichment_status,
-            suppressed: true,
-            suppressed_reason: (enrichedData.website_url || enrichedData.linkedin_company_url)
-              ? 'enrichment_status_not_verified'
-              : 'no_company_anchor'
-          };
-        }
+        // Per-field publish gate: buildPublicView handles both v3 rows (field_evidence JSONB)
+        // and v2 legacy rows (flat columns). Each field is emitted only when verified.
+        const baseView = buildPublicView(enrichedData);
+        enrichedManager.enrichment_data = {
+          ...baseView,
+          // Supplemental fields not gated by field_evidence
+          fund_type: enrichedData.fund_type,
+          investment_stage: enrichedData.investment_stage,
+          portfolio_companies: enrichedData.portfolio_companies || [],
+        };
       }
 
       // Check advisers lookup. Pass relatedNames so the stricter gate can
