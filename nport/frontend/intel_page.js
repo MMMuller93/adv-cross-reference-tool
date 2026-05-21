@@ -832,6 +832,9 @@ function FormDTable({ rows, slug, audit }) {
       label: 'Filer',
       accessor: r => r.filer_entityname,
       cellClassName: 'text-xs text-slate-700',
+      render: r => r.accession_number
+        ? <a href={`/intel/fund/${encodeURIComponent(r.accession_number)}`} className="text-slate-700 hover:text-slate-900 hover:underline">{r.filer_entityname}</a>
+        : r.filer_entityname,
     },
     {
       key: 'adviser_name',
@@ -1306,6 +1309,207 @@ function AdviserPage({ crd }) {
 
 // --- global search ----------------------------------------------------------
 
+// --- fund detail page (Form D pooled-vehicle SPV) -----------------------------
+
+function FundPage({ accession }) {
+  const [data, setData] = React.useState(null);
+  const [error, setError] = React.useState(null);
+
+  React.useEffect(() => {
+    setData(null);
+    setError(null);
+    fetch(`/api/intel/funds/${encodeURIComponent(accession)}`)
+      .then(r => r.ok ? r.json() : r.json().then(b => Promise.reject(b)))
+      .then(setData)
+      .catch(e => setError(e && e.error ? e.error : 'Failed to load'));
+  }, [accession]);
+
+  if (error) {
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-10">
+        <a href="/" className="text-sm text-slate-500 hover:text-slate-900">← Back</a>
+        <h1 className="font-serif text-2xl font-semibold text-slate-900 mt-4">Accession {accession}</h1>
+        <p className="mt-3 text-sm text-red-700">{error}</p>
+      </div>
+    );
+  }
+  if (!data) {
+    return <div className="max-w-5xl mx-auto px-6 py-10 text-sm text-slate-400">Loading…</div>;
+  }
+
+  const { filing, related_parties: relatedParties, adviser, tracked_companies: trackedCompanies, edgar_url: edgarUrl } = data;
+  const offeringTotal = filing.total_offering_amount ? parseFloat(filing.total_offering_amount) : null;
+  const offeringSold = filing.total_amount_sold ? parseFloat(filing.total_amount_sold) : null;
+  const offeringRemaining = filing.total_remaining ? parseFloat(filing.total_remaining) : null;
+  const minInvest = filing.minimum_investment ? parseFloat(filing.minimum_investment) : null;
+  const totalInvestors = filing.total_investors != null ? parseInt(filing.total_investors, 10) : null;
+
+  return (
+    <div className="max-w-6xl mx-auto px-6 py-6">
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+        <a href="/" className="text-sm text-slate-500 hover:text-slate-900">← Back</a>
+        <GlobalSearchBar />
+      </div>
+
+      <div className="mt-3 mb-6">
+        <div className="flex items-center gap-2 mb-2 flex-wrap">
+          {filing.investment_fund_type && (
+            <span className="text-[10px] uppercase tracking-widest font-semibold bg-slate-100 text-slate-700 px-2 py-1 rounded">
+              {filing.investment_fund_type}
+            </span>
+          )}
+          {filing.is_amendment && (
+            <span className="text-[10px] uppercase tracking-widest font-semibold bg-amber-100 text-amber-900 px-2 py-1 rounded">
+              Amendment (D/A)
+            </span>
+          )}
+        </div>
+        <h1 className="font-serif text-2xl md:text-3xl font-semibold tracking-tight text-slate-900 leading-tight">
+          {filing.entityname}
+        </h1>
+        <div className="text-xs font-mono text-slate-500 mt-1">
+          CIK {filing.cik} · Accession {filing.accession_number}
+          {edgarUrl && (
+            <a href={edgarUrl} target="_blank" rel="noopener noreferrer"
+               className="ml-3 text-slate-600 hover:text-slate-900 underline">
+              EDGAR ↗
+            </a>
+          )}
+        </div>
+        {trackedCompanies && trackedCompanies.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2 items-center">
+            <span className="text-[10px] uppercase tracking-widest text-slate-500 font-medium">Holds</span>
+            {trackedCompanies.map((tc, i) => (
+              <a key={i} href={`/intel/${encodeURIComponent(tc.slug)}`}
+                 className="text-sm font-serif italic font-semibold text-slate-900 hover:text-slate-700 underline">
+                {tc.slug}
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="nport-metric-strip mb-6">
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Offering total</div>
+          <div className="font-mono text-lg font-semibold text-slate-900 tabular-nums mt-1">{fmtUsdShort(offeringTotal)}</div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Amount sold</div>
+          <div className="font-mono text-lg font-semibold text-slate-900 tabular-nums mt-1">{fmtUsdShort(offeringSold)}</div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Remaining</div>
+          <div className="font-mono text-lg font-semibold text-slate-900 tabular-nums mt-1">{fmtUsdShort(offeringRemaining)}</div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Min. investment</div>
+          <div className="font-mono text-lg font-semibold text-slate-900 tabular-nums mt-1">{fmtUsdShort(minInvest)}</div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Investors</div>
+          <div className="font-mono text-lg font-semibold text-slate-900 tabular-nums mt-1">{totalInvestors != null ? fmtInt(totalInvestors) : '—'}</div>
+        </div>
+      </div>
+
+      <div className="grid md:grid-cols-3 gap-5">
+        <div className="md:col-span-2 space-y-5">
+          <section className="nport-panel">
+            <div className="nport-panel-header">
+              <h2 className="font-serif text-lg font-semibold text-slate-900">Filing particulars</h2>
+            </div>
+            <dl className="px-5 py-4 grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+              <div><dt className="text-[10px] uppercase tracking-widest text-slate-500 font-medium">Filing date</dt><dd className="text-slate-900 mt-0.5">{fmtDate(filing.filing_date)}</dd></div>
+              <div><dt className="text-[10px] uppercase tracking-widest text-slate-500 font-medium">First sale</dt><dd className="text-slate-900 mt-0.5">{fmtDate(filing.sale_date) || '—'}</dd></div>
+              <div><dt className="text-[10px] uppercase tracking-widest text-slate-500 font-medium">Signature date</dt><dd className="text-slate-900 mt-0.5">{fmtDate(filing.signature_date) || '—'}</dd></div>
+              <div><dt className="text-[10px] uppercase tracking-widest text-slate-500 font-medium">Submission type</dt><dd className="text-slate-900 mt-0.5">{filing.submission_type || '—'}</dd></div>
+              <div className="col-span-2"><dt className="text-[10px] uppercase tracking-widest text-slate-500 font-medium">Federal exemptions</dt><dd className="text-slate-900 mt-0.5 font-mono text-xs">{filing.federal_exemptions || '—'}</dd></div>
+              <div><dt className="text-[10px] uppercase tracking-widest text-slate-500 font-medium">Entity type</dt><dd className="text-slate-900 mt-0.5">{filing.entity_type || '—'}</dd></div>
+              <div><dt className="text-[10px] uppercase tracking-widest text-slate-500 font-medium">Jurisdiction</dt><dd className="text-slate-900 mt-0.5">{filing.jurisdiction || '—'}</dd></div>
+              <div><dt className="text-[10px] uppercase tracking-widest text-slate-500 font-medium">Year of inc.</dt><dd className="text-slate-900 mt-0.5">{filing.year_of_inc || '—'}</dd></div>
+              <div><dt className="text-[10px] uppercase tracking-widest text-slate-500 font-medium">Industry group</dt><dd className="text-slate-900 mt-0.5">{filing.industry_group_type || '—'}</dd></div>
+              <div className="col-span-2"><dt className="text-[10px] uppercase tracking-widest text-slate-500 font-medium">Issuer address</dt><dd className="text-slate-900 mt-0.5">{[filing.street1, filing.city, filing.state_or_country, filing.zipcode].filter(Boolean).join(', ') || '—'}</dd></div>
+              <div><dt className="text-[10px] uppercase tracking-widest text-slate-500 font-medium">Issuer phone</dt><dd className="text-slate-900 mt-0.5 font-mono text-xs">{filing.issuer_phone || '—'}</dd></div>
+              <div><dt className="text-[10px] uppercase tracking-widest text-slate-500 font-medium">Signed by</dt><dd className="text-slate-900 mt-0.5">{filing.name_of_signer || '—'}{filing.signature_title && <span className="text-[11px] text-slate-500 ml-1">({filing.signature_title})</span>}</dd></div>
+              {filing.previous_accession && (
+                <div className="col-span-2"><dt className="text-[10px] uppercase tracking-widest text-slate-500 font-medium">Previous accession</dt>
+                  <dd className="text-slate-900 mt-0.5 font-mono text-xs">
+                    <a href={`/intel/fund/${encodeURIComponent(filing.previous_accession)}`} className="text-slate-600 hover:text-slate-900 underline">{filing.previous_accession}</a>
+                  </dd>
+                </div>
+              )}
+            </dl>
+          </section>
+        </div>
+
+        <div className="md:col-span-1 space-y-5">
+          {adviser && (
+            <section className="nport-panel">
+              <div className="nport-panel-header">
+                <h2 className="font-serif text-base font-semibold text-slate-900">Investment Adviser</h2>
+              </div>
+              <div className="px-4 py-3 space-y-2 text-sm">
+                <a href={`/intel/adviser/${encodeURIComponent(adviser.crd)}`} className="font-serif italic font-semibold text-slate-900 hover:text-slate-700 underline block">{adviser.name}</a>
+                <div className="text-[10px] font-mono text-slate-500">CRD {adviser.crd}</div>
+                {adviser.total_aum && <div className="text-[11px] text-slate-600">AUM <span className="font-mono">{fmtUsdShort(adviser.total_aum)}</span></div>}
+                {adviser.phone && <div className="text-[12px] flex gap-2 items-baseline"><span className="text-slate-500">Phone</span><span className="font-mono text-slate-700">{adviser.phone}</span></div>}
+                {adviser.website && <div className="text-[12px] flex gap-2 items-baseline"><span className="text-slate-500">Web</span><a href={normalizeHref(adviser.website)} target="_blank" rel="noopener noreferrer" className="font-mono text-slate-700 hover:text-slate-900 underline break-all">{adviser.website}</a></div>}
+                {adviser.cco_name && <div className="text-[12px] flex gap-2 items-baseline"><span className="text-slate-500">CCO</span><div><span className="text-slate-900">{renderPersonWithLinkedIn(adviser.cco_name, adviser.person_enrichment)}</span>{adviser.cco_email && <a href={`mailto:${adviser.cco_email}`} className="ml-2 font-mono text-[10px] text-slate-600 hover:text-slate-900">{adviser.cco_email}</a>}</div></div>}
+                {adviser.team_members && adviser.team_members.length > 0 && (
+                  <div className="pt-3 mt-3 border-t border-slate-100">
+                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Team ({adviser.team_members.length})</div>
+                    <ul className="space-y-1.5">
+                      {adviser.team_members.slice(0, 5).map((m, i) => (
+                        <li key={i} className="text-[12px]">
+                          <span className="text-slate-900 font-medium">{m.name}</span>
+                          {m.linkedin && <a href={m.linkedin} target="_blank" rel="noopener noreferrer" className="ml-1.5 text-[10px] text-blue-700 hover:text-blue-900">in↗</a>}
+                          {m.email && <a href={`mailto:${m.email}`} className="ml-2 font-mono text-[10px] text-slate-600 hover:text-slate-900">{m.email}</a>}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {relatedParties && relatedParties.length > 0 && (
+            <section className="nport-panel">
+              <div className="nport-panel-header">
+                <h2 className="font-serif text-base font-semibold text-slate-900">Related Parties ({relatedParties.length})</h2>
+              </div>
+              <ul className="divide-y divide-slate-100">
+                {relatedParties.map((rp, i) => (
+                  <li key={i} className="px-4 py-2.5">
+                    <div className="text-sm font-medium text-slate-900">{rp.name}</div>
+                    {rp.role && <div className="text-[11px] text-slate-500 mt-0.5">{rp.role}</div>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          <section className="nport-panel">
+            <div className="nport-panel-header">
+              <h2 className="font-serif text-base font-semibold text-slate-900">Filings</h2>
+            </div>
+            <ul className="px-4 py-3 space-y-1 text-sm">
+              {edgarUrl && <li><a href={edgarUrl} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between text-slate-700 hover:text-slate-900 py-1.5"><span>Form D archive</span><span className="text-xs text-slate-400">EDGAR ↗</span></a></li>}
+              {adviser && adviser.form_adv_url && <li><a href={adviser.form_adv_url} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between text-slate-700 hover:text-slate-900 py-1.5"><span>Adviser Form ADV</span><span className="text-xs text-slate-400">SEC ↗</span></a></li>}
+              {adviser && <li><a href={`https://adviserinfo.sec.gov/firm/summary/${adviser.crd}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between text-slate-700 hover:text-slate-900 py-1.5"><span>Adviser IAPD</span><span className="text-xs text-slate-400">SEC ↗</span></a></li>}
+            </ul>
+          </section>
+        </div>
+      </div>
+
+      <footer className="mt-12 pt-6 border-t border-slate-200 text-xs text-slate-500">
+        Fund Holders Intel V1.2 • SPV detail • Form D source: SEC EDGAR
+      </footer>
+    </div>
+  );
+}
+
+
 function GlobalSearchBar({ initialQuery = '' }) {
   const [q, setQ] = React.useState(initialQuery);
   const submit = (e) => {
@@ -1463,6 +1667,7 @@ function SearchPage({ initialQuery }) {
 window.mountIntelRouter = function () {
   const path = window.location.pathname;
   const searchMatch = path === '/intel/search';
+  const fundMatch = path.match(/^\/intel\/fund\/([^\/]+)/);
   const adviserMatch = path.match(/^\/intel\/adviser\/([^\/]+)/);
   const companyMatch = path.match(/^\/intel\/([^\/]+)/);
   const root = document.getElementById('root');
@@ -1471,6 +1676,11 @@ window.mountIntelRouter = function () {
     const params = new URLSearchParams(window.location.search);
     const initialQuery = params.get('q') || '';
     ReactDOM.createRoot(root).render(<SearchPage initialQuery={initialQuery} />);
+    return true;
+  }
+  if (fundMatch) {
+    const accession = decodeURIComponent(fundMatch[1]);
+    ReactDOM.createRoot(root).render(<FundPage accession={accession} />);
     return true;
   }
   if (adviserMatch) {

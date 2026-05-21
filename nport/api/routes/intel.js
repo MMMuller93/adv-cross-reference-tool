@@ -490,6 +490,166 @@ router.get('/companies/:slug/holders', async (req, res) => {
 });
 
 // ----------------------------------------------------------------------------
+// Fund detail endpoint — one Form D filing (pooled-vehicle SPV) by accession.
+// Returns the filing row + parsed related parties + resolved adviser detail
+// + which tracked companies this fund holds.
+// ----------------------------------------------------------------------------
+
+router.get('/funds/:accession', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const accession = String(req.params.accession || '').trim();
+    if (!accession) {
+      return res.status(400).json({ error: 'accession required', code: 'MISSING_ACCESSION' });
+    }
+
+    // 1. Form D filing row (Form D supabase). Could match either dashed or
+    // un-dashed accession in case the URL strips dashes.
+    const accessionVariants = accession.includes('-')
+      ? [accession]
+      : [accession, `${accession.slice(0, 10)}-${accession.slice(10, 12)}-${accession.slice(12)}`];
+    let filing = null;
+    for (const variant of accessionVariants) {
+      const { data } = await deps.formdClient
+        .from('form_d_filings')
+        .select('*')
+        .eq('accessionnumber', variant)
+        .limit(1);
+      if (data && data.length) { filing = data[0]; break; }
+    }
+    if (!filing) {
+      return notFound(res, `Form D filing not found: ${accession}`, 'FUND_NOT_FOUND');
+    }
+
+    // 2. Cross-reference: what adviser CRD is this bridged to?
+    const { data: xref } = await deps.formdClient
+      .from('cross_reference_matches')
+      .select('adviser_entity_crd')
+      .eq('formd_accession', filing.accessionnumber)
+      .not('adviser_entity_crd', 'is', null)
+      .limit(1);
+    let resolvedCrd = (xref && xref.length) ? String(xref[0].adviser_entity_crd) : null;
+
+    // 3. Also check our intel layer (the materialized resolution table)
+    if (!resolvedCrd) {
+      const { data: intelRows } = await deps.nportClient
+        .from('intel_formd_pooled_vehicle_offering')
+        .select('offering_id')
+        .eq('accession_number', filing.accessionnumber)
+        .limit(1);
+      if (intelRows && intelRows.length) {
+        const { data: resRows } = await deps.nportClient
+          .from('intel_adviser_resolution')
+          .select('crd,method')
+          .eq('source_table', 'intel_formd_pooled_vehicle_offering')
+          .eq('source_id', intelRows[0].offering_id)
+          .limit(1);
+        if (resRows && resRows.length) {
+          resolvedCrd = String(resRows[0].crd);
+        }
+      }
+    }
+
+    // 4. Adviser detail if we have a CRD
+    let adviser = null;
+    if (resolvedCrd) {
+      const details = await fetchAdviserDetails(deps.advClient, [resolvedCrd]);
+      const advDetail = details[resolvedCrd];
+      const extras = await fetchEnrichedExtras(deps.formdClient, [resolvedCrd]);
+      const extra = extras[resolvedCrd] || {};
+      const personEnrichmentMap = await fetchPersonEnrichment(deps.nportClient, [resolvedCrd]);
+      if (advDetail) {
+        adviser = {
+          crd: resolvedCrd,
+          name: advDetail.adviser_name || null,
+          total_aum: advDetail.total_aum || null,
+          phone: advDetail.phone_number || null,
+          website: pickCanonicalDomain(advDetail.primary_website, advDetail.other_websites, extra.website_url),
+          cco_name: normalizeName(advDetail.cco_name),
+          cco_email: advDetail.cco_email || null,
+          signatory_name: normalizeName(advDetail.signatory_name),
+          signatory_title: advDetail.signatory_title || null,
+          owners: normalizeOwnersList(advDetail.owner_full_legal_name),
+          form_adv_url: advDetail.form_adv_url || null,
+          linkedin_company_url: extra.linkedin_company_url || null,
+          team_members: teamMembersToStructured(extra.team_members),
+          twitter_handle: extra.twitter_handle || null,
+          person_enrichment: personEnrichmentMap[resolvedCrd] || {},
+        };
+      }
+    }
+
+    // 5. Parse related parties from the filing (pipe-separated columns)
+    const splitPipe = (s) => (s ? String(s).split('|').map(t => t.trim()).filter(Boolean) : []);
+    const relatedNames = splitPipe(filing.related_names);
+    const relatedRoles = splitPipe(filing.related_roles);
+    const relatedParties = relatedNames.map((name, i) => ({
+      name: normalizeName(name) || name,
+      role: relatedRoles[i] || null,
+    }));
+
+    // 6. Which tracked companies does this fund hold?
+    const { data: intelOfferings } = await deps.nportClient
+      .from('intel_formd_pooled_vehicle_offering')
+      .select('company_slug,total_offering_amount,filing_date')
+      .eq('accession_number', filing.accessionnumber);
+    const trackedCompanies = (intelOfferings || []).map(o => ({
+      slug: o.company_slug,
+      total_offering_amount: o.total_offering_amount,
+      filing_date: o.filing_date,
+    }));
+
+    res.json({
+      filing: {
+        accession_number: filing.accessionnumber,
+        entityname: filing.entityname,
+        cik: filing.cik,
+        filing_date: filing.filing_date,
+        sale_date: filing.sale_date,
+        signature_date: filing.signaturedate,
+        is_amendment: filing.isamendment === 'true' || filing.isamendment === true,
+        submission_type: filing.submissiontype,
+        previous_accession: filing.previousaccessionnumber,
+        // Offering economics
+        total_offering_amount: filing.totalofferingamount,
+        total_amount_sold: filing.totalamountsold,
+        total_remaining: filing.totalremaining,
+        minimum_investment: filing.minimuminvestmentaccepted,
+        total_investors: filing.totalnumberalreadyinvested,
+        revenue_range: filing.revenuerange,
+        // Exemptions + type
+        industry_group_type: filing.industrygrouptype,
+        investment_fund_type: filing.investmentfundtype,
+        federal_exemptions: filing.federalexemptions_items_list,
+        is_pooled_fund: filing.ispooledinvestmentfundtype === 'true' || filing.ispooledinvestmentfundtype === true,
+        // Issuer location
+        entity_type: filing.entitytype,
+        jurisdiction: filing.jurisdictionofinc,
+        year_of_inc: filing.yearofinc_value_entered,
+        city: filing.city,
+        state_or_country: filing.stateorcountry,
+        street1: filing.street1,
+        zipcode: filing.zipcode,
+        issuer_phone: filing.issuerphonenumber,
+        // Signature
+        name_of_signer: filing.nameofsigner,
+        signature_title: filing.signaturetitle,
+        // Series
+        series_master_llc: filing.series_master_llc,
+      },
+      related_parties: relatedParties,
+      adviser,
+      tracked_companies: trackedCompanies,
+      edgar_url: filing.cik && filing.accessionnumber
+        ? `https://www.sec.gov/Archives/edgar/data/${String(filing.cik).replace(/^0+/, '')}/${String(filing.accessionnumber).replace(/-/g, '')}/`
+        : null,
+    });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// ----------------------------------------------------------------------------
 // Global search across tracked companies + advisers + ADV funds + Form D
 // filings. Returns a unified, ranked result list.
 // ----------------------------------------------------------------------------
