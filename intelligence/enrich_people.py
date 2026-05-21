@@ -92,12 +92,69 @@ CORPORATE_TOKENS = {
     'TRUST', 'BANK', 'ASSOCIATES', 'MANAGEMENT', 'CAPITAL', 'PARTNERS',
     'FUND', 'FUNDS', 'ADVISORS', 'ADVISERS', 'SECURITIES', 'SERVICES',
     'PLC', 'GMBH', 'AG', 'SA', 'NV', 'BV',
+    # Codex 2026-05-20 — institutional / non-person entity tokens. Single-
+    # token presence is enough to mark the string as 'not a person' so we
+    # don't waste search quota on 'Teachers Insurance and Annuity
+    # Association of America' etc.
+    'ASSOCIATION', 'FOUNDATION', 'UNIVERSITY', 'COLLEGE', 'INSTITUTE',
+    'COMMITTEE', 'COUNCIL', 'BOARD', 'TRUSTEES', 'GOVERNORS',
+    'PENSION', 'RETIREMENT', 'INSURANCE', 'ANNUITY',
 }
+
+# Substring patterns that mark an owner string as institutional (multi-word
+# phrases that single-token CORPORATE_TOKENS check misses). Codex's list.
+INSTITUTIONAL_PHRASES = (
+    'board of', 'board of governors', 'board of trustees', 'board of directors',
+    'retirement system', 'pension fund', 'pension plan', 'insurance company',
+    'annuity association',
+)
+
+# Centralized nickname table. Previously duplicated and divergent between
+# _name_variants() and _name_tokens_match() (Codex 2026-05-20). Keep one
+# source of truth. Lower-case keys/values for case-insensitive lookups.
+SHORT_FIRST_NAMES: dict[str, str] = {
+    'edward': 'ed', 'robert': 'bob', 'richard': 'rick', 'william': 'bill',
+    'michael': 'mike', 'christopher': 'chris', 'daniel': 'dan',
+    'anthony': 'tony', 'james': 'jim', 'joseph': 'joe', 'stephen': 'steve',
+    'steven': 'steve', 'thomas': 'tom', 'charles': 'charlie',
+    'matthew': 'matt', 'patrick': 'pat', 'andrew': 'andy',
+    'benjamin': 'ben', 'nicholas': 'nick', 'jonathan': 'jon',
+    'kenneth': 'ken', 'samuel': 'sam', 'theodore': 'ted',
+}
+
+# Generic firm-name tokens that shouldn't alone upgrade snippet match to
+# 'high' confidence. Codex 2026-05-20: 'any token >3 chars' was matching
+# words like 'capital'/'management' that appear in countless firms.
+FIRM_STOPWORDS = {
+    'capital', 'management', 'partners', 'advisors', 'advisers',
+    'advisory', 'group', 'fund', 'funds', 'investments', 'investment',
+    'ventures', 'venture', 'holdings', 'trust', 'bank', 'company',
+    'corporation', 'associates', 'services', 'securities', 'global',
+    'financial', 'wealth', 'asset', 'assets', 'equity', 'private',
+    'strategic', 'alternative', 'opportunity', 'opportunities', 'llc',
+    'inc', 'corp', 'limited',
+}
+
+# LinkedIn URL paths to reject — these aren't person profiles. Codex 2026-05-20.
+LINKEDIN_REJECT_PATH_PARTS = (
+    '/pub/dir/', '/company/', '/school/', '/feed/', '/search/',
+    '/groups/', '/learning/', '/jobs/', '/pulse/', '/posts/',
+    '/activity-', '/sales/', '/showcase/',
+)
 
 
 def _is_likely_corporate(s: str) -> bool:
+    """True iff s looks like an institutional / corporate entity, not a
+    person. Two checks: token-level (CORPORATE_TOKENS) and substring-phrase
+    (INSTITUTIONAL_PHRASES — catches 'Board of Governors of the Federal
+    Reserve' etc. where no single token is corporate).
+    """
     if not s:
         return False
+    lower = s.lower()
+    for phrase in INSTITUTIONAL_PHRASES:
+        if phrase in lower:
+            return True
     tokens = re.split(r"[\s,.()]+", s.upper())
     return any(t in CORPORATE_TOKENS for t in tokens if t)
 
@@ -271,26 +328,30 @@ def _url_slug_matches_name(url: str, person_name: str) -> bool:
 
 
 def _name_tokens_match(snippet: str, person_name: str) -> bool:
-    """Softer person match: snippet contains the first name AND last name
-    as separate words, in any order. Survives 'Ed Perks CFA' vs 'Edward
-    Douglas Perks'.
+    """Person match: snippet contains the last name AND (first name OR
+    nickname-form) as WORD-BOUNDARY matches, not substring (Codex 2026-05-20).
+    Survives 'Ed Perks CFA' vs 'Edward Douglas Perks' via SHORT_FIRST_NAMES
+    nickname table.
+
+    Word-boundary is critical so 'rob' doesn't match 'robust' or 'roberta'.
     """
     if not snippet or not person_name:
         return False
     s = snippet.lower()
     tokens = person_name.lower().split()
+    if not tokens:
+        return False
     if len(tokens) < 2:
-        return tokens[0] in s
+        return bool(re.search(r"\b" + re.escape(tokens[0]) + r"\b", s))
     last = tokens[-1]
     first_candidates = [tokens[0]]
-    short_first = {"edward": "ed", "robert": "bob", "richard": "rick",
-                   "william": "bill", "michael": "mike", "christopher": "chris",
-                   "daniel": "dan", "anthony": "tony", "james": "jim",
-                   "joseph": "joe", "stephen": "steve", "steven": "steve",
-                   "thomas": "tom", "charles": "charlie", "matthew": "matt"}
-    if tokens[0] in short_first:
-        first_candidates.append(short_first[tokens[0]])
-    return last in s and any(fc in s for fc in first_candidates)
+    if tokens[0] in SHORT_FIRST_NAMES:
+        first_candidates.append(SHORT_FIRST_NAMES[tokens[0]])
+    last_hit = bool(re.search(r"\b" + re.escape(last) + r"\b", s))
+    first_hit = any(
+        re.search(r"\b" + re.escape(fc) + r"\b", s) for fc in first_candidates
+    )
+    return last_hit and first_hit
 
 
 def find_linkedin_for_person(person_name: str, firm_name: str, role_hint: Optional[str] = None,
@@ -330,10 +391,15 @@ def find_linkedin_for_person(person_name: str, firm_name: str, role_hint: Option
         "google" if os.environ.get("GOOGLE_API_KEY") else None)
 
     best = None
+    # Track per-call count via a closure so the caller (main loop) can cap
+    # by actual search-call budget, not by person count (Codex 2026-05-20).
+    search_calls_made = [0]
+
     for qi, query in enumerate(queries):
         if qi > 0:
             time.sleep(1.2)  # avoid Brave free-tier 1-req/sec 429
         hits = brave_search(query) or google_cse_search(query) or []
+        search_calls_made[0] += 1
         for hit in hits:
             url = hit.get("url") or ""
             url_lower = url.lower()
@@ -351,8 +417,17 @@ def find_linkedin_for_person(person_name: str, firm_name: str, role_hint: Option
                 continue
             snippet = (hit.get("snippet") or "") + " " + (hit.get("title") or "") + " " + url
             person_ok = _name_tokens_match(snippet, person_name)
-            firm_tokens = [t.lower() for t in firm_short.split() if len(t) > 3]
-            firm_ok = any(t in snippet.lower() for t in firm_tokens)
+            # Use the validator's chunk-based firm-signal check (Codex 2026-
+            # 05-20). 'any token >3 chars' would let generic words like
+            # 'capital', 'management', 'partners' grant 'high' confidence —
+            # _contains_firm_signal rejects those.
+            try:
+                from enrichment_validator import _contains_firm_signal  # type: ignore
+                firm_ok = _contains_firm_signal(snippet.lower(), firm_short)
+            except ImportError:
+                # Fallback to old logic if validator isn't importable
+                firm_tokens_loose = [t.lower() for t in firm_short.split() if len(t) > 3]
+                firm_ok = any(t in snippet.lower() for t in firm_tokens_loose)
             if person_ok and firm_ok:
                 best = {"hit": hit, "confidence": "high"}
                 break
@@ -379,6 +454,9 @@ def find_linkedin_for_person(person_name: str, firm_name: str, role_hint: Option
         if m:
             result["inferred_title"] = m.group(1).strip()
 
+    # Expose the per-call count via the result so the main loop can
+    # accurately budget by search calls (Codex 2026-05-20 finding).
+    result["_search_calls"] = search_calls_made[0]
     if cache is not None:
         cache[cache_key] = result
     return result
@@ -394,15 +472,31 @@ def fetch_named_people_for_company(nport, adv, slug: str) -> list[dict[str, Any]
     view to discover the relevant CRD set; then queries advisers_enriched
     for the per-firm named-person fields.
     """
-    crds_resp = (
-        nport.table("v_intel_company_holders")
-        .select("adviser_crd")
-        .eq("company_slug", slug)
-        .not_.is_("adviser_crd", "null")
-        .limit(5000)
-        .execute()
-    )
-    crds = sorted({str(r["adviser_crd"]) for r in (crds_resp.data or []) if r.get("adviser_crd")})
+    # Keyset-paginate over v_intel_company_holders so SpaceX-scale firms
+    # (>5000 holdings) don't truncate (Codex 2026-05-20 finding).
+    crds_set: set[str] = set()
+    last_id = 0
+    while True:
+        resp = (
+            nport.table("v_intel_company_holders")
+            .select("evidence_id,adviser_crd")
+            .eq("company_slug", slug)
+            .not_.is_("adviser_crd", "null")
+            .gt("evidence_id", last_id)
+            .order("evidence_id")
+            .limit(1000)
+            .execute()
+        )
+        rows = resp.data or []
+        if not rows:
+            break
+        for r in rows:
+            if r.get("adviser_crd"):
+                crds_set.add(str(r["adviser_crd"]))
+        if len(rows) < 1000:
+            break
+        last_id = int(rows[-1]["evidence_id"])
+    crds = sorted(crds_set)
     if not crds:
         return []
 
@@ -511,7 +605,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                     person["name"], person["firm"], person["role"],
                     cache=cache, force=args.force,
                 )
-                call_count += 1
+                # Count the actual number of Brave/Google calls this person
+                # produced (multiple variant queries × retries), not just 1
+                # (Codex 2026-05-20 fix — was previously per-person).
+                call_count += result.get("_search_calls", 1)
                 time.sleep(args.delay_ms / 1000.0)
 
             if result.get("linkedin_url"):
