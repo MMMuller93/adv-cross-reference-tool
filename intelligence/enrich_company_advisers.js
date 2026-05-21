@@ -224,6 +224,28 @@ async function main() {
     if (i < toEnrich.length - 1) await new Promise(r => setTimeout(r, args.delay));
   }
   console.log(`\nDone. succeeded=${succeeded} (empty=${empty}) failed=${failed}`);
+
+  // Always run the Python validator over the rows we just wrote. PFR's
+  // enrichment_engine_v2 sometimes returns wrong data even when its own AI
+  // validation flagged a mismatch (Codex 2026-05-20 review). The validator
+  // nulls fields that fail plausibility checks (discord.gg primary_website,
+  // unrelated Twitter handles, etc.) so the live UI never shows them.
+  if (!args.dryRun && succeeded > 0) {
+    console.log('\nRunning plausibility validator on rows just written…');
+    const { spawnSync } = require('child_process');
+    const venvPython = '/Users/Miles/projects/PrivateFundsRadar-fund-holders-intel/.venv/bin/python';
+    const result = spawnSync(venvPython, [
+      path.join(__dirname, 'cleanup_enriched_managers.py'),
+      '--source', 'intel_company_advisers',
+      '--execute',
+    ], {
+      env: { ...process.env },
+      stdio: 'inherit',
+    });
+    if (result.status !== 0) {
+      console.warn('  validator exited non-zero — manual cleanup may be needed.');
+    }
+  }
 }
 
 main().catch(err => {
