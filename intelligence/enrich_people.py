@@ -81,6 +81,16 @@ def create_adv_client():
     return create_client(url, key)
 
 
+def create_formd_client():
+    """Form D supabase client — used for enriched_managers reads."""
+    url = os.environ.get("SUPABASE_URL_FORMD") or "https://ltdalxkhbbhmkimmogyq.supabase.co"
+    key = os.environ.get("SUPABASE_ANON_KEY_FORMD") or os.environ.get("FORMD_SUPABASE_ANON_KEY")
+    if not key:
+        raise RuntimeError("SUPABASE_ANON_KEY_FORMD required (add to .env.nport)")
+    from supabase import create_client  # type: ignore
+    return create_client(url, key)
+
+
 # ---------------------------------------------------------------------------
 # Name normalization (mirrors nport/api/lib/name_normalizer.js so the JOIN
 # key on the API side matches what we write here).
@@ -466,14 +476,109 @@ def find_linkedin_for_person(person_name: str, firm_name: str, role_hint: Option
 # Orchestration
 # ---------------------------------------------------------------------------
 
-def fetch_named_people_for_company(nport, adv, slug: str) -> list[dict[str, Any]]:
-    """For a tracked company, get every (adviser_crd, person_name, role) tuple
-    that appears in the holders rollup. Reuses the v_intel_company_holders
-    view to discover the relevant CRD set; then queries advisers_enriched
-    for the per-firm named-person fields.
+def fetch_named_people_for_crds(nport, adv, formd, crds: list[str]) -> list[dict[str, Any]]:
+    """Given a list of adviser CRDs, return (crd, firm, name, role,
+    source_table, source_role) tuples for every named individual surfaced
+    by:
+      - advisers_enriched (cco, signatory, control, regulatory, owners)
+      - enriched_managers.team_members[*] (PFR-engine-extracted team)
+
+    Codex 2026-05-21 added the team_members pull — without it the UI's
+    team-member rows never get DB-backed LinkedIn icons.
     """
-    # Keyset-paginate over v_intel_company_holders so SpaceX-scale firms
-    # (>5000 holdings) don't truncate (Codex 2026-05-20 finding).
+    if not crds:
+        return []
+
+    people: list[dict[str, Any]] = []
+    # 1. advisers_enriched named-person fields
+    for chunk_start in range(0, len(crds), 100):
+        chunk = crds[chunk_start : chunk_start + 100]
+        resp = (
+            adv.table("advisers_enriched")
+            .select("crd,adviser_name,cco_name,signatory_name,owner_full_legal_name,"
+                    "owner_title_or_status,control_person_name,regulatory_contact_name")
+            .in_("crd", chunk)
+            .execute()
+        )
+        for row in (resp.data or []):
+            firm = row.get("adviser_name") or ""
+            crd = str(row["crd"])
+            for field, role, source_role_field in [
+                ("cco_name", "cco", None),
+                ("signatory_name", "signatory", None),
+                ("control_person_name", "control", None),
+                ("regulatory_contact_name", "regulatory", None),
+            ]:
+                v = row.get(field)
+                if v and not _is_likely_corporate(v):
+                    name = normalize_name(v)
+                    if name:
+                        people.append({
+                            "crd": crd, "firm": firm, "name": name, "role": role,
+                            "source_table": "advisers_enriched",
+                            "source_role": field,
+                        })
+            # Owners: parallel semicolon-parsed names + titles
+            owner_blob = row.get("owner_full_legal_name") or ""
+            owner_titles = (row.get("owner_title_or_status") or "").split(";")
+            for i, raw in enumerate(owner_blob.split(";")):
+                raw = raw.strip()
+                if not raw or _is_likely_corporate(raw):
+                    continue
+                name = normalize_name(raw)
+                if name:
+                    people.append({
+                        "crd": crd, "firm": firm, "name": name, "role": "owner",
+                        "source_table": "advisers_enriched.owner_full_legal_name",
+                        "source_role": (owner_titles[i] if i < len(owner_titles) else "").strip() or None,
+                    })
+
+    # 2. enriched_managers.team_members[*] — PFR engine output
+    # Each row has linked_crd + team_members JSON [{name, title, linkedin, email}]
+    for chunk_start in range(0, len(crds), 100):
+        chunk = crds[chunk_start : chunk_start + 100]
+        resp = (
+            formd.table("enriched_managers")
+            .select("linked_crd,series_master_llc,team_members")
+            .in_("linked_crd", chunk)
+            .execute()
+        )
+        for row in (resp.data or []):
+            crd = str(row.get("linked_crd") or "")
+            if not crd:
+                continue
+            firm = row.get("series_master_llc") or ""
+            tm = row.get("team_members") or []
+            if isinstance(tm, str):
+                try:
+                    tm = __import__("json").loads(tm)
+                except Exception:
+                    tm = []
+            if not isinstance(tm, list):
+                continue
+            for m in tm:
+                if not isinstance(m, dict):
+                    continue
+                raw_name = (m.get("name") or "").strip()
+                if not raw_name or _is_likely_corporate(raw_name):
+                    continue
+                name = normalize_name(raw_name)
+                if not name:
+                    continue
+                people.append({
+                    "crd": crd, "firm": firm, "name": name, "role": "team",
+                    "source_table": "enriched_managers.team_members",
+                    "source_role": m.get("title") or m.get("role") or None,
+                })
+
+    return people
+
+
+def fetch_named_people_for_company(nport, adv, slug: str) -> list[dict[str, Any]]:
+    """For a tracked company, get every named individual via every CRD
+    that holds it. Calls fetch_named_people_for_crds after collecting
+    the CRD set from v_intel_company_holders.
+    """
     crds_set: set[str] = set()
     last_id = 0
     while True:
@@ -497,45 +602,12 @@ def fetch_named_people_for_company(nport, adv, slug: str) -> list[dict[str, Any]
             break
         last_id = int(rows[-1]["evidence_id"])
     crds = sorted(crds_set)
-    if not crds:
-        return []
-
-    people: list[dict[str, Any]] = []
-    for chunk_start in range(0, len(crds), 100):
-        chunk = crds[chunk_start : chunk_start + 100]
-        resp = (
-            adv.table("advisers_enriched")
-            .select("crd,adviser_name,cco_name,signatory_name,owner_full_legal_name,"
-                    "control_person_name,regulatory_contact_name")
-            .in_("crd", chunk)
-            .execute()
-        )
-        for row in (resp.data or []):
-            firm = row.get("adviser_name") or ""
-            crd = str(row["crd"])
-            for field, role in [
-                ("cco_name", "cco"),
-                ("signatory_name", "signatory"),
-                ("control_person_name", "control"),
-                ("regulatory_contact_name", "regulatory"),
-            ]:
-                v = row.get(field)
-                if v and not _is_likely_corporate(v):
-                    name = normalize_name(v)
-                    if name:
-                        people.append({"crd": crd, "firm": firm, "name": name, "role": role})
-            # Owners blob: semicolon-separated, mixed corporate + people.
-            owner_blob = row.get("owner_full_legal_name") or ""
-            for raw in owner_blob.split(";"):
-                raw = raw.strip()
-                if not raw or _is_likely_corporate(raw):
-                    continue
-                name = normalize_name(raw)
-                if name:
-                    people.append({"crd": crd, "firm": firm, "name": name, "role": "owner"})
+    formd = create_formd_client()
+    people = fetch_named_people_for_crds(nport, adv, formd, crds)
 
     # Dedupe on (crd, normalized_name) — same person may appear via multiple
-    # ADV fields; we only want to scrape them once.
+    # source paths (e.g., both owner and team_member); we keep the first
+    # occurrence but track that source-role variety in source_table.
     seen = set()
     deduped = []
     for p in people:
@@ -555,36 +627,55 @@ def write_enrichment_row(nport, row: dict[str, Any]) -> None:
 
 def main(argv: Optional[list[str]] = None) -> int:
     p = argparse.ArgumentParser(description="Per-person enrichment for Form ADV named individuals.")
-    p.add_argument("--company", help="Slug; if omitted, --all required")
+    p.add_argument("--company", help="Slug; if omitted, --all or --crd required")
     p.add_argument("--all", action="store_true", help="Process every tracked company")
+    p.add_argument("--crd", action="append", default=[],
+                   help="Process specific adviser CRD(s) directly. Repeatable. "
+                        "Bypasses tracked-company lookup; processes the CRD's own "
+                        "named individuals + team_members.")
     p.add_argument("--execute", action="store_true", help="Write to intel_person_enrichment")
     p.add_argument("--max-calls", type=int, default=200, help="Cap Brave/Google calls (default 200)")
     p.add_argument("--delay-ms", type=int, default=1500, help="Pacing between calls (default 1500)")
     p.add_argument("--force", action="store_true", help="Re-enrich rows enriched <30 days ago")
     args = p.parse_args(argv)
 
-    if not args.company and not args.all:
-        print("ERROR: provide --company SLUG or --all", file=sys.stderr)
+    if not args.company and not args.all and not args.crd:
+        print("ERROR: provide --company SLUG, --all, or --crd CRD", file=sys.stderr)
         return 2
 
     load_credentials()
     nport = create_nport_client()
     adv = create_adv_client()
+    formd = create_formd_client()
     cache = load_cache()
 
-    if args.company:
-        company_slugs = [args.company]
+    # Build the (crd, firm, name, role, source_table, source_role) list.
+    # Codex 2026-05-22: now includes enriched_managers.team_members.
+    if args.crd:
+        people = fetch_named_people_for_crds(nport, adv, formd, [str(c) for c in args.crd])
+        seen = set()
+        deduped = []
+        for p_ in people:
+            key = (p_["crd"], p_["name"])
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(p_)
+        people_by_slug = [("--crd run--", deduped)]
+    elif args.company:
+        people_by_slug = [(args.company, fetch_named_people_for_company(nport, adv, args.company))]
     else:
-        # Iterate every private_companies row
         rs = nport.table("private_companies").select("slug").limit(5000).execute()
-        company_slugs = [r["slug"] for r in (rs.data or [])]
+        people_by_slug = []
+        for r in (rs.data or []):
+            slug = r["slug"]
+            people_by_slug.append((slug, fetch_named_people_for_company(nport, adv, slug)))
 
     call_count = 0
     written = 0
     skipped = 0
-    for slug in company_slugs:
+    for slug, people in people_by_slug:
         print(f"\n=== {slug} ===")
-        people = fetch_named_people_for_company(nport, adv, slug)
         print(f"  {len(people)} unique named people to consider")
         for person in people:
             if call_count >= args.max_calls:
@@ -620,15 +711,49 @@ def main(argv: Optional[list[str]] = None) -> int:
                 print(f"  · {person['name']:30s} ({person['role']:10s} @ {person['firm'][:30]}) -> no match")
 
             if args.execute and result.get("linkedin_url"):
+                # v3: tighten confidence — promote to 'high' ONLY when the
+                # evidence snippet contains a firm-name token AND the URL
+                # slug shares a name token. Demote 'medium' rows that don't
+                # have firm-token evidence to 'low' (won't surface in the
+                # high-only view). This is the Codex 2026-05-22 precision
+                # gate.
+                raw_hit = result.get("raw_hit") or {}
+                ev_url = raw_hit.get("url") or result["linkedin_url"]
+                ev_snippet = ((raw_hit.get("snippet") or "") + " " +
+                              (raw_hit.get("title") or "")).strip()
+                # Firm-token presence in evidence snippet
+                firm_short = person["firm"].split(",")[0].split(" Inc")[0].split(" LLC")[0].strip()
+                firm_tokens_check = False
+                try:
+                    from enrichment_validator import _contains_firm_signal
+                    firm_tokens_check = _contains_firm_signal(ev_snippet, firm_short)
+                except Exception:
+                    firm_tokens_check = any(
+                        t.lower() in ev_snippet.lower()
+                        for t in firm_short.split()
+                        if len(t) > 3
+                    )
+                gated_confidence = result["confidence"]
+                if gated_confidence == "medium" and not firm_tokens_check:
+                    gated_confidence = "low"
+                if gated_confidence == "high" and not firm_tokens_check:
+                    gated_confidence = "medium"
+
                 write_enrichment_row(nport, {
                     "adviser_crd": person["crd"],
                     "normalized_name": person["name"],
                     "role_hint": person["role"],
                     "linkedin_url": result["linkedin_url"],
                     "inferred_title": result.get("inferred_title"),
-                    "confidence": result["confidence"],
+                    "confidence": gated_confidence,
                     "source": result.get("source"),
                     "raw_search_hit": result.get("raw_hit"),
+                    # Provenance (Codex v3 schema)
+                    "source_table": person.get("source_table"),
+                    "source_role": person.get("source_role"),
+                    "evidence_url": ev_url,
+                    "evidence_snippet": ev_snippet[:500] if ev_snippet else None,
+                    "last_attempt_at": __import__("datetime").datetime.utcnow().isoformat(),
                 })
                 written += 1
         save_cache(cache)
