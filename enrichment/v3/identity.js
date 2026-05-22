@@ -135,6 +135,47 @@ async function resolveIdentity(rawName, opts = {}) {
     console.error('[identity] External DB lookup failed:', err.message);
   }
 
+  // IAPD live fallback (added 2026-05-22).
+  // The local advisers_enriched cache misses firms registered AFTER our cron
+  // refresh — e.g., "201 Ventures Management LLC" (CRD 341854, ACTIVE in IAPD,
+  // not yet in our cache). The IAPD JSON API is unauth'd and indexes every
+  // SEC-registered + state-registered adviser. We try each variant against it
+  // and apply the same stricter CRD gate to reject acronym FPs.
+  //
+  // Opt-in via opts.iapdFallback OR env var ENRICHMENT_IAPD_FALLBACK=true.
+  // Off by default in unit tests; on for the v3 enrichment workflow.
+  const iapdEnabled = opts.iapdFallback === true || process.env.ENRICHMENT_IAPD_FALLBACK === 'true';
+  if (iapdEnabled) {
+    try {
+      const { iapdLiveLookupVariants } = require('../../lib/iapd_live');
+      const iapdRes = await iapdLiveLookupVariants(variants);
+      if (iapdRes && iapdRes.found) {
+        const gate = passesStricterCrdGate(iapdRes, rawName, {
+          matchedVariant: iapdRes.matched_variant,
+          relatedNames: opts.relatedNames,
+        });
+        if (gate.pass) {
+          console.log(`[identity] IAPD live hit: ${iapdRes.adviser_name} (CRD ${iapdRes.crd}) via variant "${iapdRes.matched_variant}"`);
+          return {
+            resolved: true,
+            crd: String(iapdRes.crd),
+            adviser_name: iapdRes.adviser_name,
+            registration_type: iapdRes.registration_type || null,
+            primary_website: null,  // IAPD response doesn't include primary_website
+            anchor: 'iapd_live',
+            matched_variant: iapdRes.matched_variant,
+            matched_source: 'iapd_live',
+            variants_tried: variants,
+          };
+        } else {
+          gateRejections.push({ crd: iapdRes.crd, variant: iapdRes.matched_variant, adviser_name: iapdRes.adviser_name, source: 'iapd_live', ...gate });
+        }
+      }
+    } catch (err) {
+      console.error('[identity] IAPD fallback error:', err.message);
+    }
+  }
+
   return {
     resolved: false,
     crd: null,
