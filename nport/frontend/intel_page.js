@@ -77,6 +77,86 @@ const renderPersonWithLinkedIn = (name, personEnrichment) => {
 };
 
 /**
+ * PersonContactButtons — PFR-parity contact-button row for a single person.
+ *
+ * Renders LinkedIn / Email buttons (only when data is present). Disabled
+ * states use a greyed-out pill + small X overlay (PFR pattern at
+ * public/app.js:5065). Email button is shown ONLY when the email is
+ * structurally attributable to this specific person (from
+ * enriched_managers.team_members[*].email OR intel_person_enrichment.
+ * inferred_email). Firm-level CCO email is NOT shown here unless the
+ * person IS the CCO.
+ *
+ * Props:
+ *   linkedin: URL or null
+ *   email:    address or null
+ *   size:     'sm' (default) | 'md'
+ */
+const PersonContactButtons = ({ linkedin, email, size = 'sm' }) => {
+  const pad = size === 'md' ? 'px-2.5 py-1' : 'px-2 py-0.5';
+  const text = size === 'md' ? 'text-[11px]' : 'text-[10px]';
+  const iconSize = size === 'md' ? 'w-3 h-3' : 'w-2.5 h-2.5';
+
+  const activeCls = `inline-flex items-center gap-1 ${pad} bg-white border border-slate-200 rounded ${text} font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors`;
+  const disabledCls = `inline-flex items-center gap-1 ${pad} bg-slate-50 border border-slate-100 rounded ${text} font-medium text-slate-300 cursor-not-allowed`;
+
+  return (
+    <span className="inline-flex flex-wrap gap-1 items-center">
+      {linkedin ? (
+        <a href={linkedin} target="_blank" rel="noopener noreferrer"
+           className={activeCls} title="View on LinkedIn">
+          <svg className={iconSize} viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14M8.27 18.5V10H6.7v8.5h1.57m-.79-9.39c.5 0 .91-.41.91-.92 0-.5-.41-.91-.91-.91-.5 0-.91.41-.91.91 0 .51.41.92.91.92M18.5 18.5v-4.65c0-2.07-1.43-2.85-2.86-2.85a2.5 2.5 0 0 0-2.21 1.21V10h-1.5v8.5h1.5v-4.7c0-.97.79-1.76 1.76-1.76.97 0 1.81.79 1.81 1.76v4.7h1.5z"/>
+          </svg>
+          LinkedIn
+        </a>
+      ) : (
+        <span className={disabledCls + ' relative'} title="No LinkedIn found">
+          <svg className={iconSize} viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14M8.27 18.5V10H6.7v8.5h1.57m-.79-9.39c.5 0 .91-.41.91-.92 0-.5-.41-.91-.91-.91-.5 0-.91.41-.91.91 0 .51.41.92.91.92M18.5 18.5v-4.65c0-2.07-1.43-2.85-2.86-2.85a2.5 2.5 0 0 0-2.21 1.21V10h-1.5v8.5h1.5v-4.7c0-.97.79-1.76 1.76-1.76.97 0 1.81.79 1.81 1.76v4.7h1.5z"/>
+          </svg>
+          LinkedIn
+          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-white border border-slate-200 flex items-center justify-center text-[7px] text-slate-400">×</span>
+        </span>
+      )}
+      {email && (
+        <a href={`mailto:${email}`} className={activeCls} title={`Email ${email}`}>
+          <svg className={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="3" y="5" width="18" height="14" rx="2"/>
+            <path d="m22 7-8.97 5.7a2 2 0 0 1-2.06 0L2 7"/>
+          </svg>
+          Email
+        </a>
+      )}
+    </span>
+  );
+};
+
+/**
+ * Resolve a person's contact info from the data shapes the API returns.
+ * Single source of truth for what to show next to a person's name.
+ *
+ *   person: {name, title?, linkedin?, email?}    (from team_members)
+ *           OR {name, title?}                    (from owners_detail)
+ *           OR string                            (legacy)
+ *   personEnrichmentMap: { [normalized_name]: {linkedin_url, inferred_email, ...} }
+ *
+ * Priority for linkedin: person.linkedin → enrichment[name].linkedin_url
+ * Priority for email:    person.email     → enrichment[name].inferred_email
+ *                        (no firm-level fallback — that would falsely
+ *                         attribute the firm's generic email to this person)
+ */
+const resolvePersonContact = (person, personEnrichmentMap) => {
+  if (!person) return { linkedin: null, email: null };
+  const name = typeof person === 'string' ? person : (person.name || '');
+  const enr = (personEnrichmentMap || {})[name] || {};
+  return {
+    linkedin: (typeof person === 'object' ? person.linkedin : null) || enr.linkedin_url || null,
+    email: (typeof person === 'object' ? person.email : null) || enr.inferred_email || null,
+  };
+};
+
+/**
  * Build an EDGAR archive index URL for a specific filing.
  *   cik       e.g. '0000044201' or '44201'
  *   accession e.g. '0001193125-26-182055'
@@ -359,24 +439,19 @@ function AdviserDetailPanel({ adv, holdings, companyName }) {
                   <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">
                     Team ({adv.team_members.length})
                   </div>
-                  <ul className="space-y-1.5">
-                    {adv.team_members.map((m, i) => (
-                      <li key={i} className="text-[12px] flex items-baseline gap-2 flex-wrap">
-                        <span className="text-slate-900 font-medium">{m.name}</span>
-                        {m.title && <span className="text-[10px] text-slate-500">{m.title}</span>}
-                        {m.linkedin && (
-                          <a href={m.linkedin} target="_blank" rel="noopener noreferrer"
-                             className="text-[10px] text-blue-700 hover:text-blue-900 font-medium"
-                             title="LinkedIn">in↗</a>
-                        )}
-                        {m.email && (
-                          <a href={`mailto:${m.email}`}
-                             className="font-mono text-[10px] text-slate-600 hover:text-slate-900 break-all">
-                            {m.email}
-                          </a>
-                        )}
-                      </li>
-                    ))}
+                  <ul className="space-y-2">
+                    {adv.team_members.map((m, i) => {
+                      const contact = resolvePersonContact(m, adv.person_enrichment);
+                      return (
+                        <li key={i} className="text-sm">
+                          <div className="flex items-baseline gap-2 flex-wrap">
+                            <span className="text-slate-900 font-medium text-[12px]">{m.name}</span>
+                            <PersonContactButtons linkedin={contact.linkedin} email={contact.email} />
+                          </div>
+                          {m.title && <div className="text-[10px] text-slate-500 mt-0.5">{m.title}</div>}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
@@ -1276,36 +1351,18 @@ function AdviserPage({ crd }) {
                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">
                   Principals / Owners ({(adviser.owners_detail || adviser.owners).length})
                 </div>
-                <ul className="space-y-1">
+                <ul className="space-y-2">
                   {(adviser.owners_detail && adviser.owners_detail.length > 0
                     ? adviser.owners_detail.slice(0, 5)
                     : adviser.owners.slice(0, 5).map(name => ({ name, title: null, ownership_amount: null, owner_type: null }))
-                  ).map((o, i) => (
-                    <li key={i} className="text-sm text-slate-900">
-                      {renderPersonWithLinkedIn(o.name, adviser.person_enrichment)}
-                      {(o.title || o.ownership_amount) && (
-                        <div className="text-[10px] text-slate-500 mt-0.5">
-                          {o.title}{o.title && o.ownership_amount && ' · '}
-                          {o.ownership_amount && (<span className="font-mono">{o.ownership_amount}</span>)}
-                          {o.owner_type && o.owner_type !== 'Direct' && (
-                            <span className="ml-1 text-[9px] uppercase tracking-widest text-slate-400">({o.owner_type})</span>
-                          )}
+                  ).map((o, i) => {
+                    const contact = resolvePersonContact(o, adviser.person_enrichment);
+                    return (
+                      <li key={i} className="text-sm">
+                        <div className="flex items-baseline gap-2 flex-wrap">
+                          <span className="text-slate-900 font-medium">{o.name}</span>
+                          <PersonContactButtons linkedin={contact.linkedin} email={contact.email} />
                         </div>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-                {(adviser.owners_detail || adviser.owners).length > 5 && (
-                  <button onClick={() => setOwnersExpanded(!ownersExpanded)}
-                          className="mt-2 text-[11px] text-slate-600 hover:text-slate-900">
-                    {ownersExpanded ? 'Show less' : `Show all ${(adviser.owners_detail || adviser.owners).length}`}
-                  </button>
-                )}
-                {ownersExpanded && (
-                  <ul className="space-y-1 mt-2 pt-2 border-t border-slate-100">
-                    {(adviser.owners_detail || adviser.owners.map(name => ({ name }))).slice(5).map((o, i) => (
-                      <li key={i} className="text-sm text-slate-900">
-                        {renderPersonWithLinkedIn(o.name, adviser.person_enrichment)}
                         {(o.title || o.ownership_amount) && (
                           <div className="text-[10px] text-slate-500 mt-0.5">
                             {o.title}{o.title && o.ownership_amount && ' · '}
@@ -1316,7 +1373,37 @@ function AdviserPage({ crd }) {
                           </div>
                         )}
                       </li>
-                    ))}
+                    );
+                  })}
+                </ul>
+                {(adviser.owners_detail || adviser.owners).length > 5 && (
+                  <button onClick={() => setOwnersExpanded(!ownersExpanded)}
+                          className="mt-2 text-[11px] text-slate-600 hover:text-slate-900">
+                    {ownersExpanded ? 'Show less' : `Show all ${(adviser.owners_detail || adviser.owners).length}`}
+                  </button>
+                )}
+                {ownersExpanded && (
+                  <ul className="space-y-2 mt-2 pt-2 border-t border-slate-100">
+                    {(adviser.owners_detail || adviser.owners.map(name => ({ name }))).slice(5).map((o, i) => {
+                      const contact = resolvePersonContact(o, adviser.person_enrichment);
+                      return (
+                        <li key={i} className="text-sm">
+                          <div className="flex items-baseline gap-2 flex-wrap">
+                            <span className="text-slate-900 font-medium">{o.name}</span>
+                            <PersonContactButtons linkedin={contact.linkedin} email={contact.email} />
+                          </div>
+                          {(o.title || o.ownership_amount) && (
+                            <div className="text-[10px] text-slate-500 mt-0.5">
+                              {o.title}{o.title && o.ownership_amount && ' · '}
+                              {o.ownership_amount && (<span className="font-mono">{o.ownership_amount}</span>)}
+                              {o.owner_type && o.owner_type !== 'Direct' && (
+                                <span className="ml-1 text-[9px] uppercase tracking-widest text-slate-400">({o.owner_type})</span>
+                              )}
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
