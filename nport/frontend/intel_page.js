@@ -60,6 +60,32 @@ const firstInitial = (name) => {
  * Returns React fragments inline (not a separate component) so it can be
  * dropped into existing layouts without re-wrapping.
  */
+// Inline external-link icon — replaces the prior `↗` text marker.
+// Used everywhere we link out (EDGAR, SEC IAPD, LinkedIn, vendor pages).
+const ExternalLinkIcon = ({ className = 'w-3 h-3 ml-0.5 inline-block opacity-60' }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+       strokeLinecap="round" strokeLinejoin="round"
+       className={className} aria-hidden="true">
+    <path d="M7 17 17 7M9 7h8v8" />
+  </svg>
+);
+
+// Shared footer used across every intel page. No version stamps, no
+// page-specific jargon — just the attribution. Keeps every page's
+// chrome identical so the product feels coherent, not "internal V1".
+const IntelFooter = () => (
+  <footer className="mt-16 pt-6 border-t border-slate-200">
+    <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 text-xs text-slate-500">
+      <div>
+        Sourced from SEC filings — N-PORT, Form D, and Form ADV via EDGAR.
+      </div>
+      <div className="font-mono text-[10px] uppercase tracking-wider text-slate-400">
+        Fund Holders Intel
+      </div>
+    </div>
+  </footer>
+);
+
 const renderPersonWithLinkedIn = (name, personEnrichment) => {
   if (!name) return null;
   const enr = personEnrichment && personEnrichment[name];
@@ -68,9 +94,9 @@ const renderPersonWithLinkedIn = (name, personEnrichment) => {
     <>
       {name}
       <a href={enr.linkedin_url} target="_blank" rel="noopener noreferrer"
-         className="ml-1 text-[10px] text-blue-700 hover:text-blue-900"
-         title={enr.inferred_title ? `${enr.inferred_title} (LinkedIn)` : 'LinkedIn'}>
-        in↗
+         className="ml-1 text-[11px] text-slate-500 hover:text-slate-900 align-baseline"
+         title={enr.inferred_title ? `${enr.inferred_title} · LinkedIn` : 'LinkedIn profile'}>
+        <ExternalLinkIcon />
       </a>
     </>
   );
@@ -264,7 +290,7 @@ function AdviserDetailPanel({ adv, holdings, companyName }) {
               rel="noopener noreferrer"
               className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white transition-all"
             >
-              Website ↗
+              Website
             </a>
           )}
           {adv.crd && (
@@ -274,7 +300,7 @@ function AdviserDetailPanel({ adv, holdings, companyName }) {
               rel="noopener noreferrer"
               className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white transition-all"
             >
-              IAPD ↗
+              IAPD
             </a>
           )}
           {adv.form_adv_url && (
@@ -284,7 +310,7 @@ function AdviserDetailPanel({ adv, holdings, companyName }) {
               rel="noopener noreferrer"
               className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white transition-all"
             >
-              Form ADV ↗
+              Form ADV
             </a>
           )}
           {adv.linkedin_company_url && (
@@ -294,7 +320,7 @@ function AdviserDetailPanel({ adv, holdings, companyName }) {
               rel="noopener noreferrer"
               className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white transition-all"
             >
-              LinkedIn ↗
+              LinkedIn
             </a>
           )}
         </div>
@@ -513,9 +539,9 @@ function AdviserDetailPanel({ adv, holdings, companyName }) {
                           {fmtDate(h._date)}
                           {url && (
                             <a href={url} target="_blank" rel="noopener noreferrer"
-                               className="ml-1.5 text-slate-500 hover:text-slate-900"
+                               className="ml-1.5 text-slate-400 hover:text-slate-900"
                                title={`EDGAR filing ${h.accession_number}`}>
-                              ↗
+                              <ExternalLinkIcon />
                             </a>
                           )}
                         </div>
@@ -909,7 +935,7 @@ function NportTable({ rows, slug, audit }) {
           <a href={url} target="_blank" rel="noopener noreferrer"
              className="text-slate-500 hover:text-slate-900"
              title={`EDGAR filing ${r.accession_number}`}>
-            EDGAR ↗
+            EDGAR
           </a>
         );
       },
@@ -924,7 +950,7 @@ function NportTable({ rows, slug, audit }) {
       columns={columns}
       csvUrl={csvUrl}
       defaultSort={{ key: 'value_usd', direction: 'desc' }}
-      emptyText="No private-era N-PORT holdings."
+      emptyText="No N-PORT holdings to display."
     />
   );
 }
@@ -965,12 +991,6 @@ function FormDTable({ rows, slug, audit }) {
       render: r => fmtDate(r.filing_date),
     },
     {
-      key: 'adviser_method',
-      label: 'Method',
-      accessor: r => r.adviser_method,
-      cellClassName: 'text-xs text-slate-500',
-    },
-    {
       key: 'source',
       label: 'Source',
       sortable: false,
@@ -983,7 +1003,7 @@ function FormDTable({ rows, slug, audit }) {
           <a href={url} target="_blank" rel="noopener noreferrer"
              className="text-slate-500 hover:text-slate-900"
              title={`EDGAR filing ${r.accession_number}`}>
-            EDGAR ↗
+            EDGAR
           </a>
         );
       },
@@ -998,7 +1018,7 @@ function FormDTable({ rows, slug, audit }) {
       columns={columns}
       csvUrl={csvUrl}
       defaultSort={{ key: 'value_usd', direction: 'desc' }}
-      emptyText="No private-era Form D pooled-vehicle filings."
+      emptyText="No Form D pooled-vehicle filings to display."
     />
   );
 }
@@ -1106,7 +1126,7 @@ function UnifiedFundsPane({ nportHolders, formdHolders, slug, audit }) {
     {
       key: 'status',
       label: 'Status',
-      accessor: r => r.status || r.adviser_method || '',
+      accessor: r => r.status || '',
       cellClassName: 'text-xs',
       render: r => {
         if (r._src === 'N-PORT' && r.status) {
@@ -1115,9 +1135,6 @@ function UnifiedFundsPane({ nportHolders, formdHolders, slug, audit }) {
               {fmtStatus(r.status)}
             </span>
           );
-        }
-        if (r._src === 'Form D' && r.adviser_method) {
-          return <span className="text-slate-500">{r.adviser_method}</span>;
         }
         return null;
       },
@@ -1135,7 +1152,7 @@ function UnifiedFundsPane({ nportHolders, formdHolders, slug, audit }) {
           <a href={url} target="_blank" rel="noopener noreferrer"
              className="text-slate-500 hover:text-slate-900"
              title={`EDGAR filing ${r.accession_number}`}>
-            EDGAR ↗
+            EDGAR
           </a>
         );
       },
@@ -1176,7 +1193,7 @@ function UnifiedFundsPane({ nportHolders, formdHolders, slug, audit }) {
               target="_blank" rel="noopener noreferrer"
               className="mt-2 inline-block text-xs text-slate-600 hover:text-slate-900 underline"
             >
-              View full filing on EDGAR ↗
+              View full filing on EDGAR
             </a>
           )}
         </div>
@@ -1195,19 +1212,13 @@ function UnifiedFundsPane({ nportHolders, formdHolders, slug, audit }) {
                 <dd className="font-mono text-slate-700">{row.adviser_crd}</dd>
               </React.Fragment>
             )}
-            {row.adviser_method && (
-              <React.Fragment>
-                <dt className="text-slate-500">Match method</dt>
-                <dd className="text-slate-700">{row.adviser_method}</dd>
-              </React.Fragment>
-            )}
           </dl>
           {row.adviser_crd && (
             <a
               href={`/intel/adviser/${encodeURIComponent(row.adviser_crd)}`}
               className="mt-2 inline-block text-xs text-slate-600 hover:text-slate-900 underline"
             >
-              View full adviser profile (people, contacts) →
+              View full adviser profile →
             </a>
           )}
         </div>
@@ -1299,19 +1310,50 @@ function IntelPage({ slug }) {
       .catch((e) => setError(e.message));
   }, [slug, auditMode]);
 
+  // Pretty company name from the URL slug while we wait for data —
+  // avoids exposing the raw slug ('anthropic-ai-inc') to the user.
+  const prettySlug = slug
+    .replace(/[-_]/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+
+  // Dynamic browser tab title — "Anthropic · Fund Holders Intel" once
+  // data loads, falls back to pretty-slug while loading.
+  useEffectI(() => {
+    const name = (data && data.company && data.company.display_name) || prettySlug;
+    document.title = `${name} · Fund Holders Intel`;
+  }, [data, prettySlug]);
+
   if (error) {
     return (
-      <div className="max-w-2xl mx-auto p-6">
-        <h1 className="font-serif text-2xl font-semibold mb-2 text-slate-900">Error loading {slug}</h1>
-        <p className="text-sm text-red-700">{error}</p>
+      <div className="max-w-2xl mx-auto px-6 py-16">
+        <h1 className="font-serif text-3xl font-semibold mb-3 text-slate-900">
+          Couldn't load {prettySlug}
+        </h1>
+        <p className="text-sm text-slate-600 mb-4">{error}</p>
+        <a href="/intel/search" className="text-sm text-slate-700 underline hover:text-slate-900">
+          ← Back to search
+        </a>
       </div>
     );
   }
 
   if (!data) {
     return (
-      <div className="max-w-2xl mx-auto p-6">
-        <p className="text-sm text-slate-500">Loading {slug}...</p>
+      <div className="max-w-7xl mx-auto px-6 py-8">
+        <div className="animate-pulse">
+          <div className="h-9 w-64 bg-slate-200 rounded mb-3"></div>
+          <div className="h-3 w-48 bg-slate-100 rounded mb-12"></div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+            {[0,1,2,3].map(i => (
+              <div key={i} className="rounded-lg border border-slate-200 bg-white p-4">
+                <div className="h-2 w-20 bg-slate-100 rounded mb-3"></div>
+                <div className="h-7 w-16 bg-slate-200 rounded"></div>
+              </div>
+            ))}
+          </div>
+          <div className="h-5 w-40 bg-slate-200 rounded mb-4"></div>
+          <div className="h-72 rounded-lg bg-slate-100"></div>
+        </div>
       </div>
     );
   }
@@ -1353,14 +1395,20 @@ function IntelPage({ slug }) {
         </div>
       </header>
 
-      {/* Lifecycle banner */}
+      {/* Status banner — shown only when the company is no longer private */}
       {!isPrivate && (
-        <div className="mb-6 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm">
-          <strong className="font-semibold">Lifecycle note: </strong>
-          {company.display_name} is currently <strong>{fmtStatus(lifecycle.current_status)}</strong>
-          {lifecycle.last_event_date && ` as of ${fmtDate(lifecycle.last_event_date)}`}.
-          {!auditMode && ` Showing private-era holdings only — public-era rows are excluded.`}
-          {auditMode && ` AUDIT MODE: all holdings shown regardless of era.`}
+        <div className="mb-6 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm flex items-start gap-2">
+          <svg className="w-4 h-4 mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <div>
+            {company.display_name} is now <strong>{fmtStatus(lifecycle.current_status)}</strong>
+            {lifecycle.last_event_date && ` as of ${fmtDate(lifecycle.last_event_date)}`}.
+            {!auditMode && ` Holdings shown are from while the company was private.`}
+            {auditMode && ` Showing all filings, including those after the company went public.`}
+          </div>
         </div>
       )}
 
@@ -1370,7 +1418,7 @@ function IntelPage({ slug }) {
           <div className="text-xs text-slate-500 uppercase tracking-wide">N-PORT holdings</div>
           <div className="font-serif text-2xl font-semibold text-slate-900 mt-1">{fmtInt(summary.eligible_nport)}</div>
           {summary.total_nport !== summary.eligible_nport && (
-            <div className="text-xs text-slate-500 mt-0.5">{fmtInt(summary.total_nport - summary.eligible_nport)} public-era hidden</div>
+            <div className="text-xs text-slate-500 mt-0.5">{fmtInt(summary.total_nport - summary.eligible_nport)} post-IPO filings hidden</div>
           )}
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -1391,7 +1439,7 @@ function IntelPage({ slug }) {
       <div className="mb-6 flex items-center justify-end text-xs">
         <label className="flex items-center gap-2 text-slate-600 cursor-pointer">
           <input type="checkbox" checked={auditMode} onChange={(e) => setAuditMode(e.target.checked)} className="rounded border-slate-300" />
-          Show audit mode (include public-era rows)
+          Include post-IPO filings
         </label>
       </div>
 
@@ -1427,9 +1475,8 @@ function IntelPage({ slug }) {
       )}
 
       {/* Footer */}
-      <footer className="mt-12 pt-6 border-t border-slate-200 text-xs text-slate-500">
-        Fund Holders Intel V1.1 • Lifecycle-aware • Source: N-PORT, Form D, ADV via SEC EDGAR
-      </footer>
+      <IntelFooter />
+
     </div>
   );
 }
@@ -1457,15 +1504,32 @@ function AdviserPage({ crd }) {
 
   if (error) {
     return (
-      <div className="max-w-5xl mx-auto px-6 py-10">
-        <a href="/" className="text-sm text-slate-500 hover:text-slate-900">← Back</a>
-        <h1 className="font-serif text-2xl font-semibold text-slate-900 mt-4">CRD {crd}</h1>
-        <p className="mt-3 text-sm text-red-700">{error}</p>
+      <div className="max-w-2xl mx-auto px-6 py-16">
+        <a href="/intel/search" className="text-sm text-slate-500 hover:text-slate-900">← Back to search</a>
+        <h1 className="font-serif text-3xl font-semibold text-slate-900 mt-4 mb-3">Couldn't load adviser</h1>
+        <p className="text-sm text-slate-600">{error}</p>
       </div>
     );
   }
   if (!data) {
-    return <div className="max-w-5xl mx-auto px-6 py-10 text-sm text-slate-400">Loading…</div>;
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-10">
+        <div className="animate-pulse">
+          <div className="h-3 w-24 bg-slate-100 rounded mb-6"></div>
+          <div className="h-9 w-80 bg-slate-200 rounded mb-3"></div>
+          <div className="h-3 w-40 bg-slate-100 rounded mb-10"></div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+            {[0,1,2,3].map(i => (
+              <div key={i} className="rounded-lg border border-slate-200 bg-white p-4">
+                <div className="h-2 w-20 bg-slate-100 rounded mb-3"></div>
+                <div className="h-7 w-16 bg-slate-200 rounded"></div>
+              </div>
+            ))}
+          </div>
+          <div className="h-64 rounded-lg bg-slate-100"></div>
+        </div>
+      </div>
+    );
   }
 
   const { adviser, summary, companies, service_providers: serviceProviders } = data;
@@ -1540,23 +1604,23 @@ function AdviserPage({ crd }) {
           {adviser.website && (
             <a href={normalizeHref(adviser.website)} target="_blank" rel="noopener noreferrer"
                className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
-              Website ↗
+              Website
             </a>
           )}
           <a href={`https://adviserinfo.sec.gov/firm/summary/${adviser.crd}`} target="_blank" rel="noopener noreferrer"
              className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
-            IAPD ↗
+            IAPD
           </a>
           {adviser.form_adv_url && (
             <a href={adviser.form_adv_url} target="_blank" rel="noopener noreferrer"
                className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
-              Form ADV ↗
+              Form ADV
             </a>
           )}
           {adviser.linkedin_company_url && (
             <a href={adviser.linkedin_company_url} target="_blank" rel="noopener noreferrer"
                className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
-              LinkedIn ↗
+              LinkedIn
             </a>
           )}
         </div>
@@ -1586,7 +1650,7 @@ function AdviserPage({ crd }) {
       <div className="flex justify-end mb-3">
         <label className="text-xs text-slate-500 flex items-center gap-2">
           <input type="checkbox" checked={audit} onChange={e => setAudit(e.target.checked)} />
-          Show audit mode (include public-era rows)
+          Include post-IPO filings
         </label>
       </div>
 
@@ -1754,14 +1818,12 @@ function AdviserPage({ crd }) {
             rows={companies}
             columns={companyColumns}
             defaultSort={{ key: 'total_value_usd', direction: 'desc' }}
-            emptyText="No private-era holdings recorded for this adviser."
+            emptyText="No holdings recorded for this adviser."
           />
         </div>
       </section>
 
-      <footer className="mt-12 pt-6 border-t border-slate-200 text-xs text-slate-500">
-        Fund Holders Intel V1.1 • Adviser drill-down • Click a company name to see all its holders.
-      </footer>
+      <IntelFooter />
     </div>
   );
 }
@@ -1785,15 +1847,32 @@ function FundPage({ accession }) {
 
   if (error) {
     return (
-      <div className="max-w-5xl mx-auto px-6 py-10">
-        <a href="/" className="text-sm text-slate-500 hover:text-slate-900">← Back</a>
-        <h1 className="font-serif text-2xl font-semibold text-slate-900 mt-4">Accession {accession}</h1>
-        <p className="mt-3 text-sm text-red-700">{error}</p>
+      <div className="max-w-2xl mx-auto px-6 py-16">
+        <a href="/intel/search" className="text-sm text-slate-500 hover:text-slate-900">← Back to search</a>
+        <h1 className="font-serif text-3xl font-semibold text-slate-900 mt-4 mb-3">Couldn't load filing</h1>
+        <p className="text-sm text-slate-600">{error}</p>
       </div>
     );
   }
   if (!data) {
-    return <div className="max-w-5xl mx-auto px-6 py-10 text-sm text-slate-400">Loading…</div>;
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-10">
+        <div className="animate-pulse">
+          <div className="h-3 w-24 bg-slate-100 rounded mb-6"></div>
+          <div className="h-9 w-96 bg-slate-200 rounded mb-3"></div>
+          <div className="h-3 w-60 bg-slate-100 rounded mb-10"></div>
+          <div className="grid grid-cols-3 gap-4 mb-10">
+            {[0,1,2].map(i => (
+              <div key={i} className="rounded-lg border border-slate-200 bg-white p-4">
+                <div className="h-2 w-20 bg-slate-100 rounded mb-3"></div>
+                <div className="h-6 w-24 bg-slate-200 rounded"></div>
+              </div>
+            ))}
+          </div>
+          <div className="h-64 rounded-lg bg-slate-100"></div>
+        </div>
+      </div>
+    );
   }
 
   const { filing, related_parties: relatedParties, adviser, tracked_companies: trackedCompanies, edgar_url: edgarUrl } = data;
@@ -1831,7 +1910,7 @@ function FundPage({ accession }) {
           {edgarUrl && (
             <a href={edgarUrl} target="_blank" rel="noopener noreferrer"
                className="ml-3 text-slate-600 hover:text-slate-900 underline">
-              EDGAR ↗
+              EDGAR
             </a>
           )}
         </div>
@@ -1921,7 +2000,7 @@ function FundPage({ accession }) {
                       {adviser.team_members.slice(0, 5).map((m, i) => (
                         <li key={i} className="text-[12px]">
                           <span className="text-slate-900 font-medium">{m.name}</span>
-                          {m.linkedin && <a href={m.linkedin} target="_blank" rel="noopener noreferrer" className="ml-1.5 text-[10px] text-blue-700 hover:text-blue-900">in↗</a>}
+                          {m.linkedin && <a href={m.linkedin} target="_blank" rel="noopener noreferrer" className="ml-1.5 text-slate-400 hover:text-slate-900" title="LinkedIn profile"><ExternalLinkIcon /></a>}
                           {m.email && <a href={`mailto:${m.email}`} className="ml-2 font-mono text-[10px] text-slate-600 hover:text-slate-900">{m.email}</a>}
                         </li>
                       ))}
@@ -1953,17 +2032,15 @@ function FundPage({ accession }) {
               <h2 className="font-serif text-base font-semibold text-slate-900">Filings</h2>
             </div>
             <ul className="px-4 py-3 space-y-1 text-sm">
-              {edgarUrl && <li><a href={edgarUrl} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between text-slate-700 hover:text-slate-900 py-1.5"><span>Form D archive</span><span className="text-xs text-slate-400">EDGAR ↗</span></a></li>}
-              {adviser && adviser.form_adv_url && <li><a href={adviser.form_adv_url} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between text-slate-700 hover:text-slate-900 py-1.5"><span>Adviser Form ADV</span><span className="text-xs text-slate-400">SEC ↗</span></a></li>}
-              {adviser && <li><a href={`https://adviserinfo.sec.gov/firm/summary/${adviser.crd}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between text-slate-700 hover:text-slate-900 py-1.5"><span>Adviser IAPD</span><span className="text-xs text-slate-400">SEC ↗</span></a></li>}
+              {edgarUrl && <li><a href={edgarUrl} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between text-slate-700 hover:text-slate-900 py-1.5"><span>Form D archive</span><span className="text-xs text-slate-400">EDGAR</span></a></li>}
+              {adviser && adviser.form_adv_url && <li><a href={adviser.form_adv_url} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between text-slate-700 hover:text-slate-900 py-1.5"><span>Adviser Form ADV</span><span className="text-xs text-slate-400">SEC</span></a></li>}
+              {adviser && <li><a href={`https://adviserinfo.sec.gov/firm/summary/${adviser.crd}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between text-slate-700 hover:text-slate-900 py-1.5"><span>Adviser IAPD</span><span className="text-xs text-slate-400">SEC</span></a></li>}
             </ul>
           </section>
         </div>
       </div>
 
-      <footer className="mt-12 pt-6 border-t border-slate-200 text-xs text-slate-500">
-        Fund Holders Intel V1.2 • SPV detail • Form D source: SEC EDGAR
-      </footer>
+      <IntelFooter />
     </div>
   );
 }
