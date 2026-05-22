@@ -839,7 +839,7 @@ function NportTable({ rows, slug, audit }) {
       cellClassName: 'text-slate-900',
       render: r => r.adviser_name && r.adviser_crd
         ? <a href={`/intel/adviser/${encodeURIComponent(r.adviser_crd)}`} className="text-slate-900 hover:text-slate-700 hover:underline">{r.adviser_name}</a>
-        : (r.adviser_name || <span className="text-slate-400 italic">unidentified</span>),
+        : (r.adviser_name || <span className="text-slate-300">—</span>),
     },
     {
       key: 'value_usd',
@@ -918,7 +918,7 @@ function FormDTable({ rows, slug, audit }) {
       cellClassName: 'text-slate-900',
       render: r => r.adviser_name && r.adviser_crd
         ? <a href={`/intel/adviser/${encodeURIComponent(r.adviser_crd)}`} className="text-slate-900 hover:text-slate-700 hover:underline">{r.adviser_name}</a>
-        : (r.adviser_name || <span className="text-slate-400 italic">unbridged</span>),
+        : (r.adviser_name || <span className="text-slate-300">—</span>),
     },
     {
       key: 'value_usd',
