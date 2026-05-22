@@ -119,18 +119,114 @@ INSTITUTIONAL_PHRASES = (
     'annuity association',
 )
 
-# Centralized nickname table. Previously duplicated and divergent between
-# _name_variants() and _name_tokens_match() (Codex 2026-05-20). Keep one
-# source of truth. Lower-case keys/values for case-insensitive lookups.
-SHORT_FIRST_NAMES: dict[str, str] = {
-    'edward': 'ed', 'robert': 'bob', 'richard': 'rick', 'william': 'bill',
-    'michael': 'mike', 'christopher': 'chris', 'daniel': 'dan',
-    'anthony': 'tony', 'james': 'jim', 'joseph': 'joe', 'stephen': 'steve',
-    'steven': 'steve', 'thomas': 'tom', 'charles': 'charlie',
-    'matthew': 'matt', 'patrick': 'pat', 'andrew': 'andy',
-    'benjamin': 'ben', 'nicholas': 'nick', 'jonathan': 'jon',
-    'kenneth': 'ken', 'samuel': 'sam', 'theodore': 'ted',
+# Centralized nickname table. Lower-case keys; values are lists of
+# common short/nickname forms. Used by _first_name_variants() to
+# generate match candidates against snippets and URL slugs.
+#
+# Coverage: top ~50 male + female professional names. The long-tail is
+# handled by the prefix-fuzzy fallback in _first_name_variants (any
+# 3-char prefix of a 4+ char first name is also tried), so this table
+# only needs to cover NON-prefix nicknames (Robert→Bob, Margaret→Peggy)
+# and the most common prefix nicknames where we want explicit support.
+SHORT_FIRST_NAMES: dict[str, list[str]] = {
+    # Male — common
+    'alexander': ['alex', 'al'],
+    'andrew': ['andy', 'drew'],
+    'anthony': ['tony'],
+    'benjamin': ['ben'],
+    'charles': ['charlie', 'chuck', 'chas'],
+    'christopher': ['chris'],
+    'daniel': ['dan', 'danny'],
+    'david': ['dave'],
+    'edward': ['ed', 'eddie', 'ted', 'ned'],
+    'frederick': ['fred', 'freddie'],
+    'gerald': ['jerry', 'gerry'],
+    'henry': ['hank', 'harry'],
+    'james': ['jim', 'jimmy', 'jamie'],
+    'jeffrey': ['jeff'],
+    'joseph': ['joe', 'joey'],
+    'jonathan': ['jon', 'jonny'],
+    'kenneth': ['ken', 'kenny'],
+    'lawrence': ['larry', 'lance'],
+    'matthew': ['matt'],
+    'michael': ['mike', 'mick'],
+    'nicholas': ['nick'],
+    'patrick': ['pat'],
+    'peter': ['pete'],
+    'philip': ['phil'],
+    'richard': ['rich', 'dick', 'rick', 'ricky'],
+    'robert': ['rob', 'bob', 'bobby', 'rocky'],
+    'samuel': ['sam', 'sammy'],
+    'stephen': ['steve', 'stevie'],
+    'steven': ['steve', 'stevie'],
+    'theodore': ['ted', 'teddy', 'theo'],
+    'thomas': ['tom', 'tommy'],
+    'timothy': ['tim'],
+    'william': ['will', 'bill', 'billy', 'liam'],
+    # Female — common
+    'alexandra': ['alex', 'sandy', 'lexie'],
+    'barbara': ['barb', 'babs'],
+    'catherine': ['cathy', 'kate', 'katie', 'kat', 'cat'],
+    'katherine': ['kate', 'katie', 'kathy', 'kat'],
+    'kathryn': ['kate', 'katie', 'kathy'],
+    'christine': ['chris', 'chrissy'],
+    'christina': ['chris', 'christy', 'tina'],
+    'deborah': ['deb', 'debbie', 'debby'],
+    'elizabeth': ['liz', 'beth', 'eliza', 'lizzie', 'betsy', 'betty'],
+    'jacqueline': ['jackie', 'jacqui'],
+    'jane': ['janie'],
+    'janet': ['jan'],
+    'jennifer': ['jen', 'jenny', 'jenn'],
+    'judith': ['judy'],
+    'kimberly': ['kim'],
+    'laura': ['laurie'],
+    'lauren': ['laurie'],
+    'margaret': ['maggie', 'meg', 'peggy', 'margie'],
+    'mary': ['molly', 'polly'],
+    'megan': ['meg'],
+    'meredith': ['merry'],
+    'nancy': ['nan'],
+    'nicole': ['nikki', 'nikky'],
+    'patricia': ['pat', 'patty', 'tricia', 'patsy'],
+    'rebecca': ['becky', 'becca'],
+    'sarah': ['sally'],
+    'stephanie': ['steph', 'stephie'],
+    'susan': ['sue', 'susie'],
+    'theresa': ['terry', 'tess'],
+    'victoria': ['vicky', 'tori'],
+    'virginia': ['ginny', 'ginger'],
 }
+
+
+def _first_name_variants(first_name: str) -> list[str]:
+    """Return lower-case candidate forms of a first name to check against
+    snippets and URL slugs.
+
+    Three layers:
+      1. The original (lower-cased)
+      2. Curated nickname table (SHORT_FIRST_NAMES) — for non-prefix
+         nicknames (Robert→Bob, Margaret→Peggy)
+      3. Prefix-fuzzy fallback — for 4+ char first names, accept any
+         3, 4, 5 char prefix. Catches Jennifer→Jen, Katherine→Kat,
+         David→Dav, etc. that aren't in the curated table.
+
+    Combined with the last-name word-boundary requirement, prefix
+    matching keeps precision high (a 3-char prefix alone wouldn't be
+    enough, but prefix + matching last name is).
+    """
+    if not first_name:
+        return []
+    fn = first_name.lower().strip()
+    out = [fn]
+    if fn in SHORT_FIRST_NAMES:
+        out.extend(SHORT_FIRST_NAMES[fn])
+    if len(fn) >= 4:
+        for n in (3, 4, 5):
+            if n < len(fn):
+                p = fn[:n]
+                if p not in out:
+                    out.append(p)
+    return out
 
 # Generic firm-name tokens that shouldn't alone upgrade snippet match to
 # 'high' confidence. Codex 2026-05-20: 'any token >3 chars' was matching
@@ -295,8 +391,12 @@ LINKEDIN_PROFILE_RE = re.compile(r"^https?://(?:[a-z]+\.)?linkedin\.com/in/[A-Za
 
 def _name_variants(person_name: str) -> list[str]:
     """Generate likely-LinkedIn name forms from a Form ADV full name.
-    'Edward Douglas Perks' -> ['Edward Douglas Perks', 'Edward Perks', 'Ed Perks']
-    'Robert W. Sharps'     -> ['Robert W. Sharps', 'Robert Sharps', 'Bob Sharps']
+    'Edward Douglas Perks'   -> ['Edward Douglas Perks', 'Edward Perks', 'Ed Perks']
+    'Jennifer Benson Dardis' -> ['Jennifer Benson Dardis', 'Jennifer Dardis',
+                                  'Jen Dardis', 'Jenn Dardis']
+
+    Reuses the centralized SHORT_FIRST_NAMES table + prefix-fuzzy via
+    _first_name_variants so every callable-name variant is tried.
     """
     if not person_name:
         return []
@@ -306,17 +406,14 @@ def _name_variants(person_name: str) -> list[str]:
     first = tokens[0]
     last = tokens[-1]
     variants = [person_name, f"{first} {last}"]
-    # Common short-form first names (very limited; expand as needed).
-    short_first = {
-        "Edward": "Ed", "Robert": "Bob", "Richard": "Rick", "William": "Bill",
-        "Michael": "Mike", "Christopher": "Chris", "Daniel": "Dan",
-        "Anthony": "Tony", "James": "Jim", "Joseph": "Joe", "Stephen": "Steve",
-        "Steven": "Steve", "Thomas": "Tom", "Charles": "Charlie",
-        "Matthew": "Matt", "Patrick": "Pat", "Andrew": "Andy",
-        "Benjamin": "Ben", "Nicholas": "Nick", "Jonathan": "Jon",
-    }
-    if first in short_first:
-        variants.append(f"{short_first[first]} {last}")
+    # Add each first-name variant (curated nicknames + prefix-fuzzy)
+    for v in _first_name_variants(first):
+        if v == first.lower():
+            continue
+        # Re-titlecase the variant for query construction (Brave/Google
+        # ignore case but readable logs are nice)
+        cand = f"{v.title()} {last}"
+        variants.append(cand)
     return list(dict.fromkeys(variants))  # dedupe, preserve order
 
 
@@ -339,11 +436,15 @@ def _url_slug_matches_name(url: str, person_name: str) -> bool:
 
 def _name_tokens_match(snippet: str, person_name: str) -> bool:
     """Person match: snippet contains the last name AND (first name OR
-    nickname-form) as WORD-BOUNDARY matches, not substring (Codex 2026-05-20).
-    Survives 'Ed Perks CFA' vs 'Edward Douglas Perks' via SHORT_FIRST_NAMES
-    nickname table.
+    nickname-form OR 3+-char first-name prefix) as WORD-BOUNDARY matches.
 
-    Word-boundary is critical so 'rob' doesn't match 'robust' or 'roberta'.
+    Combines:
+      - exact first name
+      - curated nickname forms (SHORT_FIRST_NAMES — Jennifer→Jen)
+      - prefix-fuzzy fallback (David→Dav, Katherine→Kat) via
+        _first_name_variants
+
+    Word-boundary anchored so 'rob' doesn't match 'robust' / 'roberta'.
     """
     if not snippet or not person_name:
         return False
@@ -354,9 +455,7 @@ def _name_tokens_match(snippet: str, person_name: str) -> bool:
     if len(tokens) < 2:
         return bool(re.search(r"\b" + re.escape(tokens[0]) + r"\b", s))
     last = tokens[-1]
-    first_candidates = [tokens[0]]
-    if tokens[0] in SHORT_FIRST_NAMES:
-        first_candidates.append(SHORT_FIRST_NAMES[tokens[0]])
+    first_candidates = _first_name_variants(tokens[0])
     last_hit = bool(re.search(r"\b" + re.escape(last) + r"\b", s))
     first_hit = any(
         re.search(r"\b" + re.escape(fc) + r"\b", s) for fc in first_candidates
@@ -711,12 +810,18 @@ def main(argv: Optional[list[str]] = None) -> int:
                 print(f"  · {person['name']:30s} ({person['role']:10s} @ {person['firm'][:30]}) -> no match")
 
             if args.execute and result.get("linkedin_url"):
-                # v3: tighten confidence — promote to 'high' ONLY when the
-                # evidence snippet contains a firm-name token AND the URL
-                # slug shares a name token. Demote 'medium' rows that don't
-                # have firm-token evidence to 'low' (won't surface in the
-                # high-only view). This is the Codex 2026-05-22 precision
-                # gate.
+                # v3 confidence gate (Codex 2026-05-22):
+                #   - 'high'   = strong identity in URL slug OR firm-token in snippet
+                #   - 'medium' = neither strong-slug nor firm-snippet (won't surface)
+                #   - 'low'    = nothing useful (definitely doesn't surface)
+                #
+                # Strong identity in URL slug = the slug contains BOTH the
+                # last name AND a first-name variant as separate tokens
+                # (e.g., 'jen-benson-dardis' for Jennifer Benson Dardis).
+                # When the search query was already scoped to the firm and
+                # the slug structurally identifies the person, that's
+                # enough — even when the snippet itself doesn't mention
+                # the firm (e.g., LinkedIn shows location not employer).
                 raw_hit = result.get("raw_hit") or {}
                 ev_url = raw_hit.get("url") or result["linkedin_url"]
                 ev_snippet = ((raw_hit.get("snippet") or "") + " " +
@@ -733,11 +838,26 @@ def main(argv: Optional[list[str]] = None) -> int:
                         for t in firm_short.split()
                         if len(t) > 3
                     )
+                # Strong-slug check: slug has last name AND first-variant as
+                # separate hyphen/underscore tokens
+                strong_slug = False
+                slug_m = re.search(r'linkedin\.com/(?:in|pub)/([^/?#]+)', ev_url, re.IGNORECASE)
+                if slug_m:
+                    slug_tokens = set(t.lower() for t in re.split(r'[-_]', slug_m.group(1)) if t)
+                    name_tokens = person["name"].lower().split()
+                    if len(name_tokens) >= 2:
+                        last = name_tokens[-1]
+                        first_vars = _first_name_variants(name_tokens[0])
+                        last_in_slug = last in slug_tokens
+                        first_in_slug = any(v in slug_tokens for v in first_vars)
+                        strong_slug = last_in_slug and first_in_slug
+
                 gated_confidence = result["confidence"]
-                if gated_confidence == "medium" and not firm_tokens_check:
-                    gated_confidence = "low"
-                if gated_confidence == "high" and not firm_tokens_check:
-                    gated_confidence = "medium"
+                if gated_confidence in ("medium", "high"):
+                    if firm_tokens_check or strong_slug:
+                        gated_confidence = "high"
+                    else:
+                        gated_confidence = "low"
 
                 write_enrichment_row(nport, {
                     "adviser_crd": person["crd"],
