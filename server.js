@@ -1242,38 +1242,47 @@ app.get('/api/funds/new-managers', async (req, res) => {
     const defaultStartDate = startDate || new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     console.log(`[Gemini] Fetching new managers from ${defaultStartDate} to ${endDate || 'now'}, fundType: ${fundType || 'all'}, state: ${state || 'all'}, query: ${query || 'none'}`);
 
-    // Use paginated fetch to get all results (Supabase has 1000 row limit)
-    const data = await fetchAllResultsPaginated((from, to) => {
+    // EMERGENCY FIX 2026-05-22: form_d_filings has grown to ~330K rows and
+    // OFFSET pagination on this table now hits Postgres statement_timeout
+    // (Supabase error 57014: "canceling statement due to statement timeout").
+    // Per MEMORY.md: "NEVER use OFFSET pagination for large tables (>50k rows)."
+    // Converted to keyset pagination on the indexed `id` column.
+    const data = [];
+    const BATCH_SIZE = 1000;
+    let lastId = 0;
+    while (true) {
       let q = formdClient
         .from('form_d_filings')
         .select('*')
-        .range(from, to);
+        .gt('id', lastId)
+        .order('id', { ascending: true })
+        .limit(BATCH_SIZE);
 
-      // If query provided, search entityname; otherwise filter by "a series of"
       if (query) {
         q = q.ilike('entityname', `%${query}%`);
       } else {
         q = q.ilike('entityname', '%a series of%');
       }
 
-      // Exclude amendments - only show original Form D filings (not D/A)
       q = q.neq('isamendment', 'true');
-
       // Hard scope gate: only pooled-investment-fund issuers.
-      // industrygrouptype is essentially 100% populated; this drops operating-co
-      // Reg D, real-estate syndications, biotech raises, etc. that should never
-      // appear in a fund-manager view. Verified: POC1 (.poc-stress-test) showed 0
-      // NULL values on this column in 2025+ data.
       q = q.eq('industrygrouptype', 'Pooled Investment Fund');
-
-      // Always apply date filter (default to last 12 months for performance)
       q = q.gte('filing_date', defaultStartDate);
       if (endDate) q = q.lte('filing_date', endDate);
       if (fundType) q = q.ilike('investmentfundtype', `%${fundType}%`);
       if (state) q = q.eq('stateorcountry', state);
 
-      return q;
-    });
+      const { data: batch, error } = await q;
+      if (error) {
+        console.error(`[new-managers] keyset fetch error at lastId=${lastId}:`, error.message);
+        break;
+      }
+      if (!batch || batch.length === 0) break;
+      data.push(...batch);
+      lastId = batch[batch.length - 1].id;
+      console.log(`  Keyset fetched ${batch.length} rows (lastId now ${lastId}, total ${data.length})`);
+      if (batch.length < BATCH_SIZE) break;
+    }
 
     console.log(`  Total filings fetched: ${data.length}`);
 
