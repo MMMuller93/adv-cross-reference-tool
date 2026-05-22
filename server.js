@@ -421,6 +421,12 @@ async function getAdviserIndex() {
     });
     const advisersByNameExact = {};
     const advisersByNamePrefix = [];
+    // Inverted token index: distinctive-token → Set of indexes into advisersByNamePrefix.
+    // Lets variant-laddered matcher narrow from 57K candidates to ~5-20 per variant
+    // (added 2026-05-22 after the variant-ladder hit 400M comparisons / request).
+    const { distinctiveTokens } = require('./lib/name_matcher');
+    const tokenToAdvIdx = new Map();  // token (string) → Set<number>
+
     let activeCount = 0;
     let inactiveCount = 0;
     const isAdviserActive = (adv) => adv.aum_2023 || adv.aum_2024 || adv.aum_2025 || adv.aum_2026 || adv.total_aum;
@@ -431,11 +437,19 @@ async function getAdviserIndex() {
       if (isAdviserActive(adv)) activeCount++; else inactiveCount++;
       if (name1) advisersByNameExact[name1] = adv;
       if (name2) advisersByNameExact[name2] = adv;
+      const idx = advisersByNamePrefix.length;
       advisersByNamePrefix.push({ names: [name1, name2].filter(n => n), adv });
+      // Build inverted index from BOTH names' distinctive tokens
+      const tokens = new Set([...distinctiveTokens(name1), ...distinctiveTokens(name2)]);
+      for (const t of tokens) {
+        if (!tokenToAdvIdx.has(t)) tokenToAdvIdx.set(t, new Set());
+        tokenToAdvIdx.get(t).add(idx);
+      }
     }
     const built = {
       advisersByNameExact,
       advisersByNamePrefix,
+      tokenToAdvIdx,
       builtAt: now,
       count: advisersData.length,
       activeCount,
@@ -1380,6 +1394,8 @@ app.get('/api/funds/new-managers', async (req, res) => {
     const advIdx = await getAdviserIndex();
     const advisersByNameExact = advIdx.advisersByNameExact;
     const advisersByNamePrefix = advIdx.advisersByNamePrefix;
+    const tokenToAdvIdx = advIdx.tokenToAdvIdx;  // inverted token index for narrowed candidate lookup
+    const { distinctiveTokens: distinctiveTokensShared } = require('./lib/name_matcher');
     const isAdviserActive = (adv) => adv.aum_2023 || adv.aum_2024 || adv.aum_2025 || adv.aum_2026 || adv.total_aum;
     console.log(`  Using cached adviser index: ${advIdx.count} advisers (built ${Math.round((Date.now() - advIdx.builtAt)/1000)}s ago)`);
 
@@ -1448,9 +1464,33 @@ app.get('/api/funds/new-managers', async (req, res) => {
       for (const t of a) if (b.has(t) && !MATCH_STOPWORDS.has(t)) n++;
       return n;
     };
-    // Per-pair predicate: does this single adviser candidate match the
-    // (variant-derived) manager name? Same bidirectional token-subset rule as
-    // before — only the OUTER iteration changed.
+    // Per-pair predicate: bidirectional token-subset match against ONE candidate adviser.
+    // Used inside the inverted-index narrowed loop in tryAdviserMatch below.
+    const advPairMatches = (mgrTokens, mgrDist, name, nameIdx) => {
+      if (!name) return false;
+      const advTokens = rawTokens(name);
+      if (advTokens.size < 2) return false;
+      // Production bug 2026-05-11: short adviser_entity_legal_name values
+      // ("ANCHOR CAPITAL" — 2 tokens) are common prefixes across unrelated firms.
+      if (nameIdx === 1 && advTokens.size <= 2) return false;
+      if (sharedDistinctive(mgrTokens, advTokens) < 1) return false;
+      const advDist = distinctiveOf(advTokens);
+      // Direction A: adv ⊆ mgr
+      if (advTokens.size <= mgrTokens.size && [...advTokens].every(t => mgrTokens.has(t))) {
+        const mgrExtraDist = [...mgrDist].filter(t => !advDist.has(t));
+        if (mgrExtraDist.length === 0) return true;
+      }
+      // Direction B: mgr ⊆ adv
+      if (mgrTokens.size <= advTokens.size && [...mgrTokens].every(t => advTokens.has(t))) {
+        const advExtraDist = [...advDist].filter(t => !mgrDist.has(t));
+        if (advExtraDist.length === 0) return true;
+      }
+      return false;
+    };
+
+    // Inverted-index-narrowed candidate lookup. Reduces per-variant scan from
+    // O(57K advisers) to O(~5-20 token-overlapping candidates) — ~2000x speedup.
+    // Was the 2026-05-22 production-outage fix.
     const tryAdviserMatch = (variantName) => {
       const lowerName = variantName.toLowerCase();
       if (advisersByNameExact[lowerName]) {
@@ -1460,61 +1500,59 @@ app.get('/api/funds/new-managers', async (req, res) => {
       const mgrDist = distinctiveOf(mgrTokens);
       if (mgrTokens.size < 1) return null;
 
-      for (const { names, adv } of advisersByNamePrefix) {
+      // Use the SAME tokenization the index was built with (lib/name_matcher).
+      // Union the adviser indexes that share at least one distinctive token.
+      const variantDistinct = distinctiveTokensShared(variantName);
+      if (variantDistinct.size === 0) return null;
+      const candidateIdxs = new Set();
+      for (const tok of variantDistinct) {
+        const advSet = tokenToAdvIdx.get(tok);
+        if (advSet) for (const i of advSet) candidateIdxs.add(i);
+      }
+      if (candidateIdxs.size === 0) return null;
+
+      for (const i of candidateIdxs) {
+        const { names, adv } = advisersByNamePrefix[i];
         for (let nameIdx = 0; nameIdx < names.length; nameIdx++) {
-          const name = names[nameIdx];
-          if (!name) continue;
-          const advTokens = rawTokens(name);
-          if (advTokens.size < 2) continue;
-          // Production bug 2026-05-11: short adviser_entity_legal_name values
-          // like "ANCHOR CAPITAL" (2 tokens) are common prefixes across many
-          // unrelated firms. Skip legal_name matching when ≤2 raw tokens —
-          // adviser_name (the primary field) is more specific.
-          // names[0] = adviser_name, names[1] = adviser_entity_legal_name.
-          if (nameIdx === 1 && advTokens.size <= 2) continue;
-          if (sharedDistinctive(mgrTokens, advTokens) < 1) continue;
-          const advDist = distinctiveOf(advTokens);
-          // Direction A: adv ⊆ mgr (adviser name fully inside manager).
-          if (advTokens.size <= mgrTokens.size && [...advTokens].every(t => mgrTokens.has(t))) {
-            const mgrExtraDist = [...mgrDist].filter(t => !advDist.has(t));
-            if (mgrExtraDist.length === 0) return adv;
-          }
-          // Direction B: mgr ⊆ adv (manager name fully inside adviser).
-          if (mgrTokens.size <= advTokens.size && [...mgrTokens].every(t => advTokens.has(t))) {
-            const advExtraDist = [...advDist].filter(t => !mgrDist.has(t));
-            if (advExtraDist.length === 0) return adv;
+          if (advPairMatches(mgrTokens, mgrDist, names[nameIdx], nameIdx)) {
+            return adv;
           }
         }
       }
       return null;
     };
 
-    // Variant-laddered match (2026-05-18). Tries progressively shorter
-    // variants so manager-side tail tokens ("Series", "Master", "Opportunity",
-    // "Growth", "Holdings") that aren't in the SEC adviser_name don't block
-    // a match.
+    // Variant-laddered match — RESTORED 2026-05-22 with inverted-token-index.
+    // Tries progressively shorter name variants so manager-side tail tokens
+    // ("Series", "Master", "Opportunity", "Growth", "Holdings") that aren't in
+    // the SEC adviser_name don't block a match. Hash3-class fix.
     //
-    // Stricter CRD gate added 2026-05-19: once a variant produces a match,
-    // verify the shared distinctive token count with passesStricterCrdGate.
-    // Without this, a single-token variant like "TMS" can wrongly match
-    // "TMS Capital Management" (TMS Angels false-positive regression that
-    // the v3 enrichment pipeline already protects against).
-    // EMERGENCY REVERT 2026-05-22: variant-ladder iteration over 57K advisers
-    // × 1949 managers × ~4 variants caused >20s request times → production HTTP 000.
-    // Reverted to single-pass match (try parsedName only). Hash3-class shorter-variant
-    // matches will NOT resolve via this endpoint until the proper fix lands (token-
-    // inverted index on the adviser cache, ~30-45 min effort, queued as immediate
-    // follow-up). v3 enrichment + lib/adv_lookup.js searchAdvByName still do
-    // variant laddering — only this hot-path endpoint is reverted.
+    // Original variant-ladder (commit 3472334) became prohibitively slow as
+    // form_d_filings + advisers_enriched grew: 4 variants × 57K full-scan ×
+    // 1949 managers = ~400M comparisons. The inverted-token-index built in
+    // the adviser cache narrows each variant's candidate set to O(~5-20),
+    // making the variant ladder cheap.
+    //
+    // Stricter CRD gate (passesStricterCrdGate) rejects acronym-only false
+    // positives — e.g., "TMS" alone matching "TMS Capital Management" when
+    // the actual firm is "TMS Angels" (unrelated).
     const findAdviserMatch = (parsedName, opts = {}) => {
-      const adv = tryAdviserMatch(parsedName);
-      if (!adv) return null;
-      const gate = passesStricterCrdGate(
-        { found: true, adviser_name: adv.adviser_name },
-        parsedName,
-        { matchedVariant: parsedName, relatedNames: opts.relatedNames || null }
-      );
-      return gate.pass ? adv : null;
+      const variants = nameVariants.generateVariants(parsedName, { extraStripper: parseFundName });
+      const tries = [parsedName, ...variants];
+      const seen = new Set();
+      for (const v of tries) {
+        if (!v || seen.has(v.toLowerCase())) continue;
+        seen.add(v.toLowerCase());
+        const adv = tryAdviserMatch(v);
+        if (!adv) continue;
+        const gate = passesStricterCrdGate(
+          { found: true, adviser_name: adv.adviser_name },
+          parsedName,
+          { matchedVariant: v, relatedNames: opts.relatedNames || null }
+        );
+        if (gate.pass) return adv;
+      }
+      return null;
     };
 
     // Process all managers in memory (no API calls)
