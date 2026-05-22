@@ -651,10 +651,11 @@ function CollapsibleSection({ title, count, defaultOpen = false, children }) {
  * defaultSort: { key, direction: 'asc' | 'desc' } applied on mount
  * csvUrl: when present, renders a Download CSV button that opens the URL
  */
-function PaginatedTable({ rows, columns, csvUrl, emptyText, defaultSort, pageSize = 50 }) {
+function PaginatedTable({ rows, columns, csvUrl, emptyText, defaultSort, pageSize = 50, expandableRender, rowKey, toolbarExtras }) {
   const [filter, setFilter] = React.useState('');
   const [sort, setSort] = React.useState(defaultSort || null);
   const [page, setPage] = React.useState(0);
+  const [openKey, setOpenKey] = React.useState(null);
 
   if (!rows || !rows.length) {
     return <p className="text-sm text-slate-500">{emptyText || 'No rows.'}</p>;
@@ -715,6 +716,7 @@ function PaginatedTable({ rows, columns, csvUrl, emptyText, defaultSort, pageSiz
           className="w-64 rounded border border-slate-200 px-2 py-1 text-sm focus:outline-none focus:border-slate-400"
         />
         <div className="flex items-center gap-3 text-xs text-slate-500">
+          {toolbarExtras}
           <span>
             {fmtInt(total)} {total === 1 ? 'row' : 'rows'}
             {q ? ` (filtered from ${fmtInt(rows.length)})` : ''}
@@ -736,6 +738,7 @@ function PaginatedTable({ rows, columns, csvUrl, emptyText, defaultSort, pageSiz
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500 tracking-wide">
             <tr>
+              {expandableRender && <th className="w-8 px-2 py-2"></th>}
               {columns.map(c => {
                 const sortable = c.sortable !== false;
                 const isSorted = sort && sort.key === c.key;
@@ -760,18 +763,44 @@ function PaginatedTable({ rows, columns, csvUrl, emptyText, defaultSort, pageSiz
             </tr>
           </thead>
           <tbody>
-            {pageRows.map((r, i) => (
-              <tr key={i} className="border-t border-slate-100">
-                {columns.map(c => {
-                  const content = c.render ? c.render(r) : colAccessor(c, r);
-                  return (
-                    <td key={c.key} className={`px-3 py-2 ${c.cellClassName || ''}`}>
-                      {content == null || content === '' ? <span className="text-slate-300">—</span> : content}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
+            {pageRows.map((r, i) => {
+              const key = rowKey ? rowKey(r) : i;
+              const isOpen = expandableRender && openKey === key;
+              return (
+                <React.Fragment key={key}>
+                  <tr
+                    className={`border-t border-slate-100 ${expandableRender ? 'cursor-pointer hover:bg-slate-50' : ''} ${isOpen ? 'bg-slate-50' : ''}`}
+                    onClick={expandableRender ? (e) => {
+                      // Don't toggle when clicking a link or button inside the row
+                      const tag = (e.target.tagName || '').toLowerCase();
+                      if (tag === 'a' || tag === 'button' || e.target.closest('a,button')) return;
+                      setOpenKey(prev => prev === key ? null : key);
+                    } : undefined}
+                  >
+                    {expandableRender && (
+                      <td className="px-2 py-2 text-slate-400 select-none">
+                        <span className="inline-block w-4 text-center">{isOpen ? '▾' : '▸'}</span>
+                      </td>
+                    )}
+                    {columns.map(c => {
+                      const content = c.render ? c.render(r) : colAccessor(c, r);
+                      return (
+                        <td key={c.key} className={`px-3 py-2 ${c.cellClassName || ''}`}>
+                          {content == null || content === '' ? <span className="text-slate-300">—</span> : content}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                  {isOpen && (
+                    <tr className="bg-slate-50 border-t border-slate-100">
+                      <td colSpan={columns.length + 1} className="px-6 py-4">
+                        {expandableRender(r)}
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -974,6 +1003,256 @@ function FormDTable({ rows, slug, audit }) {
   );
 }
 
+// --- Unified Funds pane: N-PORT + Form D merged, source-filterable, expandable rows ---
+
+function UnifiedFundsPane({ nportHolders, formdHolders, slug, audit }) {
+  const [showNport, setShowNport] = React.useState(true);
+  const [showFormd, setShowFormd] = React.useState(true);
+
+  // Normalize both shapes into a single row schema
+  const nportRows = (nportHolders || []).map(r => ({
+    _src: 'N-PORT',
+    _key: `nport:${r.evidence_id || r.accession_number}:${r.series_id || ''}:${r.issuer_title}`,
+    name: r.issuer_title,
+    adviser_name: r.adviser_name,
+    adviser_crd: r.adviser_crd,
+    adviser_method: r.adviser_method,
+    value_usd: r.value_usd,
+    date: r.evidence_date,
+    status: r.status_at_evidence_date,
+    cik: r.registrant_cik,
+    accession_number: r.accession_number,
+    raw: r,
+  }));
+  const formdRows = (formdHolders || []).map(r => ({
+    _src: 'Form D',
+    _key: `formd:${r.evidence_id || r.accession_number}:${r.filer_entityname}`,
+    name: r.filer_entityname,
+    adviser_name: r.adviser_name,
+    adviser_crd: r.adviser_crd,
+    adviser_method: r.adviser_method,
+    value_usd: r.value_usd,
+    date: r.filing_date,
+    status: null, // Form D doesn't carry a per-row status
+    cik: r.filer_cik,
+    accession_number: r.accession_number,
+    raw: r,
+  }));
+  const merged = [
+    ...(showNport ? nportRows : []),
+    ...(showFormd ? formdRows : []),
+  ];
+
+  const columns = [
+    {
+      key: '_src',
+      label: 'Source',
+      accessor: r => r._src,
+      cellClassName: 'text-xs',
+      render: r => (
+        <span className={
+          'inline-block rounded px-2 py-0.5 text-xs font-medium ' +
+          (r._src === 'N-PORT'
+            ? 'bg-slate-100 text-slate-700'
+            : 'bg-amber-50 text-amber-800')
+        }>
+          {r._src}
+        </span>
+      ),
+    },
+    {
+      key: 'name',
+      label: 'Fund / Vehicle',
+      accessor: r => r.name,
+      cellClassName: 'text-xs text-slate-700',
+      render: r => {
+        if (r._src === 'Form D' && r.accession_number) {
+          return (
+            <a
+              href={`/intel/fund/${encodeURIComponent(r.accession_number)}`}
+              className="text-slate-700 hover:text-slate-900 hover:underline"
+            >
+              {r.name}
+            </a>
+          );
+        }
+        return r.name;
+      },
+    },
+    {
+      key: 'adviser_name',
+      label: 'Manager / Adviser',
+      accessor: r => r.adviser_name,
+      cellClassName: 'text-slate-900',
+      render: r => r.adviser_name && r.adviser_crd
+        ? <a href={`/intel/adviser/${encodeURIComponent(r.adviser_crd)}`} className="text-slate-900 hover:text-slate-700 hover:underline">{r.adviser_name}</a>
+        : (r.adviser_name || <span className="text-slate-300">—</span>),
+    },
+    {
+      key: 'value_usd',
+      label: 'Value / Offering',
+      align: 'right',
+      accessor: r => r.value_usd || 0,
+      cellClassName: 'text-right font-mono',
+      render: r => fmtUsdShort(r.value_usd),
+    },
+    {
+      key: 'date',
+      label: 'Date',
+      accessor: r => r.date,
+      cellClassName: 'text-xs text-slate-500',
+      render: r => fmtDate(r.date),
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      accessor: r => r.status || r.adviser_method || '',
+      cellClassName: 'text-xs',
+      render: r => {
+        if (r._src === 'N-PORT' && r.status) {
+          return (
+            <span className={r.status === 'private' ? 'text-slate-600' : 'text-amber-700'}>
+              {fmtStatus(r.status)}
+            </span>
+          );
+        }
+        if (r._src === 'Form D' && r.adviser_method) {
+          return <span className="text-slate-500">{r.adviser_method}</span>;
+        }
+        return null;
+      },
+    },
+    {
+      key: 'source',
+      label: 'EDGAR',
+      sortable: false,
+      accessor: r => r.accession_number || '',
+      cellClassName: 'text-xs',
+      render: r => {
+        const url = edgarFilingUrl(r.cik, r.accession_number);
+        if (!url) return null;
+        return (
+          <a href={url} target="_blank" rel="noopener noreferrer"
+             className="text-slate-500 hover:text-slate-900"
+             title={`EDGAR filing ${r.accession_number}`}>
+            EDGAR ↗
+          </a>
+        );
+      },
+    },
+  ];
+
+  const expandableRender = (row) => {
+    const raw = row.raw || {};
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-slate-500 mb-1">Filing</div>
+          <dl className="grid grid-cols-[max-content,1fr] gap-x-3 gap-y-1 text-xs">
+            <dt className="text-slate-500">Source</dt>
+            <dd className="text-slate-900 font-medium">{row._src}</dd>
+            <dt className="text-slate-500">Accession</dt>
+            <dd className="font-mono text-slate-700">{row.accession_number || '—'}</dd>
+            <dt className="text-slate-500">CIK</dt>
+            <dd className="font-mono text-slate-700">{row.cik || '—'}</dd>
+            <dt className="text-slate-500">{row._src === 'N-PORT' ? 'As-of date' : 'Filed'}</dt>
+            <dd className="text-slate-700">{fmtDate(row.date) || '—'}</dd>
+            {row._src === 'N-PORT' && raw.series_id && (
+              <React.Fragment>
+                <dt className="text-slate-500">Series</dt>
+                <dd className="font-mono text-slate-700">{raw.series_id}</dd>
+              </React.Fragment>
+            )}
+            {row._src === 'N-PORT' && raw.status_at_evidence_date && (
+              <React.Fragment>
+                <dt className="text-slate-500">Status</dt>
+                <dd className="text-slate-700">{fmtStatus(raw.status_at_evidence_date)}</dd>
+              </React.Fragment>
+            )}
+          </dl>
+          {edgarFilingUrl(row.cik, row.accession_number) && (
+            <a
+              href={edgarFilingUrl(row.cik, row.accession_number)}
+              target="_blank" rel="noopener noreferrer"
+              className="mt-2 inline-block text-xs text-slate-600 hover:text-slate-900 underline"
+            >
+              View full filing on EDGAR ↗
+            </a>
+          )}
+        </div>
+        <div>
+          <div className="text-xs uppercase tracking-wide text-slate-500 mb-1">Manager / Adviser</div>
+          <dl className="grid grid-cols-[max-content,1fr] gap-x-3 gap-y-1 text-xs">
+            <dt className="text-slate-500">Firm</dt>
+            <dd className="text-slate-900 font-medium">
+              {row.adviser_name && row.adviser_crd
+                ? <a href={`/intel/adviser/${encodeURIComponent(row.adviser_crd)}`} className="text-slate-900 hover:underline">{row.adviser_name}</a>
+                : (row.adviser_name || <span className="text-slate-300">—</span>)}
+            </dd>
+            {row.adviser_crd && (
+              <React.Fragment>
+                <dt className="text-slate-500">CRD</dt>
+                <dd className="font-mono text-slate-700">{row.adviser_crd}</dd>
+              </React.Fragment>
+            )}
+            {row.adviser_method && (
+              <React.Fragment>
+                <dt className="text-slate-500">Match method</dt>
+                <dd className="text-slate-700">{row.adviser_method}</dd>
+              </React.Fragment>
+            )}
+          </dl>
+          {row.adviser_crd && (
+            <a
+              href={`/intel/adviser/${encodeURIComponent(row.adviser_crd)}`}
+              className="mt-2 inline-block text-xs text-slate-600 hover:text-slate-900 underline"
+            >
+              View full adviser profile (people, contacts) →
+            </a>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const toolbarExtras = (
+    <div className="flex items-center gap-3 text-xs text-slate-600 mr-3">
+      <label className="flex items-center gap-1 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={showNport}
+          onChange={(e) => setShowNport(e.target.checked)}
+          className="rounded border-slate-300"
+        />
+        <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-slate-700 font-medium">N-PORT</span>
+        <span className="text-slate-400">({fmtInt(nportRows.length)})</span>
+      </label>
+      <label className="flex items-center gap-1 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={showFormd}
+          onChange={(e) => setShowFormd(e.target.checked)}
+          className="rounded border-slate-300"
+        />
+        <span className="inline-block rounded bg-amber-50 px-1.5 py-0.5 text-amber-800 font-medium">Form D</span>
+        <span className="text-slate-400">({fmtInt(formdRows.length)})</span>
+      </label>
+    </div>
+  );
+
+  return (
+    <PaginatedTable
+      rows={merged}
+      columns={columns}
+      defaultSort={{ key: 'value_usd', direction: 'desc' }}
+      emptyText="No fund holdings to display."
+      rowKey={r => r._key}
+      expandableRender={expandableRender}
+      toolbarExtras={toolbarExtras}
+    />
+  );
+}
+
 function LifecycleTimeline({ events }) {
   if (!events || !events.length) return <p className="text-sm text-slate-500">No lifecycle events recorded.</p>;
   return (
@@ -1127,14 +1406,17 @@ function IntelPage({ slug }) {
         />
       </section>
 
-      {/* N-PORT holdings */}
-      <CollapsibleSection title="N-PORT registered-fund holdings" count={nport_holders.length}>
-        <NportTable rows={nport_holders} slug={company.slug} audit={summary.audit_mode} />
-      </CollapsibleSection>
-
-      {/* Form D pooled vehicles */}
-      <CollapsibleSection title="Form D pooled vehicles" count={formd_holders.length}>
-        <FormDTable rows={formd_holders} slug={company.slug} audit={summary.audit_mode} />
+      {/* Unified funds pane: N-PORT + Form D, source-filterable, expandable rows */}
+      <CollapsibleSection
+        title="Funds & vehicles"
+        count={nport_holders.length + formd_holders.length}
+      >
+        <UnifiedFundsPane
+          nportHolders={nport_holders}
+          formdHolders={formd_holders}
+          slug={company.slug}
+          audit={summary.audit_mode}
+        />
       </CollapsibleSection>
 
       {/* Lifecycle events */}
