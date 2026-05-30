@@ -1717,6 +1717,23 @@ const CRM_PERSON_PATCHABLE = new Set([
   'notes', 'title', 'role', 'email', 'linkedin_url', 'twitter_handle', 'phone',
 ]);
 
+// Enum validation sets (must mirror migration 010_crm_schema.sql CHECK constraints).
+// Used to reject invalid values at the API layer with 400, instead of letting
+// the DB throw a CHECK violation that becomes a 500. (Verifier bug A7/E5)
+const CRM_INTERACTION_DIRECTIONS = new Set(['outbound','inbound','internal_note']);
+const CRM_INTERACTION_CHANNELS   = new Set(['email','linkedin_msg','twitter_dm','phone','meeting','sms','event','referral','note']);
+const CRM_INTERACTION_TYPES      = new Set(['intro','followup','deal_pitch','response','meeting','call_summary','internal_note']);
+const CRM_INTERACTION_SENTIMENTS = new Set(['positive','neutral','negative','no_signal']);
+const CRM_INTERACTION_OUTCOMES   = new Set(['sent','replied','no_reply','meeting_booked','interested','not_interested','out_of_scope','wrong_person']);
+const CRM_DEAL_SIDES             = new Set(['buy','sell','either']);
+const CRM_DEAL_STATES            = new Set(['open','soft','firm','matched','negotiating','passed','stale','expired','retracted','compliance_review']);
+const CRM_FOLLOWUP_STATUSES      = new Set(['open','done','snoozed','cancelled']);
+const CRM_ENGAGEMENT_STATUSES    = new Set(['cold','researching','outreach_sent','responded','engaged','dormant']);
+
+function badRequest(res, msg) {
+  return res.status(400).json({ error: msg });
+}
+
 const CRM_DEAL_PATCHABLE = new Set([
   'state', 'security_type', 'share_class', 'structure', 'currency',
   'price_per_share_min', 'price_per_share_max',
@@ -1858,6 +1875,14 @@ router.patch('/crm/people/:id', async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
     const updates = pickAllowedFields(req.body, CRM_PERSON_PATCHABLE);
     if (!Object.keys(updates).length) return res.status(400).json({ error: 'no allowed fields in body' });
+    if (updates.engagement_status && !CRM_ENGAGEMENT_STATUSES.has(updates.engagement_status))
+      return badRequest(res, `invalid engagement_status: ${updates.engagement_status}`);
+    if (updates.priority !== undefined) {
+      const p = parseInt(updates.priority, 10);
+      if (!Number.isInteger(p) || p < 1 || p > 5)
+        return badRequest(res, `priority must be 1..5`);
+      updates.priority = p;
+    }
     if (updates.email) updates.email = updates.email.toLowerCase().trim();
     const { data, error } = await deps.nportClient
       .from('crm_person').update(updates).eq('person_id', id).select().maybeSingle();
@@ -1894,6 +1919,23 @@ router.post('/crm/people/:id/interactions', async (req, res) => {
     const required = ['occurred_at', 'direction', 'channel', 'type'];
     for (const k of required) {
       if (!b[k]) return res.status(400).json({ error: `${k} required` });
+    }
+    // Pre-INSERT enum validation (verifier bug A7) — avoid DB CHECK -> 500.
+    if (!CRM_INTERACTION_DIRECTIONS.has(b.direction))
+      return badRequest(res, `invalid direction: ${b.direction}`);
+    if (!CRM_INTERACTION_CHANNELS.has(b.channel))
+      return badRequest(res, `invalid channel: ${b.channel}`);
+    if (!CRM_INTERACTION_TYPES.has(b.type))
+      return badRequest(res, `invalid type: ${b.type}`);
+    if (b.sentiment && !CRM_INTERACTION_SENTIMENTS.has(b.sentiment))
+      return badRequest(res, `invalid sentiment: ${b.sentiment}`);
+    if (b.outcome && !CRM_INTERACTION_OUTCOMES.has(b.outcome))
+      return badRequest(res, `invalid outcome: ${b.outcome}`);
+    // Validate related_company_slug exists in private_companies (verifier bug E5)
+    if (b.related_company_slug) {
+      const { data: co } = await deps.nportClient
+        .from('private_companies').select('slug').eq('slug', b.related_company_slug).maybeSingle();
+      if (!co) return badRequest(res, `unknown company_slug: ${b.related_company_slug}`);
     }
     // Look up firm_id from person for denormalization
     const { data: person } = await deps.nportClient
@@ -1949,6 +1991,16 @@ router.post('/crm/people/:id/deal-interests', async (req, res) => {
     const b = req.body || {};
     if (!b.company_slug) return res.status(400).json({ error: 'company_slug required' });
     if (!b.side) return res.status(400).json({ error: 'side required' });
+    // Enum validation (verifier bug A7) + FK validation (verifier bug E5)
+    if (!CRM_DEAL_SIDES.has(b.side))
+      return badRequest(res, `invalid side: ${b.side}`);
+    if (b.state && !CRM_DEAL_STATES.has(b.state))
+      return badRequest(res, `invalid state: ${b.state}`);
+    {
+      const { data: co } = await deps.nportClient
+        .from('private_companies').select('slug').eq('slug', b.company_slug).maybeSingle();
+      if (!co) return badRequest(res, `unknown company_slug: ${b.company_slug}`);
+    }
 
     const { data: person } = await deps.nportClient
       .from('crm_person').select('firm_id').eq('person_id', id).maybeSingle();
@@ -1989,6 +2041,8 @@ router.patch('/crm/deal-interests/:id', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const updates = pickAllowedFields(req.body, CRM_DEAL_PATCHABLE);
     if (!Object.keys(updates).length) return res.status(400).json({ error: 'no allowed fields' });
+    if (updates.state && !CRM_DEAL_STATES.has(updates.state))
+      return badRequest(res, `invalid state: ${updates.state}`);
     const { data, error } = await deps.nportClient
       .from('crm_deal_interest').update(updates).eq('deal_interest_id', id).select().maybeSingle();
     if (error) throw error;
@@ -2050,6 +2104,8 @@ router.patch('/crm/followups/:id', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const updates = pickAllowedFields(req.body, CRM_FOLLOWUP_PATCHABLE);
     if (!Object.keys(updates).length) return res.status(400).json({ error: 'no allowed fields' });
+    if (updates.status && !CRM_FOLLOWUP_STATUSES.has(updates.status))
+      return badRequest(res, `invalid status: ${updates.status}`);
     const { data, error } = await deps.nportClient
       .from('crm_followup').update(updates).eq('followup_id', id).select().maybeSingle();
     if (error) throw error;
