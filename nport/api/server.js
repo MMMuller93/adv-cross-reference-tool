@@ -47,6 +47,7 @@ function buildApp() {
   const path = require('path');
   const frontendDir = path.join(__dirname, '..', 'frontend');
   const frontendIndex = path.join(frontendDir, 'index.html');
+  const mobileIndex = path.join(frontendDir, 'mobile.html');
   app.use('/', express.static(frontendDir));
 
   const nportRoutes = require('./routes/nport');
@@ -55,11 +56,33 @@ function buildApp() {
   const intelRoutes = require('./routes/intel');
   app.use('/api/intel', intelRoutes);
 
+  // Mobile-first /m/* views — single mobile.html, client-side routed.
+  app.get('/m', (_req, res) => res.sendFile(mobileIndex));
+  app.get('/m/funds', (_req, res) => res.sendFile(mobileIndex));
+  app.get('/m/filings', (_req, res) => res.sendFile(mobileIndex));
+  app.get('/m/filing/:accession', (_req, res) => res.sendFile(mobileIndex));
+  app.get('/m/holdings', (_req, res) => res.sendFile(mobileIndex));
+  app.get('/m/private-cos', (_req, res) => res.sendFile(mobileIndex));
+
   app.get('/company/:slug', (_req, res) => res.sendFile(frontendIndex));
+  // /intel/* SPA fallback routes. The React router picks which page to
+  // render based on pathname. Cross-cutting routes added 2026-05-26.
+  app.get('/intel', (_req, res) => res.sendFile(frontendIndex));
   app.get('/intel/search', (_req, res) => res.sendFile(frontendIndex));
+  app.get('/intel/companies', (_req, res) => res.sendFile(frontendIndex));
+  app.get('/intel/managers', (_req, res) => res.sendFile(frontendIndex));
+  app.get('/intel/funds', (_req, res) => res.sendFile(frontendIndex));
+  app.get('/intel/spvs', (_req, res) => res.sendFile(frontendIndex));
+  app.get('/intel/people', (_req, res) => res.sendFile(frontendIndex));
+  app.get('/intel/timeline', (_req, res) => res.sendFile(frontendIndex));
   app.get('/intel/fund/:accession', (_req, res) => res.sendFile(frontendIndex));
-  app.get('/intel/:slug', (_req, res) => res.sendFile(frontendIndex));
   app.get('/intel/adviser/:crd', (_req, res) => res.sendFile(frontendIndex));
+  app.get('/intel/discovered/:id', (_req, res) => res.sendFile(frontendIndex));
+  // CRM routes (must be before the generic /intel/:slug catch-all)
+  app.get('/intel/crm', (_req, res) => res.sendFile(frontendIndex));
+  app.get('/intel/crm/deals', (_req, res) => res.sendFile(frontendIndex));
+  app.get('/intel/crm/person/:id', (_req, res) => res.sendFile(frontendIndex));
+  app.get('/intel/:slug', (_req, res) => res.sendFile(frontendIndex));
   app.get('/fund/:cik', (_req, res) => res.sendFile(frontendIndex));
   app.get('/fund/:cik/:series_id', (_req, res) => res.sendFile(frontendIndex));
   app.get('/admin/unresolved', (_req, res) => res.sendFile(frontendIndex));

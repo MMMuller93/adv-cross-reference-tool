@@ -17,6 +17,54 @@
 
 const { useState: useStateI, useEffect: useEffectI, useMemo: useMemoI } = React;
 
+// --- watchlist (localStorage-backed) ----------------------------------------
+
+const WATCHLIST_KEY = 'intel.watchlist.slugs';
+const DEFAULT_WATCHLIST = ['anthropic', 'openai', 'spacex', 'figure-ai', 'databricks', 'stripe'];
+
+function readWatchlist() {
+  try {
+    const raw = window.localStorage && window.localStorage.getItem(WATCHLIST_KEY);
+    if (!raw) return DEFAULT_WATCHLIST.slice();
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) && arr.length ? arr.filter(s => typeof s === 'string') : DEFAULT_WATCHLIST.slice();
+  } catch (_) { return DEFAULT_WATCHLIST.slice(); }
+}
+function writeWatchlist(slugs) {
+  try {
+    const unique = Array.from(new Set(slugs.filter(Boolean)));
+    window.localStorage && window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(unique));
+    return unique;
+  } catch (_) { return slugs; }
+}
+function useWatchlist() {
+  const [list, setList] = useStateI(readWatchlist);
+  useEffectI(() => {
+    const onStorage = (e) => { if (e.key === WATCHLIST_KEY) setList(readWatchlist()); };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+  const toggle = React.useCallback((slug) => {
+    setList(prev => {
+      const next = prev.includes(slug) ? prev.filter(s => s !== slug) : [...prev, slug];
+      return writeWatchlist(next);
+    });
+  }, []);
+  const add = React.useCallback((slug) => {
+    if (!slug) return;
+    setList(prev => prev.includes(slug) ? prev : writeWatchlist([...prev, slug]));
+  }, []);
+  const remove = React.useCallback((slug) => {
+    setList(prev => writeWatchlist(prev.filter(s => s !== slug)));
+  }, []);
+  return { list, toggle, add, remove, has: (s) => list.includes(s) };
+}
+
+// Pretty company slug for display in the rail when no live name is available.
+const prettySlug = (slug) => String(slug || '')
+  .replace(/[-_]/g, ' ')
+  .replace(/\b\w/g, c => c.toUpperCase());
+
 // --- formatters -------------------------------------------------------------
 
 const fmtUsdShort = (n) => {
@@ -103,15 +151,15 @@ const renderPersonWithLinkedIn = (name, personEnrichment) => {
 };
 
 /**
- * PersonContactButtons — PFR-parity contact-button row for a single person.
+ * PersonContactButtons — contact-pill row for a single person.
  *
- * Renders LinkedIn / Email buttons (only when data is present). Disabled
- * states use a greyed-out pill + small X overlay (PFR pattern at
- * public/app.js:5065). Email button is shown ONLY when the email is
- * structurally attributable to this specific person (from
- * enriched_managers.team_members[*].email OR intel_person_enrichment.
- * inferred_email). Firm-level CCO email is NOT shown here unless the
- * person IS the CCO.
+ * Renders LinkedIn / Email pills only when data is present. Returns null
+ * if neither is present (no disabled-state UI — see UI_REDESIGN_PLAN
+ * 2026-05-25 §4 Phase A.4: empty state was visual debt with zero info).
+ * Email pill is shown ONLY when the email is structurally attributable
+ * to this specific person (from enriched_managers.team_members[*].email
+ * OR intel_person_enrichment.inferred_email). Firm-level CCO email is
+ * NOT shown here unless the person IS the CCO.
  *
  * Props:
  *   linkedin: URL or null
@@ -119,16 +167,16 @@ const renderPersonWithLinkedIn = (name, personEnrichment) => {
  *   size:     'sm' (default) | 'md'
  */
 const PersonContactButtons = ({ linkedin, email, size = 'sm' }) => {
+  if (!linkedin && !email) return null;
   const pad = size === 'md' ? 'px-2.5 py-1' : 'px-2 py-0.5';
   const text = size === 'md' ? 'text-[11px]' : 'text-[10px]';
   const iconSize = size === 'md' ? 'w-3 h-3' : 'w-2.5 h-2.5';
 
   const activeCls = `inline-flex items-center gap-1 ${pad} bg-white border border-slate-200 rounded ${text} font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors`;
-  const disabledCls = `inline-flex items-center gap-1 ${pad} bg-slate-50 border border-slate-100 rounded ${text} font-medium text-slate-300 cursor-not-allowed`;
 
   return (
     <span className="inline-flex flex-wrap gap-1 items-center">
-      {linkedin ? (
+      {linkedin && (
         <a href={linkedin} target="_blank" rel="noopener noreferrer"
            className={activeCls} title="View on LinkedIn">
           <svg className={iconSize} viewBox="0 0 24 24" fill="currentColor">
@@ -136,14 +184,6 @@ const PersonContactButtons = ({ linkedin, email, size = 'sm' }) => {
           </svg>
           LinkedIn
         </a>
-      ) : (
-        <span className={disabledCls + ' relative'} title="No LinkedIn found">
-          <svg className={iconSize} viewBox="0 0 24 24" fill="currentColor">
-            <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14M8.27 18.5V10H6.7v8.5h1.57m-.79-9.39c.5 0 .91-.41.91-.92 0-.5-.41-.91-.91-.91-.5 0-.91.41-.91.91 0 .51.41.92.91.92M18.5 18.5v-4.65c0-2.07-1.43-2.85-2.86-2.85a2.5 2.5 0 0 0-2.21 1.21V10h-1.5v8.5h1.5v-4.7c0-.97.79-1.76 1.76-1.76.97 0 1.81.79 1.81 1.76v4.7h1.5z"/>
-          </svg>
-          LinkedIn
-          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-white border border-slate-200 flex items-center justify-center text-[7px] text-slate-400">×</span>
-        </span>
       )}
       {email && (
         <a href={`mailto:${email}`} className={activeCls} title={`Email ${email}`}>
@@ -195,46 +235,249 @@ const edgarFilingUrl = (cik, accession) => {
   return `https://www.sec.gov/Archives/edgar/data/${cikInt}/${accNoDashes}/`;
 };
 
+// --- manager card (lazy-fetched, shown in row expansion + anywhere we need rich info) --
+
+// Module-level cache so re-opening rows doesn't re-fetch.
+const _managerEnrichmentCache = new Map();
+
+/**
+ * ManagerCard — given a manager descriptor `{kind, crd, discoveredId}`, lazy-
+ * fetches the full enrichment (website, contact, owners, team members) from
+ * `/api/intel/advisers/<crd>` (when kind=crd) or `/api/intel/discovered/<id>`
+ * (when kind=discovered) and renders a compact contact card.
+ *
+ * Cached by module-level Map so the second expand of the same row is instant
+ * and we don't hammer the API. Returns null when no manager is known.
+ */
+function ManagerCard({ kind, crd, discoveredId, compact = false }) {
+  const cacheKey = kind === 'crd' ? `crd:${crd}` : `disc:${discoveredId}`;
+  const [data, setData] = useStateI(() => _managerEnrichmentCache.get(cacheKey) || null);
+  const [loading, setLoading] = useStateI(false);
+  const [error, setError] = useStateI(null);
+
+  useEffectI(() => {
+    if (data) return;
+    if (!crd && !discoveredId) return;
+    if (_managerEnrichmentCache.has(cacheKey)) {
+      setData(_managerEnrichmentCache.get(cacheKey));
+      return;
+    }
+    setLoading(true);
+    const url = kind === 'crd'
+      ? `/api/intel/advisers/${encodeURIComponent(crd)}`
+      : `/api/intel/discovered/${encodeURIComponent(discoveredId)}`;
+    fetch(url)
+      .then(r => r.ok ? r.json() : r.json().then(b => Promise.reject(b)))
+      .then(d => {
+        _managerEnrichmentCache.set(cacheKey, d);
+        setData(d);
+        setLoading(false);
+      })
+      .catch(e => {
+        setError(String(e && e.error ? e.error : e));
+        setLoading(false);
+      });
+    // eslint-disable-next-line
+  }, [cacheKey]);
+
+  if (loading) return <div className="text-[11px] text-slate-400 italic">Loading manager details…</div>;
+  if (error) return <div className="text-[11px] text-slate-400">Couldn't load: {error}</div>;
+  if (!data) return null;
+
+  // Normalize: discovered API returns {manager, summary, holders...};
+  // adviser API returns {adviser, summary, companies, service_providers}.
+  const m = kind === 'crd' ? data.adviser : data.manager;
+  if (!m) return null;
+
+  const website = m.primary_website || m.website || m.website_url || null;
+  const linkedin = m.linkedin_company_url || null;
+  const twitter = m.twitter_handle || null;
+  const email = m.cco_email || m.alt_contact_email || m.primary_contact_email || null;
+  const phone = m.phone || m.phone_number || null;
+  const teamMembers = Array.isArray(m.team_members) ? m.team_members : [];
+  const personEnrichment = m.person_enrichment || {};
+  const ownersRaw = Array.isArray(m.owners_detail) && m.owners_detail.length
+    ? m.owners_detail
+    : (Array.isArray(m.owners) ? m.owners.map(o => typeof o === 'string' ? { name: o } : o) : []);
+  const cco = m.cco_name;
+  const signatory = m.signatory_name;
+  const teamLimit = compact ? 5 : 10;
+  const ownerLimit = compact ? 3 : 6;
+
+  return (
+    <div className="space-y-3">
+      {/* Action chips */}
+      <div className="flex flex-wrap gap-1">
+        {website && (
+          <a href={normalizeHref(website)} target="_blank" rel="noopener noreferrer"
+             className="inline-flex items-center gap-1 px-2 py-1 border border-slate-200 rounded text-[11px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
+            Website
+            <ExternalLinkIcon className="w-2.5 h-2.5 opacity-50" />
+          </a>
+        )}
+        {linkedin && (
+          <a href={linkedin} target="_blank" rel="noopener noreferrer"
+             className="inline-flex items-center gap-1 px-2 py-1 border border-slate-200 rounded text-[11px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
+            LinkedIn
+          </a>
+        )}
+        {twitter && (
+          <a href={`https://twitter.com/${String(twitter).replace(/^@/, '')}`} target="_blank" rel="noopener noreferrer"
+             className="inline-flex items-center gap-1 px-2 py-1 border border-slate-200 rounded text-[11px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
+            Twitter
+          </a>
+        )}
+        {kind === 'crd' && m.crd && (
+          <a href={`https://adviserinfo.sec.gov/firm/summary/${m.crd}`} target="_blank" rel="noopener noreferrer"
+             className="inline-flex items-center gap-1 px-2 py-1 border border-slate-200 rounded text-[11px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
+            IAPD
+          </a>
+        )}
+        {kind === 'crd' && m.form_adv_url && (
+          <a href={m.form_adv_url} target="_blank" rel="noopener noreferrer"
+             className="inline-flex items-center gap-1 px-2 py-1 border border-slate-200 rounded text-[11px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
+            Form ADV
+          </a>
+        )}
+      </div>
+
+      {/* Contact facts */}
+      {(website || email || phone) && (
+        <dl className="grid grid-cols-[max-content,1fr] gap-x-3 gap-y-1 text-[11px]">
+          {website && (
+            <React.Fragment>
+              <dt className="text-slate-500">Web</dt>
+              <dd className="font-mono text-slate-700 break-all">{String(website).replace(/^https?:\/\//, '')}</dd>
+            </React.Fragment>
+          )}
+          {email && (
+            <React.Fragment>
+              <dt className="text-slate-500">Email</dt>
+              <dd className="font-mono text-slate-700 break-all">
+                <a href={`mailto:${email}`} className="hover:text-slate-900 underline underline-offset-2">{email}</a>
+              </dd>
+            </React.Fragment>
+          )}
+          {phone && (
+            <React.Fragment>
+              <dt className="text-slate-500">Phone</dt>
+              <dd className="font-mono text-slate-700">{phone}</dd>
+            </React.Fragment>
+          )}
+          {cco && (
+            <React.Fragment>
+              <dt className="text-slate-500">CCO</dt>
+              <dd className="text-slate-900">
+                {renderPersonWithLinkedIn(cco, personEnrichment)}
+                {m.cco_email && (
+                  <a href={`mailto:${m.cco_email}`} className="ml-2 font-mono text-[10px] text-slate-500 hover:text-slate-900 break-all">{m.cco_email}</a>
+                )}
+              </dd>
+            </React.Fragment>
+          )}
+          {signatory && signatory !== cco && (
+            <React.Fragment>
+              <dt className="text-slate-500">Signatory</dt>
+              <dd className="text-slate-900">
+                {renderPersonWithLinkedIn(signatory, personEnrichment)}
+                {m.signatory_title && <span className="ml-1 text-[10px] text-slate-500">({m.signatory_title})</span>}
+              </dd>
+            </React.Fragment>
+          )}
+        </dl>
+      )}
+
+      {/* Principals / Owners */}
+      {ownersRaw.length > 0 && (
+        <div>
+          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+            Principals / Owners
+            {ownersRaw.length > ownerLimit && <span className="ml-1.5 text-slate-400 normal-case tracking-normal font-normal">({ownerLimit} of {ownersRaw.length})</span>}
+          </div>
+          <ul className="text-[11px] space-y-1">
+            {ownersRaw.slice(0, ownerLimit).map((o, i) => {
+              const contact = resolvePersonContact(o, personEnrichment);
+              return (
+                <li key={i} className="flex flex-wrap items-baseline gap-2">
+                  <span className="font-medium text-slate-900">{o.name}</span>
+                  {o.title && <span className="text-[10px] text-slate-500">{o.title}</span>}
+                  <PersonContactButtons linkedin={contact.linkedin} email={contact.email} />
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {/* Team members */}
+      {teamMembers.length > 0 && (
+        <div>
+          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+            Team
+            <span className="ml-1.5 text-slate-400 normal-case tracking-normal font-normal">
+              ({teamMembers.length > teamLimit ? `${teamLimit} of ${teamMembers.length}` : teamMembers.length})
+            </span>
+          </div>
+          <ul className="text-[11px] space-y-1">
+            {teamMembers.slice(0, teamLimit).map((tm, i) => {
+              const contact = resolvePersonContact(tm, personEnrichment);
+              return (
+                <li key={i} className="flex flex-wrap items-baseline gap-2">
+                  <span className="font-medium text-slate-900">{tm.name}</span>
+                  {tm.title && <span className="text-[10px] text-slate-500">{tm.title}</span>}
+                  <PersonContactButtons linkedin={contact.linkedin} email={contact.email} />
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {/* Deep-link to the manager page */}
+      <div>
+        <a href={kind === 'crd' ? `/intel/adviser/${encodeURIComponent(crd)}` : `/intel/discovered/${encodeURIComponent(discoveredId)}`}
+           className="text-[11px] text-slate-600 hover:text-slate-900 underline underline-offset-2">
+          View full {kind === 'crd' ? 'adviser' : 'discovered manager'} page →
+        </a>
+      </div>
+    </div>
+  );
+}
+
 // --- adviser list row (left pane) -------------------------------------------
 
 function AdviserListRow({ adv, selected, onClick }) {
+  // No avatar — a column of 21 dark blocks reads like a Figma mockup.
+  // Selection state is carried by the left border + bg only (PFR pattern).
   return (
     <div
       onClick={onClick}
       className={
-        'flex items-center gap-3 px-3 py-3 cursor-pointer transition-colors border-l-2 ' +
+        'flex items-baseline gap-4 px-4 py-3 cursor-pointer transition-colors border-l-2 ' +
         (selected
-          ? 'bg-slate-50 border-slate-800'
+          ? 'bg-slate-50 border-slate-900'
           : 'bg-white border-transparent hover:bg-slate-50')
       }
     >
-      {/* Avatar */}
-      <div className="w-9 h-9 rounded bg-slate-800 flex items-center justify-center text-white font-serif font-medium text-base flex-shrink-0">
-        {firstInitial(adv.name)}
-      </div>
-
       {/* Name + CRD */}
       <div className="flex-1 min-w-0">
-        <div className="text-[13px] font-serif font-semibold italic text-slate-900 tracking-tight truncate">
-          {adv.name || '(unidentified)'}
+        <div className="font-serif text-[14px] font-semibold text-slate-900 tracking-tight truncate leading-snug">
+          {adv.name || 'Unidentified adviser'}
         </div>
-        <div className="text-[10px] font-mono text-slate-400 mt-0.5">CRD {adv.crd}</div>
+        <div className="text-[10px] font-mono text-slate-400 mt-0.5 uppercase tracking-wider">CRD {adv.crd}</div>
       </div>
 
       {/* AUM */}
       <div className="text-right shrink-0 hidden sm:block">
         <div className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">AUM</div>
-        <div className="text-[12px] font-mono text-slate-700 tabular-nums">{fmtUsdShort(adv.total_aum)}</div>
+        <div className="text-[12px] font-mono text-slate-700 tabular-nums mt-0.5">{fmtUsdShort(adv.total_aum)}</div>
       </div>
 
-      {/* Total value */}
-      <div className="text-right shrink-0 w-20">
+      {/* Total held */}
+      <div className="text-right shrink-0 w-24">
         <div className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">Held</div>
-        <div className="text-[13px] font-mono font-semibold text-slate-900 tabular-nums">{fmtUsdShort(adv.total_value_usd)}</div>
+        <div className="text-[13px] font-mono font-semibold text-slate-900 tabular-nums tracking-tight mt-0.5">{fmtUsdShort(adv.total_value_usd)}</div>
       </div>
-
-      {/* Chevron */}
-      <span className={'text-slate-300 shrink-0 ' + (selected ? 'text-slate-700' : '')}>›</span>
     </div>
   );
 }
@@ -270,13 +513,13 @@ function AdviserDetailPanel({ adv, holdings, companyName }) {
       <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
         <div className="min-w-0 flex-1">
           <h2 className="font-serif text-lg font-semibold text-slate-900 tracking-tight leading-tight truncate">
-            {adv.name || '(unidentified)'}
+            {adv.name || 'Unidentified adviser'}
           </h2>
-          <div className="text-[10px] font-mono text-slate-500 mt-0.5">
+          <div className="text-[10px] font-mono text-slate-500 mt-1 uppercase tracking-wider">
             CRD {adv.crd}
             {adv.crd && (
               <a href={`/intel/adviser/${encodeURIComponent(adv.crd)}`}
-                 className="ml-2 text-slate-600 hover:text-slate-900 hover:underline normal-case font-sans">
+                 className="ml-3 text-slate-600 hover:text-slate-900 hover:underline normal-case font-sans tracking-normal">
                 View full profile →
               </a>
             )}
@@ -284,42 +527,22 @@ function AdviserDetailPanel({ adv, holdings, companyName }) {
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
           {adv.website && (
-            <a
-              href={normalizeHref(adv.website)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white transition-all"
-            >
+            <a href={normalizeHref(adv.website)} target="_blank" rel="noopener noreferrer" className="nport-button">
               Website
             </a>
           )}
           {adv.crd && (
-            <a
-              href={`https://adviserinfo.sec.gov/firm/summary/${adv.crd}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white transition-all"
-            >
+            <a href={`https://adviserinfo.sec.gov/firm/summary/${adv.crd}`} target="_blank" rel="noopener noreferrer" className="nport-button">
               IAPD
             </a>
           )}
           {adv.form_adv_url && (
-            <a
-              href={adv.form_adv_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white transition-all"
-            >
+            <a href={adv.form_adv_url} target="_blank" rel="noopener noreferrer" className="nport-button">
               Form ADV
             </a>
           )}
           {adv.linkedin_company_url && (
-            <a
-              href={adv.linkedin_company_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white transition-all"
-            >
+            <a href={adv.linkedin_company_url} target="_blank" rel="noopener noreferrer" className="nport-button">
               LinkedIn
             </a>
           )}
@@ -331,15 +554,15 @@ function AdviserDetailPanel({ adv, holdings, companyName }) {
         <div className="grid grid-cols-3 gap-3">
           <div>
             <div className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">Total AUM</div>
-            <div className="font-mono text-[15px] font-semibold text-slate-900 tabular-nums mt-0.5">{fmtUsdShort(adv.total_aum)}</div>
+            <div className="font-mono text-[15px] font-semibold text-slate-900 tabular-nums tracking-tight mt-0.5">{fmtUsdShort(adv.total_aum)}</div>
           </div>
           <div>
-            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">Held $</div>
-            <div className="font-mono text-[15px] font-semibold text-slate-900 tabular-nums mt-0.5">{fmtUsdShort(adv.total_value_usd)}</div>
+            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">Total held</div>
+            <div className="font-mono text-[15px] font-semibold text-slate-900 tabular-nums tracking-tight mt-0.5">{fmtUsdShort(adv.total_value_usd)}</div>
           </div>
           <div>
-            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">Evidence</div>
-            <div className="font-mono text-[15px] font-semibold text-slate-900 tabular-nums mt-0.5">{fmtInt(adv.evidence_count)}</div>
+            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">Filings</div>
+            <div className="font-mono text-[15px] font-semibold text-slate-900 tabular-nums tracking-tight mt-0.5">{fmtInt(adv.evidence_count)}</div>
           </div>
         </div>
 
@@ -527,10 +750,7 @@ function AdviserDetailPanel({ adv, holdings, companyName }) {
                   const url = edgarFilingUrl(h._cik, h.accession_number);
                   return (
                     <div key={i} className="flex gap-2 items-baseline">
-                      <span className={
-                        'text-[9px] uppercase tracking-widest font-semibold w-12 shrink-0 ' +
-                        (h._kind === 'nport' ? 'text-slate-500' : 'text-amber-700')
-                      }>
+                      <span className="text-[9px] uppercase tracking-widest font-semibold font-mono text-slate-500 w-12 shrink-0">
                         {h._kind === 'nport' ? 'N-PORT' : 'Form D'}
                       </span>
                       <div className="min-w-0 flex-1">
@@ -890,11 +1110,18 @@ function NportTable({ rows, slug, audit }) {
     {
       key: 'adviser_name',
       label: 'Manager',
-      accessor: r => r.adviser_name,
+      accessor: r => (r.manager && r.manager.name) || r.adviser_name,
       cellClassName: 'text-slate-900',
-      render: r => r.adviser_name && r.adviser_crd
-        ? <a href={`/intel/adviser/${encodeURIComponent(r.adviser_crd)}`} className="text-slate-900 hover:text-slate-700 hover:underline">{r.adviser_name}</a>
-        : (r.adviser_name || <span className="text-slate-300">—</span>),
+      render: r => {
+        const mgr = r.manager;
+        if (mgr && mgr.url && mgr.name) {
+          return <a href={mgr.url} className="text-slate-900 hover:text-slate-700 hover:underline">{mgr.name}</a>;
+        }
+        if (mgr && mgr.name) return <span>{mgr.name}</span>;
+        return r.adviser_name && r.adviser_crd
+          ? <a href={`/intel/adviser/${encodeURIComponent(r.adviser_crd)}`} className="text-slate-900 hover:text-slate-700 hover:underline">{r.adviser_name}</a>
+          : (r.adviser_name || <span className="text-slate-300">—</span>);
+      },
     },
     {
       key: 'value_usd',
@@ -950,7 +1177,7 @@ function NportTable({ rows, slug, audit }) {
       columns={columns}
       csvUrl={csvUrl}
       defaultSort={{ key: 'value_usd', direction: 'desc' }}
-      emptyText="No N-PORT holdings to display."
+      emptyText="No mutual-fund holdings yet."
     />
   );
 }
@@ -969,11 +1196,18 @@ function FormDTable({ rows, slug, audit }) {
     {
       key: 'adviser_name',
       label: 'Adviser',
-      accessor: r => r.adviser_name,
+      accessor: r => (r.manager && r.manager.name) || r.adviser_name,
       cellClassName: 'text-slate-900',
-      render: r => r.adviser_name && r.adviser_crd
-        ? <a href={`/intel/adviser/${encodeURIComponent(r.adviser_crd)}`} className="text-slate-900 hover:text-slate-700 hover:underline">{r.adviser_name}</a>
-        : (r.adviser_name || <span className="text-slate-300">—</span>),
+      render: r => {
+        const mgr = r.manager;
+        if (mgr && mgr.url && mgr.name) {
+          return <a href={mgr.url} className="text-slate-900 hover:text-slate-700 hover:underline">{mgr.name}</a>;
+        }
+        if (mgr && mgr.name) return <span>{mgr.name}</span>;
+        return r.adviser_name && r.adviser_crd
+          ? <a href={`/intel/adviser/${encodeURIComponent(r.adviser_crd)}`} className="text-slate-900 hover:text-slate-700 hover:underline">{r.adviser_name}</a>
+          : (r.adviser_name || <span className="text-slate-300">—</span>);
+      },
     },
     {
       key: 'value_usd',
@@ -1018,16 +1252,31 @@ function FormDTable({ rows, slug, audit }) {
       columns={columns}
       csvUrl={csvUrl}
       defaultSort={{ key: 'value_usd', direction: 'desc' }}
-      emptyText="No Form D pooled-vehicle filings to display."
+      emptyText="No SPV offerings yet."
     />
   );
 }
 
 // --- Unified Funds pane: N-PORT + Form D merged, source-filterable, expandable rows ---
 
-function UnifiedFundsPane({ nportHolders, formdHolders, slug, audit }) {
-  const [showNport, setShowNport] = React.useState(true);
-  const [showFormd, setShowFormd] = React.useState(true);
+/**
+ * UnifiedFundsPane — single sortable/expandable table of both N-PORT
+ * mutual-fund holdings + Form D SPV offerings.
+ *
+ * Props:
+ *   nportHolders, formdHolders — row arrays from the API
+ *   slug, audit                — passthrough for CSV download URL
+ *   lockedSource               — optional 'nport' | 'formd'. When set,
+ *                                the toolbar source toggle is hidden,
+ *                                the Source column is dropped, and only
+ *                                the chosen source's rows render. Used
+ *                                by IntelPage's tabbed view to render
+ *                                "Funds" or "SPVs" tabs as a single-
+ *                                source filtered view.
+ */
+function UnifiedFundsPane({ nportHolders, formdHolders, slug, audit, lockedSource }) {
+  const [showNport, setShowNport] = React.useState(lockedSource !== 'formd');
+  const [showFormd, setShowFormd] = React.useState(lockedSource !== 'nport');
 
   // Normalize both shapes into a single row schema
   const nportRows = (nportHolders || []).map(r => ({
@@ -1037,6 +1286,7 @@ function UnifiedFundsPane({ nportHolders, formdHolders, slug, audit }) {
     adviser_name: r.adviser_name,
     adviser_crd: r.adviser_crd,
     adviser_method: r.adviser_method,
+    manager: r.manager || null,
     value_usd: r.value_usd,
     date: r.evidence_date,
     status: r.status_at_evidence_date,
@@ -1051,6 +1301,7 @@ function UnifiedFundsPane({ nportHolders, formdHolders, slug, audit }) {
     adviser_name: r.adviser_name,
     adviser_crd: r.adviser_crd,
     adviser_method: r.adviser_method,
+    manager: r.manager || null,
     value_usd: r.value_usd,
     date: r.filing_date,
     status: null, // Form D doesn't carry a per-row status
@@ -1064,25 +1315,22 @@ function UnifiedFundsPane({ nportHolders, formdHolders, slug, audit }) {
   ];
 
   const columns = [
-    {
+    // Source pill — dropped entirely when lockedSource is set (tab view
+    // already filters to one source, so the column would be redundant).
+    ...(lockedSource ? [] : [{
       key: '_src',
       label: 'Source',
       accessor: r => r._src,
       cellClassName: 'text-xs',
       render: r => (
-        <span className={
-          'inline-block rounded px-2 py-0.5 text-xs font-medium ' +
-          (r._src === 'N-PORT'
-            ? 'bg-slate-100 text-slate-700'
-            : 'bg-amber-50 text-amber-800')
-        }>
+        <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-widest text-slate-600">
           {r._src}
         </span>
       ),
-    },
+    }]),
     {
       key: 'name',
-      label: 'Fund / Vehicle',
+      label: lockedSource === 'formd' ? 'SPV' : (lockedSource === 'nport' ? 'Fund' : 'Fund / Vehicle'),
       accessor: r => r.name,
       cellClassName: 'text-xs text-slate-700',
       render: r => {
@@ -1102,11 +1350,39 @@ function UnifiedFundsPane({ nportHolders, formdHolders, slug, audit }) {
     {
       key: 'adviser_name',
       label: 'Manager / Adviser',
-      accessor: r => r.adviser_name,
+      accessor: r => (r.manager && r.manager.name) || r.adviser_name,
       cellClassName: 'text-slate-900',
-      render: r => r.adviser_name && r.adviser_crd
-        ? <a href={`/intel/adviser/${encodeURIComponent(r.adviser_crd)}`} className="text-slate-900 hover:text-slate-700 hover:underline">{r.adviser_name}</a>
-        : (r.adviser_name || <span className="text-slate-300">—</span>),
+      render: r => {
+        const mgr = r.manager;
+        // Discovered = non-SEC-registered firm found via series-master
+        // extraction + enriched_managers lookup; CRD = exact ADV match.
+        // Small "via filings" pill signals the lower-confidence path.
+        const discoveredPill = mgr && mgr.kind === 'discovered' ? (
+          <span className="text-[9px] uppercase tracking-widest font-semibold font-mono px-1 py-0.5 rounded bg-slate-100 text-slate-500"
+                title="Manager discovered via Form D series-master parsing (not SEC-registered)">
+            via filings
+          </span>
+        ) : null;
+        if (mgr && mgr.url && mgr.name) {
+          return (
+            <span className="inline-flex items-baseline gap-1.5 flex-wrap">
+              <a href={mgr.url} className="text-slate-900 hover:text-slate-700 hover:underline">{mgr.name}</a>
+              {discoveredPill}
+            </span>
+          );
+        }
+        if (mgr && mgr.name) {
+          return (
+            <span className="inline-flex items-baseline gap-1.5 flex-wrap">
+              <span>{mgr.name}</span>
+              {discoveredPill}
+            </span>
+          );
+        }
+        return r.adviser_name && r.adviser_crd
+          ? <a href={`/intel/adviser/${encodeURIComponent(r.adviser_crd)}`} className="text-slate-900 hover:text-slate-700 hover:underline">{r.adviser_name}</a>
+          : (r.adviser_name || <span className="text-slate-300">—</span>);
+      },
     },
     {
       key: 'value_usd',
@@ -1198,55 +1474,67 @@ function UnifiedFundsPane({ nportHolders, formdHolders, slug, audit }) {
           )}
         </div>
         <div>
-          <div className="text-xs uppercase tracking-wide text-slate-500 mb-1">Manager / Adviser</div>
-          <dl className="grid grid-cols-[max-content,1fr] gap-x-3 gap-y-1 text-xs">
-            <dt className="text-slate-500">Firm</dt>
-            <dd className="text-slate-900 font-medium">
-              {row.adviser_name && row.adviser_crd
-                ? <a href={`/intel/adviser/${encodeURIComponent(row.adviser_crd)}`} className="text-slate-900 hover:underline">{row.adviser_name}</a>
-                : (row.adviser_name || <span className="text-slate-300">—</span>)}
-            </dd>
-            {row.adviser_crd && (
-              <React.Fragment>
-                <dt className="text-slate-500">CRD</dt>
-                <dd className="font-mono text-slate-700">{row.adviser_crd}</dd>
-              </React.Fragment>
+          <div className="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-baseline gap-2">
+            Manager / Adviser
+            {row.manager?.kind === 'discovered' && (
+              <span className="text-[9px] uppercase tracking-widest font-semibold font-mono px-1 py-0.5 rounded bg-slate-100 text-slate-500"
+                    title="Discovered via Form D series-master parsing (not SEC-registered)">via filings</span>
             )}
-          </dl>
-          {row.adviser_crd && (
-            <a
-              href={`/intel/adviser/${encodeURIComponent(row.adviser_crd)}`}
-              className="mt-2 inline-block text-xs text-slate-600 hover:text-slate-900 underline"
-            >
-              View full adviser profile →
-            </a>
+          </div>
+          {/* Firm name (always shown) */}
+          <div className="text-[13px] font-serif font-semibold text-slate-900 mb-2">
+            {(row.manager?.name || row.adviser_name) ? (
+              <a href={row.manager?.url || (row.adviser_crd ? `/intel/adviser/${encodeURIComponent(row.adviser_crd)}` : '#')}
+                 className="hover:text-slate-700 hover:underline">
+                {row.manager?.name || row.adviser_name}
+              </a>
+            ) : (
+              <span className="text-slate-300 font-sans">No manager attribution yet</span>
+            )}
+            {row.manager?.kind === 'crd' && row.adviser_crd && (
+              <span className="ml-2 text-[10px] font-mono font-normal text-slate-500 uppercase tracking-wider">CRD {row.adviser_crd}</span>
+            )}
+          </div>
+          {/* Lazy-fetched enrichment: website, contacts, owners, team members */}
+          {row.manager?.kind === 'crd' && row.manager.crd && (
+            <ManagerCard kind="crd" crd={row.manager.crd} compact />
+          )}
+          {row.manager?.kind === 'discovered' && row.manager.discovered_manager_id && (
+            <ManagerCard kind="discovered" discoveredId={row.manager.discovered_manager_id} compact />
+          )}
+          {!row.manager && (
+            <div className="text-[11px] text-slate-400 italic">
+              No manager identified for this filing yet. The entityname didn't match a registered adviser or a discovered manager.
+            </div>
           )}
         </div>
       </div>
     );
   };
 
-  const toolbarExtras = (
-    <div className="flex items-center gap-3 text-xs text-slate-600 mr-3">
-      <label className="flex items-center gap-1 cursor-pointer">
+  // Toolbar source-filter checkboxes — hidden when lockedSource is set
+  // (the surrounding tab view already filters to one source).
+  const toolbarExtras = lockedSource ? null : (
+    <div className="flex items-center gap-4 text-xs text-slate-600 mr-3">
+      <label className="flex items-center gap-1.5 cursor-pointer">
         <input
           type="checkbox"
           checked={showNport}
           onChange={(e) => setShowNport(e.target.checked)}
           className="rounded border-slate-300"
         />
-        <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-slate-700 font-medium">N-PORT</span>
-        <span className="text-slate-400">({fmtInt(nportRows.length)})</span>
+        <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-widest text-slate-600">N-PORT</span>
+        <span className="text-slate-400 font-mono tabular-nums">{fmtInt(nportRows.length)}</span>
       </label>
-      <label className="flex items-center gap-1 cursor-pointer">
+      <label className="flex items-center gap-1.5 cursor-pointer">
         <input
           type="checkbox"
           checked={showFormd}
           onChange={(e) => setShowFormd(e.target.checked)}
           className="rounded border-slate-300"
         />
-        <span className="inline-block rounded bg-amber-50 px-1.5 py-0.5 text-amber-800 font-medium">Form D</span>
-        <span className="text-slate-400">({fmtInt(formdRows.length)})</span>
+        <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-widest text-slate-600">Form D</span>
+        <span className="text-slate-400 font-mono tabular-nums">{fmtInt(formdRows.length)}</span>
       </label>
     </div>
   );
@@ -1290,12 +1578,301 @@ function LifecycleTimeline({ events }) {
   );
 }
 
+// --- segmented tabs ---------------------------------------------------------
+
+/**
+ * SegmentedTabs — Linear/PFR-style horizontal segmented control for
+ * switching between equivalent views of the same dataset. Each tab gets
+ * an optional count badge. Active tab carries a slate-900 bottom-border
+ * indicator and a filled count chip; inactive tabs are quiet.
+ *
+ * Used by IntelPage to switch between [Managers / Mutual funds / SPVs /
+ * Timeline] — three lenses on the same company-holders data. Solves the
+ * "managers AND N-PORT AND pooled vehicles flow is clunky" feedback by
+ * making the three lenses peers rather than sequential sections.
+ *
+ * Props:
+ *   tabs:      [{ key, label, count? }]
+ *   activeKey: string
+ *   onChange:  fn(key)
+ */
+function SegmentedTabs({ tabs, activeKey, onChange }) {
+  return (
+    <div className="flex items-stretch border-b border-slate-200 mb-6 overflow-x-auto">
+      {tabs.map(t => {
+        const isActive = activeKey === t.key;
+        return (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => onChange(t.key)}
+            className={
+              'group flex items-center gap-2 px-4 py-3 text-[12px] font-semibold transition-colors border-b-2 -mb-px whitespace-nowrap ' +
+              (isActive
+                ? 'text-slate-900 border-slate-900'
+                : 'text-slate-500 border-transparent hover:text-slate-800 hover:border-slate-300')
+            }
+          >
+            <span>{t.label}</span>
+            {t.count != null && (
+              <span className={
+                'inline-flex items-center justify-center rounded text-[10px] font-mono tabular-nums px-1.5 py-0.5 ' +
+                (isActive
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-slate-100 text-slate-500 group-hover:bg-slate-200')
+              }>
+                {fmtInt(t.count)}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * useHashTab — sync a tab key with `window.location.hash`. Reads hash
+ * on mount, listens for hashchange (back/forward), writes hash on
+ * change. Falls back to defaultKey when the hash doesn't match a valid
+ * tab key.
+ */
+function useHashTab(validKeys, defaultKey) {
+  const readHash = React.useCallback(() => {
+    const h = (window.location.hash || '').replace(/^#/, '');
+    return validKeys.includes(h) ? h : defaultKey;
+  }, [validKeys, defaultKey]);
+  const [key, setKey] = useStateI(readHash());
+  useEffectI(() => {
+    const onHash = () => setKey(readHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, [readHash]);
+  const setKeyAndHash = React.useCallback((k) => {
+    if (window.location.hash.replace(/^#/, '') !== k) {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${k}`);
+    }
+    setKey(k);
+  }, []);
+  // When validKeys changes (e.g., Timeline appears/disappears), re-read hash
+  // so we don't end up stuck on an invalid key.
+  useEffectI(() => { setKey(readHash()); }, [validKeys.join(',')]);
+  return [key, setKeyAndHash];
+}
+
+// --- AppShell — persistent rail + topbar that wraps every /intel/* page ----
+
+/**
+ * AppShell — the global chrome for /intel/*.
+ *
+ * Renders:
+ *   - 248px left rail with brand / search / WATCHLIST / MODULES / (optional
+ *     filter panel via railFilters prop)
+ *   - 52px sticky topbar with breadcrumb + optional rightActions
+ *   - Main content pane (children)
+ *
+ * Props:
+ *   children: page body
+ *   activeModule: one of 'dashboard' | 'companies' | 'managers' | 'funds' |
+ *     'spvs' | 'people' | 'timeline' — highlights the module in the rail
+ *   activeWatchlistSlug: company slug to highlight in the WATCHLIST section
+ *   breadcrumb: array of {label, href?} segments (or React node)
+ *   rightActions: optional ReactNode rendered in the topbar's right side
+ *   railFilters: optional ReactNode rendered below the modules — the
+ *     "rail morphs into a filter panel" PFR pattern.
+ *
+ * The watchlist is read from localStorage (`useWatchlist` hook). Defaults to
+ * 6 high-profile tracked companies on first load.
+ */
+function AppShell({ children, activeModule, activeWatchlistSlug, breadcrumb, rightActions, railFilters }) {
+  const { list: watchlist } = useWatchlist();
+
+  // ⌘K → /intel/search
+  useEffectI(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        window.location.href = '/intel/search';
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const isActiveSlug = (slug) => activeWatchlistSlug && activeWatchlistSlug === slug;
+
+  return (
+    <div className="intel-shell">
+      <aside className="intel-rail">
+        <a href="/intel" className="intel-rail-brand" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <span className="intel-rail-brand-mark">F</span>
+          <span>
+            <span className="intel-rail-brand-name">Fund Holders</span>
+            <div className="intel-rail-brand-kicker">Intel</div>
+          </span>
+        </a>
+
+        <a href="/intel/search" className="intel-rail-search">
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+          </svg>
+          <span>Search…</span>
+          <span className="intel-rail-search-shortcut">⌘K</span>
+        </a>
+
+        <div className="intel-rail-section-title">Watchlist</div>
+        {watchlist.length === 0 ? (
+          <div className="intel-rail-item intel-rail-item-empty">No companies pinned</div>
+        ) : watchlist.map(slug => (
+          <a key={slug} href={`/intel/${slug}`}
+             className={isActiveSlug(slug) ? 'intel-rail-item active' : 'intel-rail-item'}>
+            <span>{prettySlug(slug)}</span>
+          </a>
+        ))}
+        <a href="/intel/companies" className="intel-rail-item intel-rail-item-empty">+ Add company</a>
+
+        <div className="intel-rail-section-title">Modules</div>
+        <a href="/intel"           className={'intel-rail-item' + (activeModule === 'dashboard' ? ' active' : '')}>Dashboard</a>
+        <a href="/intel/companies" className={'intel-rail-item' + (activeModule === 'companies' ? ' active' : '')}>All companies</a>
+        <a href="/intel/managers"  className={'intel-rail-item' + (activeModule === 'managers'  ? ' active' : '')}>All managers</a>
+        <a href="/intel/funds"     className={'intel-rail-item' + (activeModule === 'funds'     ? ' active' : '')}>All funds</a>
+        <a href="/intel/spvs"      className={'intel-rail-item' + (activeModule === 'spvs'      ? ' active' : '')}>All SPVs</a>
+        <a href="/intel/people"    className={'intel-rail-item' + (activeModule === 'people'    ? ' active' : '')}>People</a>
+        <a href="/intel/timeline"  className={'intel-rail-item' + (activeModule === 'timeline'  ? ' active' : '')}>Timeline</a>
+
+        {railFilters && (
+          <>
+            <div className="intel-rail-section-title">Parameters</div>
+            <div className="intel-rail-filters">{railFilters}</div>
+          </>
+        )}
+      </aside>
+
+      <div className="intel-main">
+        <div className="intel-topbar">
+          <div className="intel-breadcrumb">
+            {Array.isArray(breadcrumb) ? breadcrumb.map((seg, i) => (
+              <React.Fragment key={i}>
+                {i > 0 && <span className="intel-breadcrumb-sep">/</span>}
+                {seg.href ? <a href={seg.href}>{seg.label}</a> :
+                  <span className={i === breadcrumb.length - 1 ? 'intel-breadcrumb-current' : ''}>{seg.label}</span>}
+              </React.Fragment>
+            )) : breadcrumb}
+          </div>
+          <div className="flex items-center gap-2">{rightActions}</div>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// Pin/unpin button — small action shown on company pages.
+function WatchlistButton({ slug }) {
+  const { has, toggle } = useWatchlist();
+  const pinned = has(slug);
+  return (
+    <button onClick={() => toggle(slug)} className="nport-button" title={pinned ? 'Remove from watchlist' : 'Add to watchlist'}>
+      {pinned ? '★ Watching' : '☆ Watch'}
+    </button>
+  );
+}
+
+// --- cross-cutting placeholder pages ----------------------------------------
+// Stub implementations — Phase 3 fills these with real data + filters.
+
+function DashboardPage() {
+  return (
+    <AppShell activeModule="dashboard" breadcrumb={[{ label: 'Dashboard' }]}>
+      <div className="intel-page">
+        <h1 className="font-serif text-[28px] font-bold tracking-tight">Good evening</h1>
+        <p className="text-[12px] text-slate-500 mt-1">Dashboard placeholder — companies-list + activity feed land here next.</p>
+        <div className="mt-6 text-sm text-slate-600">
+          Pinned companies are in the rail on the left. Click any to drill in. Use the Modules section for cross-cutting views.
+        </div>
+      </div>
+    </AppShell>
+  );
+}
+
+function AllCompaniesPage() {
+  return (
+    <AppShell activeModule="companies" breadcrumb={[{ label: 'All companies' }]}>
+      <div className="intel-page">
+        <h1 className="font-serif text-[26px] font-bold tracking-tight">All companies</h1>
+        <p className="text-[12px] text-slate-500 mt-1">Sortable list of every tracked company — coming next session. For now, click a watchlist item.</p>
+      </div>
+    </AppShell>
+  );
+}
+
+function AllManagersPage() {
+  return (
+    <AppShell activeModule="managers" breadcrumb={[{ label: 'All managers' }]}>
+      <div className="intel-page">
+        <h1 className="font-serif text-[26px] font-bold tracking-tight">All managers</h1>
+        <p className="text-[12px] text-slate-500 mt-1">Cross-cutting view across all tracked companies — coming next session.</p>
+      </div>
+    </AppShell>
+  );
+}
+
+function AllFundsPage() {
+  return (
+    <AppShell activeModule="funds" breadcrumb={[{ label: 'All funds' }]}>
+      <div className="intel-page">
+        <h1 className="font-serif text-[26px] font-bold tracking-tight">All funds</h1>
+        <p className="text-[12px] text-slate-500 mt-1">All N-PORT mutual fund holdings of tracked companies — coming next session.</p>
+      </div>
+    </AppShell>
+  );
+}
+
+function AllSpvsPage() {
+  return (
+    <AppShell activeModule="spvs" breadcrumb={[{ label: 'All SPVs' }]}>
+      <div className="intel-page">
+        <h1 className="font-serif text-[26px] font-bold tracking-tight">All SPVs</h1>
+        <p className="text-[12px] text-slate-500 mt-1">All Form D pooled-vehicle offerings of tracked companies — coming next session.</p>
+      </div>
+    </AppShell>
+  );
+}
+
+function PeoplePage() {
+  return (
+    <AppShell activeModule="people" breadcrumb={[{ label: 'People' }]}>
+      <div className="intel-page">
+        <h1 className="font-serif text-[26px] font-bold tracking-tight">People</h1>
+        <p className="text-[12px] text-slate-500 mt-1">Signatories, CCOs, principals, and team members across all entities — coming next session.</p>
+      </div>
+    </AppShell>
+  );
+}
+
+function TimelinePage() {
+  return (
+    <AppShell activeModule="timeline" breadcrumb={[{ label: 'Timeline' }]}>
+      <div className="intel-page">
+        <h1 className="font-serif text-[26px] font-bold tracking-tight">Timeline</h1>
+        <p className="text-[12px] text-slate-500 mt-1">Recent lifecycle events + filings across all tracked companies — coming next session.</p>
+      </div>
+    </AppShell>
+  );
+}
+
 // --- main page --------------------------------------------------------------
+
+// Static tab keys for the IntelPage tab control. Module-level to keep the
+// reference stable across renders (useHashTab compares deps).
+const INTEL_TAB_KEYS = ['managers', 'funds', 'spvs', 'timeline'];
 
 function IntelPage({ slug }) {
   const [data, setData] = useStateI(null);
   const [error, setError] = useStateI(null);
   const [auditMode, setAuditMode] = useStateI(false);
+  const [showAdvanced, setShowAdvanced] = useStateI(false);
+  const [activeTab, setActiveTab] = useHashTab(INTEL_TAB_KEYS, 'managers');
 
   useEffectI(() => {
     setData(null);
@@ -1310,174 +1887,178 @@ function IntelPage({ slug }) {
       .catch((e) => setError(e.message));
   }, [slug, auditMode]);
 
-  // Pretty company name from the URL slug while we wait for data —
-  // avoids exposing the raw slug ('anthropic-ai-inc') to the user.
-  const prettySlug = slug
-    .replace(/[-_]/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
+  // Pretty fallback while data is loading. Uses the module-level
+  // prettySlug helper (not the React Hook rules; just a function).
+  const slugPretty = prettySlug(slug);
 
-  // Dynamic browser tab title — "Anthropic · Fund Holders Intel" once
-  // data loads, falls back to pretty-slug while loading.
+  // Dynamic browser tab title.
   useEffectI(() => {
-    const name = (data && data.company && data.company.display_name) || prettySlug;
+    const name = (data && data.company && data.company.display_name) || slugPretty;
     document.title = `${name} · Fund Holders Intel`;
-  }, [data, prettySlug]);
+  }, [data, slugPretty]);
+
+  const breadcrumb = [
+    { label: 'Companies', href: '/intel/companies' },
+    { label: (data && data.company && data.company.display_name) || slugPretty },
+  ];
 
   if (error) {
     return (
-      <div className="max-w-2xl mx-auto px-6 py-16">
-        <h1 className="font-serif text-3xl font-semibold mb-3 text-slate-900">
-          Couldn't load {prettySlug}
-        </h1>
-        <p className="text-sm text-slate-600 mb-4">{error}</p>
-        <a href="/intel/search" className="text-sm text-slate-700 underline hover:text-slate-900">
-          ← Back to search
-        </a>
-      </div>
+      <AppShell activeWatchlistSlug={slug} breadcrumb={breadcrumb}>
+        <div className="intel-page">
+          <div className="max-w-2xl py-12">
+            <h1 className="font-serif text-3xl font-semibold mb-3 text-slate-900">
+              Couldn't load {slugPretty}
+            </h1>
+            <p className="text-sm text-slate-600 mb-4">{error}</p>
+            <a href="/intel/search" className="nport-button">← Back to search</a>
+          </div>
+        </div>
+      </AppShell>
     );
   }
 
   if (!data) {
     return (
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        <div className="animate-pulse">
-          <div className="h-9 w-64 bg-slate-200 rounded mb-3"></div>
-          <div className="h-3 w-48 bg-slate-100 rounded mb-12"></div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
-            {[0,1,2,3].map(i => (
-              <div key={i} className="rounded-lg border border-slate-200 bg-white p-4">
-                <div className="h-2 w-20 bg-slate-100 rounded mb-3"></div>
-                <div className="h-7 w-16 bg-slate-200 rounded"></div>
-              </div>
-            ))}
+      <AppShell activeWatchlistSlug={slug} breadcrumb={breadcrumb}>
+        <div className="intel-page">
+          <div className="animate-pulse">
+            <div className="h-9 w-64 bg-slate-200 rounded mb-3"></div>
+            <div className="h-3 w-48 bg-slate-100 rounded mb-10"></div>
+            <div className="h-72 rounded-lg bg-slate-100"></div>
           </div>
-          <div className="h-5 w-40 bg-slate-200 rounded mb-4"></div>
-          <div className="h-72 rounded-lg bg-slate-100"></div>
         </div>
-      </div>
+      </AppShell>
     );
   }
 
   const { company, lifecycle, summary, nport_holders, formd_holders, advisers } = data;
   const isPrivate = lifecycle.current_status === 'private';
   const totalValue = (advisers || []).reduce((s, a) => s + (a.total_value_usd || 0), 0);
+  const hasTimeline = lifecycle.events && lifecycle.events.length > 0;
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-8">
-      {/* Top bar with global search */}
-      <div className="flex justify-end mb-4">
-        <GlobalSearchBar />
-      </div>
-
-      {/* Company header */}
-      <header className="mb-8 pb-6 border-b border-slate-200">
-        <div className="flex items-start justify-between gap-6 flex-wrap">
-          <div>
-            <h1 className="font-serif text-4xl font-bold tracking-tight text-slate-900">{company.display_name}</h1>
-            <div className="flex items-center gap-4 mt-2 text-sm text-slate-600">
-              {company.sector && <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs uppercase tracking-wide font-medium">{company.sector}</span>}
-              {company.founded_year && <span>Founded {company.founded_year}</span>}
+    <AppShell
+      activeWatchlistSlug={slug}
+      breadcrumb={breadcrumb}
+      rightActions={<WatchlistButton slug={slug} />}
+    >
+      <div className="intel-page">
+        {/* Company header — name + metadata on left, last valuation on right.
+            Visual debt cleanup applied: dropped the 4-card metric strip, the
+            heavy amber banner, and the "most recent reported" wordy eyebrow.
+            See .llm/IA_REDESIGN_CRITIQUE_2026-05-26.md §3. */}
+        <header className="flex items-start justify-between gap-6 flex-wrap mb-2">
+          <div className="min-w-0">
+            <h1 className="nport-title text-slate-900">{company.display_name}</h1>
+            <div className="flex items-center flex-wrap gap-3 mt-3 text-[12px] text-slate-600">
+              {company.sector && <span className="nport-status">{company.sector}</span>}
+              {company.founded_year && <span className="text-slate-500">Founded {company.founded_year}</span>}
               {company.primary_domain && (
-                <a href={`https://${company.primary_domain}`} target="_blank" rel="noopener noreferrer" className="font-mono text-xs text-slate-700 hover:text-slate-900 underline">
+                <a href={`https://${company.primary_domain}`} target="_blank" rel="noopener noreferrer"
+                   className="font-mono text-[11px] text-slate-600 hover:text-slate-900 underline underline-offset-2">
                   {company.primary_domain}
                 </a>
               )}
+              {!isPrivate && (
+                <span className="inline-flex items-center gap-1.5 text-[11px] text-amber-700">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                  Now {fmtStatus(lifecycle.current_status)}
+                  {lifecycle.last_event_date && ` · ${fmtDate(lifecycle.last_event_date)}`}
+                </span>
+              )}
             </div>
           </div>
-          <div className="text-right">
-            {company.latest_known_valuation_usd && (
-              <>
-                <div className="font-serif text-2xl font-semibold text-slate-900">{fmtUsdShort(company.latest_known_valuation_usd)}</div>
-                <div className="text-xs text-slate-500">{company.most_recent_round || 'last reported valuation'}{company.most_recent_round_date ? ` • ${fmtDate(company.most_recent_round_date)}` : ''}</div>
-              </>
+          {company.latest_known_valuation_usd && (
+            <div className="text-right shrink-0">
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Last valuation</div>
+              <div className="font-mono text-[26px] font-semibold text-slate-900 tabular-nums tracking-tight mt-1 leading-none">
+                {fmtUsdShort(company.latest_known_valuation_usd)}
+              </div>
+              {(company.most_recent_round || company.most_recent_round_date) && (
+                <div className="text-[11px] text-slate-500 mt-1">
+                  {company.most_recent_round}
+                  {company.most_recent_round && company.most_recent_round_date && ' · '}
+                  {company.most_recent_round_date && fmtDate(company.most_recent_round_date)}
+                </div>
+              )}
+            </div>
+          )}
+        </header>
+
+        {/* One-line stat summary replaces the 4-card metric strip (§3 #5). */}
+        <p className="text-[13px] text-slate-600 mt-5 mb-6">
+          <span className="font-mono font-semibold text-slate-900 tabular-nums">{fmtUsdShort(totalValue)}</span> held by tracked investors —{' '}
+          <span className="tabular-nums font-mono">{fmtInt(summary.distinct_advisers)}</span> managers ·{' '}
+          <span className="tabular-nums font-mono">{fmtInt(summary.eligible_nport)}</span> mutual fund filings ·{' '}
+          <span className="tabular-nums font-mono">{fmtInt(summary.eligible_formd)}</span> SPVs
+        </p>
+
+        {/* Sub-tabs — segmented control */}
+        <SegmentedTabs
+          tabs={[
+            { key: 'managers', label: 'Managers', count: summary.distinct_advisers },
+            { key: 'funds', label: 'Mutual funds', count: nport_holders.length },
+            { key: 'spvs', label: 'SPVs', count: formd_holders.length },
+            ...(hasTimeline ? [{ key: 'timeline', label: 'Timeline', count: lifecycle.events.length }] : []),
+          ]}
+          activeKey={activeTab}
+          onChange={setActiveTab}
+        />
+
+        {/* Tab body */}
+        {activeTab === 'managers' && (
+          <AdviserListDetail
+            advisers={advisers}
+            nportHolders={nport_holders}
+            formdHolders={formd_holders}
+            companyName={company.display_name}
+          />
+        )}
+
+        {activeTab === 'funds' && (
+          <UnifiedFundsPane
+            nportHolders={nport_holders}
+            formdHolders={formd_holders}
+            slug={company.slug}
+            audit={summary.audit_mode}
+            lockedSource="nport"
+          />
+        )}
+
+        {activeTab === 'spvs' && (
+          <UnifiedFundsPane
+            nportHolders={nport_holders}
+            formdHolders={formd_holders}
+            slug={company.slug}
+            audit={summary.audit_mode}
+            lockedSource="formd"
+          />
+        )}
+
+        {activeTab === 'timeline' && hasTimeline && (
+          <LifecycleTimeline events={lifecycle.events} />
+        )}
+
+        {/* Advanced disclosure (audit toggle moved off primary view) */}
+        {activeTab !== 'timeline' && (
+          <div className="mt-8 pt-4 border-t border-slate-100">
+            <button onClick={() => setShowAdvanced(s => !s)}
+                    className="text-[11px] text-slate-400 hover:text-slate-700 font-mono uppercase tracking-wider">
+              {showAdvanced ? '▾ Advanced' : '▸ Advanced'}
+            </button>
+            {showAdvanced && (
+              <div className="mt-3 text-[12px] text-slate-500">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={auditMode} onChange={(e) => setAuditMode(e.target.checked)} className="rounded border-slate-300" />
+                  <span>Include filings after the company went public ({fmtInt(summary.total_nport - summary.eligible_nport)} hidden)</span>
+                </label>
+              </div>
             )}
           </div>
-        </div>
-      </header>
-
-      {/* Status banner — shown only when the company is no longer private */}
-      {!isPrivate && (
-        <div className="mb-6 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm flex items-start gap-2">
-          <svg className="w-4 h-4 mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          <div>
-            {company.display_name} is now <strong>{fmtStatus(lifecycle.current_status)}</strong>
-            {lifecycle.last_event_date && ` as of ${fmtDate(lifecycle.last_event_date)}`}.
-            {!auditMode && ` Holdings shown are from while the company was private.`}
-            {auditMode && ` Showing all filings, including those after the company went public.`}
-          </div>
-        </div>
-      )}
-
-      {/* Summary stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <div className="text-xs text-slate-500 uppercase tracking-wide">N-PORT holdings</div>
-          <div className="font-serif text-2xl font-semibold text-slate-900 mt-1">{fmtInt(summary.eligible_nport)}</div>
-          {summary.total_nport !== summary.eligible_nport && (
-            <div className="text-xs text-slate-500 mt-0.5">{fmtInt(summary.total_nport - summary.eligible_nport)} post-IPO filings hidden</div>
-          )}
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <div className="text-xs text-slate-500 uppercase tracking-wide">Form D vehicles</div>
-          <div className="font-serif text-2xl font-semibold text-slate-900 mt-1">{fmtInt(summary.eligible_formd)}</div>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <div className="text-xs text-slate-500 uppercase tracking-wide">Adviser firms</div>
-          <div className="font-serif text-2xl font-semibold text-slate-900 mt-1">{fmtInt(summary.distinct_advisers)}</div>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <div className="text-xs text-slate-500 uppercase tracking-wide">Total value</div>
-          <div className="font-serif text-2xl font-semibold text-slate-900 mt-1">{fmtUsdShort(totalValue)}</div>
-        </div>
+        )}
       </div>
-
-      {/* Audit toggle */}
-      <div className="mb-6 flex items-center justify-end text-xs">
-        <label className="flex items-center gap-2 text-slate-600 cursor-pointer">
-          <input type="checkbox" checked={auditMode} onChange={(e) => setAuditMode(e.target.checked)} className="rounded border-slate-300" />
-          Include post-IPO filings
-        </label>
-      </div>
-
-      {/* Advisers — primary section (two-pane list + detail) */}
-      <section className="mb-10">
-        <h2 className="font-serif text-2xl font-semibold text-slate-900 mb-4">Adviser firms</h2>
-        <AdviserListDetail
-          advisers={advisers}
-          nportHolders={nport_holders}
-          formdHolders={formd_holders}
-          companyName={company.display_name}
-        />
-      </section>
-
-      {/* Unified funds pane: N-PORT + Form D, source-filterable, expandable rows */}
-      <CollapsibleSection
-        title="Funds & vehicles"
-        count={nport_holders.length + formd_holders.length}
-      >
-        <UnifiedFundsPane
-          nportHolders={nport_holders}
-          formdHolders={formd_holders}
-          slug={company.slug}
-          audit={summary.audit_mode}
-        />
-      </CollapsibleSection>
-
-      {/* Lifecycle events */}
-      {(lifecycle.events && lifecycle.events.length > 0) && (
-        <CollapsibleSection title="Lifecycle events" count={lifecycle.events.length}>
-          <LifecycleTimeline events={lifecycle.events} />
-        </CollapsibleSection>
-      )}
-
-      {/* Footer */}
-      <IntelFooter />
-
-    </div>
+    </AppShell>
   );
 }
 
@@ -1504,31 +2085,28 @@ function AdviserPage({ crd }) {
 
   if (error) {
     return (
-      <div className="max-w-2xl mx-auto px-6 py-16">
-        <a href="/intel/search" className="text-sm text-slate-500 hover:text-slate-900">← Back to search</a>
-        <h1 className="font-serif text-3xl font-semibold text-slate-900 mt-4 mb-3">Couldn't load adviser</h1>
-        <p className="text-sm text-slate-600">{error}</p>
-      </div>
+      <AppShell activeModule="managers" breadcrumb={[{ label: 'Managers', href: '/intel/managers' }, { label: `CRD ${crd}` }]}>
+        <div className="intel-page">
+          <div className="max-w-2xl py-12">
+            <a href="/intel/search" className="text-sm text-slate-500 hover:text-slate-900">← Back to search</a>
+            <h1 className="font-serif text-3xl font-semibold text-slate-900 mt-4 mb-3">Couldn't load adviser</h1>
+            <p className="text-sm text-slate-600">{error}</p>
+          </div>
+        </div>
+      </AppShell>
     );
   }
   if (!data) {
     return (
-      <div className="max-w-5xl mx-auto px-6 py-10">
-        <div className="animate-pulse">
-          <div className="h-3 w-24 bg-slate-100 rounded mb-6"></div>
-          <div className="h-9 w-80 bg-slate-200 rounded mb-3"></div>
-          <div className="h-3 w-40 bg-slate-100 rounded mb-10"></div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
-            {[0,1,2,3].map(i => (
-              <div key={i} className="rounded-lg border border-slate-200 bg-white p-4">
-                <div className="h-2 w-20 bg-slate-100 rounded mb-3"></div>
-                <div className="h-7 w-16 bg-slate-200 rounded"></div>
-              </div>
-            ))}
+      <AppShell activeModule="managers" breadcrumb={[{ label: 'Managers', href: '/intel/managers' }, { label: `CRD ${crd}` }]}>
+        <div className="intel-page">
+          <div className="animate-pulse">
+            <div className="h-9 w-80 bg-slate-200 rounded mb-3"></div>
+            <div className="h-3 w-40 bg-slate-100 rounded mb-10"></div>
+            <div className="h-64 rounded-lg bg-slate-100"></div>
           </div>
-          <div className="h-64 rounded-lg bg-slate-100"></div>
         </div>
-      </div>
+      </AppShell>
     );
   }
 
@@ -1542,7 +2120,7 @@ function AdviserPage({ crd }) {
       render: r => (
         <a
           href={`/intel/${encodeURIComponent(r.slug)}`}
-          className="font-serif italic font-semibold text-slate-900 hover:text-slate-700"
+          className="font-serif font-semibold text-slate-900 hover:text-slate-700 hover:underline underline-offset-2"
         >
           {r.display_name}
         </a>
@@ -1560,7 +2138,7 @@ function AdviserPage({ crd }) {
       accessor: r => r.lifecycle_status,
       cellClassName: 'text-xs',
       render: r => (
-        <span className={r.lifecycle_status === 'private' ? 'text-slate-600' : 'text-amber-700'}>
+        <span className={r.lifecycle_status === 'private' ? 'text-slate-600' : 'text-slate-500'}>
           {fmtStatus(r.lifecycle_status)}
         </span>
       ),
@@ -1586,40 +2164,36 @@ function AdviserPage({ crd }) {
   const hasContact = adviser.phone || adviser.website || adviser.cco_name || adviser.signatory_name;
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-6">
-      <a href="/" className="text-sm text-slate-500 hover:text-slate-900">← Back</a>
-
-      {/* Top bar with search */}
-      <div className="flex justify-end mt-2 mb-2">
-        <GlobalSearchBar />
-      </div>
-
+    <AppShell
+      activeModule="managers"
+      breadcrumb={[
+        { label: 'Managers', href: '/intel/managers' },
+        { label: adviser.name || 'Unidentified firm' },
+      ]}
+    >
+      <div className="intel-page">
       {/* Header */}
       <div className="mt-1 mb-6">
         <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900">
-          {adviser.name || '(unidentified firm)'}
+          {adviser.name || 'Unidentified firm'}
         </h1>
         <div className="text-xs font-mono text-slate-500 mt-1">CRD {adviser.crd}</div>
         <div className="flex flex-wrap items-center gap-1.5 mt-3">
           {adviser.website && (
-            <a href={normalizeHref(adviser.website)} target="_blank" rel="noopener noreferrer"
-               className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
+            <a href={normalizeHref(adviser.website)} target="_blank" rel="noopener noreferrer" className="nport-button">
               Website
             </a>
           )}
-          <a href={`https://adviserinfo.sec.gov/firm/summary/${adviser.crd}`} target="_blank" rel="noopener noreferrer"
-             className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
+          <a href={`https://adviserinfo.sec.gov/firm/summary/${adviser.crd}`} target="_blank" rel="noopener noreferrer" className="nport-button">
             IAPD
           </a>
           {adviser.form_adv_url && (
-            <a href={adviser.form_adv_url} target="_blank" rel="noopener noreferrer"
-               className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
+            <a href={adviser.form_adv_url} target="_blank" rel="noopener noreferrer" className="nport-button">
               Form ADV
             </a>
           )}
           {adviser.linkedin_company_url && (
-            <a href={adviser.linkedin_company_url} target="_blank" rel="noopener noreferrer"
-               className="px-2.5 py-1 border border-slate-200 rounded text-[10px] font-semibold text-slate-700 hover:bg-slate-50 bg-white">
+            <a href={adviser.linkedin_company_url} target="_blank" rel="noopener noreferrer" className="nport-button">
               LinkedIn
             </a>
           )}
@@ -1637,7 +2211,7 @@ function AdviserPage({ crd }) {
           <div className="font-mono text-lg font-semibold text-slate-900 tabular-nums mt-1">{fmtInt(summary.distinct_companies)}</div>
         </div>
         <div>
-          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Evidence rows</div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Filings</div>
           <div className="font-mono text-lg font-semibold text-slate-900 tabular-nums mt-1">{fmtInt(summary.total_evidence_count)}</div>
         </div>
         <div>
@@ -1650,7 +2224,7 @@ function AdviserPage({ crd }) {
       <div className="flex justify-end mb-3">
         <label className="text-xs text-slate-500 flex items-center gap-2">
           <input type="checkbox" checked={audit} onChange={e => setAudit(e.target.checked)} />
-          Include post-IPO filings
+          Show holdings after IPO
         </label>
       </div>
 
@@ -1822,9 +2396,8 @@ function AdviserPage({ crd }) {
           />
         </div>
       </section>
-
-      <IntelFooter />
-    </div>
+      </div>
+    </AppShell>
   );
 }
 
@@ -1847,31 +2420,28 @@ function FundPage({ accession }) {
 
   if (error) {
     return (
-      <div className="max-w-2xl mx-auto px-6 py-16">
-        <a href="/intel/search" className="text-sm text-slate-500 hover:text-slate-900">← Back to search</a>
-        <h1 className="font-serif text-3xl font-semibold text-slate-900 mt-4 mb-3">Couldn't load filing</h1>
-        <p className="text-sm text-slate-600">{error}</p>
-      </div>
+      <AppShell activeModule="spvs" breadcrumb={[{ label: 'SPVs', href: '/intel/spvs' }, { label: accession }]}>
+        <div className="intel-page">
+          <div className="max-w-2xl py-12">
+            <a href="/intel/search" className="text-sm text-slate-500 hover:text-slate-900">← Back to search</a>
+            <h1 className="font-serif text-3xl font-semibold text-slate-900 mt-4 mb-3">Couldn't load filing</h1>
+            <p className="text-sm text-slate-600">{error}</p>
+          </div>
+        </div>
+      </AppShell>
     );
   }
   if (!data) {
     return (
-      <div className="max-w-5xl mx-auto px-6 py-10">
-        <div className="animate-pulse">
-          <div className="h-3 w-24 bg-slate-100 rounded mb-6"></div>
-          <div className="h-9 w-96 bg-slate-200 rounded mb-3"></div>
-          <div className="h-3 w-60 bg-slate-100 rounded mb-10"></div>
-          <div className="grid grid-cols-3 gap-4 mb-10">
-            {[0,1,2].map(i => (
-              <div key={i} className="rounded-lg border border-slate-200 bg-white p-4">
-                <div className="h-2 w-20 bg-slate-100 rounded mb-3"></div>
-                <div className="h-6 w-24 bg-slate-200 rounded"></div>
-              </div>
-            ))}
+      <AppShell activeModule="spvs" breadcrumb={[{ label: 'SPVs', href: '/intel/spvs' }, { label: accession }]}>
+        <div className="intel-page">
+          <div className="animate-pulse">
+            <div className="h-9 w-96 bg-slate-200 rounded mb-3"></div>
+            <div className="h-3 w-60 bg-slate-100 rounded mb-10"></div>
+            <div className="h-64 rounded-lg bg-slate-100"></div>
           </div>
-          <div className="h-64 rounded-lg bg-slate-100"></div>
         </div>
-      </div>
+      </AppShell>
     );
   }
 
@@ -1883,9 +2453,16 @@ function FundPage({ accession }) {
   const totalInvestors = filing.total_investors != null ? parseInt(filing.total_investors, 10) : null;
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-6">
+    <AppShell
+      activeModule="spvs"
+      breadcrumb={[
+        { label: 'SPVs', href: '/intel/spvs' },
+        { label: filing.entityname || accession },
+      ]}
+    >
+      <div className="intel-page">
       <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
-        <a href="/" className="text-sm text-slate-500 hover:text-slate-900">← Back</a>
+        <a href="/" className="nport-button">← Back</a>
         <GlobalSearchBar />
       </div>
 
@@ -1897,7 +2474,7 @@ function FundPage({ accession }) {
             </span>
           )}
           {filing.is_amendment && (
-            <span className="text-[10px] uppercase tracking-widest font-semibold bg-amber-100 text-amber-900 px-2 py-1 rounded">
+            <span className="text-[10px] uppercase tracking-widest font-semibold bg-slate-100 text-slate-600 px-2 py-1 rounded">
               Amendment (D/A)
             </span>
           )}
@@ -1919,7 +2496,7 @@ function FundPage({ accession }) {
             <span className="text-[10px] uppercase tracking-widest text-slate-500 font-medium">Holds</span>
             {trackedCompanies.map((tc, i) => (
               <a key={i} href={`/intel/${encodeURIComponent(tc.slug)}`}
-                 className="text-sm font-serif italic font-semibold text-slate-900 hover:text-slate-700 underline">
+                 className="text-sm font-serif font-semibold text-slate-900 hover:text-slate-700 underline">
                 {tc.slug}
               </a>
             ))}
@@ -1941,7 +2518,7 @@ function FundPage({ accession }) {
           <div className="font-mono text-lg font-semibold text-slate-900 tabular-nums mt-1">{fmtUsdShort(offeringRemaining)}</div>
         </div>
         <div>
-          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Min. investment</div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Minimum check</div>
           <div className="font-mono text-lg font-semibold text-slate-900 tabular-nums mt-1">{fmtUsdShort(minInvest)}</div>
         </div>
         <div>
@@ -1954,7 +2531,7 @@ function FundPage({ accession }) {
         <div className="md:col-span-2 space-y-5">
           <section className="nport-panel">
             <div className="nport-panel-header">
-              <h2 className="font-serif text-lg font-semibold text-slate-900">Filing particulars</h2>
+              <h2 className="font-serif text-lg font-semibold text-slate-900">Filing details</h2>
             </div>
             <dl className="px-5 py-4 grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
               <div><dt className="text-[10px] uppercase tracking-widest text-slate-500 font-medium">Filing date</dt><dd className="text-slate-900 mt-0.5">{fmtDate(filing.filing_date)}</dd></div>
@@ -1987,7 +2564,7 @@ function FundPage({ accession }) {
                 <h2 className="font-serif text-base font-semibold text-slate-900">Investment Adviser</h2>
               </div>
               <div className="px-4 py-3 space-y-2 text-sm">
-                <a href={`/intel/adviser/${encodeURIComponent(adviser.crd)}`} className="font-serif italic font-semibold text-slate-900 hover:text-slate-700 underline block">{adviser.name}</a>
+                <a href={`/intel/adviser/${encodeURIComponent(adviser.crd)}`} className="font-serif font-semibold text-slate-900 hover:text-slate-700 underline block">{adviser.name}</a>
                 <div className="text-[10px] font-mono text-slate-500">CRD {adviser.crd}</div>
                 {adviser.total_aum && <div className="text-[11px] text-slate-600">AUM <span className="font-mono">{fmtUsdShort(adviser.total_aum)}</span></div>}
                 {adviser.phone && <div className="text-[12px] flex gap-2 items-baseline"><span className="text-slate-500">Phone</span><span className="font-mono text-slate-700">{adviser.phone}</span></div>}
@@ -2039,9 +2616,8 @@ function FundPage({ accession }) {
           </section>
         </div>
       </div>
-
-      <IntelFooter />
-    </div>
+      </div>
+    </AppShell>
   );
 }
 
@@ -2061,9 +2637,9 @@ function GlobalSearchBar({ initialQuery = '' }) {
         value={q}
         onChange={e => setQ(e.target.value)}
         placeholder="Search companies, advisers, funds, filings…"
-        className="w-72 rounded border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:border-slate-500"
+        className="nport-input w-80 px-3 py-1.5 text-[12px] text-slate-700 placeholder:text-slate-400"
       />
-      <button type="submit" className="rounded border border-slate-300 bg-white px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50">
+      <button type="submit" className="nport-button">
         Search
       </button>
     </form>
@@ -2107,18 +2683,20 @@ function SearchPage({ initialQuery }) {
     adv_fund: 'ADV fund',
     formd_filing: 'Form D',
   };
+  // All 4 types use the same neutral pill — type-label text differentiates
+  // without bright color noise. Was: company slate-800/white, adviser
+  // slate-200, adv_fund blue, formd amber.
   const typeColors = {
-    company: 'bg-slate-800 text-white',
-    adviser: 'bg-slate-200 text-slate-800',
-    adv_fund: 'bg-blue-100 text-blue-800',
-    formd_filing: 'bg-amber-100 text-amber-900',
+    company: 'bg-slate-100 text-slate-700',
+    adviser: 'bg-slate-100 text-slate-700',
+    adv_fund: 'bg-slate-100 text-slate-700',
+    formd_filing: 'bg-slate-100 text-slate-700',
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-6">
-      <a href="/" className="text-sm text-slate-500 hover:text-slate-900">← Back</a>
-
-      <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900 mt-3 mb-5">
+    <AppShell breadcrumb={[{ label: 'Search' }]}>
+      <div className="intel-page">
+      <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900 mt-1 mb-5">
         Search
       </h1>
 
@@ -2129,9 +2707,9 @@ function SearchPage({ initialQuery }) {
           onChange={e => setQ(e.target.value)}
           autoFocus
           placeholder="Search companies, advisers, funds, filings…"
-          className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:border-slate-500"
+          className="nport-input flex-1 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400"
         />
-        <button type="submit" className="rounded border border-slate-300 bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+        <button type="submit" className="nport-button nport-button-primary px-4 py-2">
           Search
         </button>
       </form>
@@ -2154,11 +2732,11 @@ function SearchPage({ initialQuery }) {
               </span>
             )}
           </div>
-          <div className="rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
+          <div className="nport-panel divide-y divide-slate-100 overflow-hidden">
             {data.results.map((r, i) => {
               const inner = (
                 <>
-                  <span className={`inline-block text-[9px] uppercase tracking-widest font-semibold px-1.5 py-0.5 rounded ${typeColors[r.type] || 'bg-slate-100 text-slate-700'}`}>
+                  <span className={`inline-block text-[10px] uppercase tracking-widest font-semibold font-mono px-1.5 py-0.5 rounded ${typeColors[r.type] || 'bg-slate-100 text-slate-700'}`}>
                     {typeLabels[r.type] || r.type}
                   </span>
                   <div className="flex-1 min-w-0">
@@ -2194,40 +2772,714 @@ function SearchPage({ initialQuery }) {
           </div>
         </>
       )}
+      </div>
+    </AppShell>
+  );
+}
+
+// --- discovered manager page (non-CRD VC/PE firm from enriched_managers) ----
+
+/**
+ * DiscoveredPage — detail page for a manager found via series-master
+ * extraction (NOT SEC-registered). Mirrors AdviserPage but simpler since
+ * the data is less rich. Backend: GET /api/intel/discovered/:id.
+ */
+function DiscoveredPage({ id }) {
+  const [data, setData] = useStateI(null);
+  const [error, setError] = useStateI(null);
+
+  useEffectI(() => {
+    setData(null);
+    setError(null);
+    fetch(`/api/intel/discovered/${encodeURIComponent(id)}`)
+      .then(r => r.ok ? r.json() : r.json().then(b => Promise.reject(b)))
+      .then(setData)
+      .catch(e => setError(e && e.error ? e.error : 'Failed to load'));
+  }, [id]);
+
+  useEffectI(() => {
+    const name = (data && data.manager && data.manager.name) || 'Discovered manager';
+    document.title = `${name} · Fund Holders Intel`;
+  }, [data]);
+
+  if (error) {
+    return (
+      <AppShell activeModule="managers" breadcrumb={[{ label: 'Managers', href: '/intel/managers' }, { label: 'Discovered' }]}>
+        <div className="intel-page">
+          <div className="max-w-2xl py-12">
+            <a href="/intel/search" className="text-sm text-slate-500 hover:text-slate-900">← Back to search</a>
+            <h1 className="font-serif text-3xl font-semibold text-slate-900 mt-4 mb-3">Couldn't load manager</h1>
+            <p className="text-sm text-slate-600">{error}</p>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+  if (!data) {
+    return (
+      <AppShell activeModule="managers" breadcrumb={[{ label: 'Managers', href: '/intel/managers' }, { label: 'Discovered' }]}>
+        <div className="intel-page">
+          <div className="animate-pulse">
+            <div className="h-9 w-80 bg-slate-200 rounded mb-3"></div>
+            <div className="h-3 w-40 bg-slate-100 rounded mb-10"></div>
+            <div className="h-64 rounded-lg bg-slate-100"></div>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const { manager, summary, holders_using_this_manager: holders } = data;
+  const hasContact = manager.website_url || manager.linkedin_company_url || manager.twitter_handle || manager.primary_contact_email || manager.phone_number;
+  const hasGeo = manager.headquarters_city || manager.headquarters_state || manager.headquarters_country;
+
+  return (
+    <AppShell
+      activeModule="managers"
+      breadcrumb={[
+        { label: 'Managers', href: '/intel/managers' },
+        { label: manager.name || 'Discovered manager' },
+      ]}
+    >
+      <div className="intel-page">
+      <div className="mt-1 mb-6">
+        <div className="flex items-baseline gap-3 flex-wrap">
+          <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900">
+            {manager.name}
+          </h1>
+          <span className="text-[10px] uppercase tracking-widest font-semibold font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500"
+                title="Manager discovered via Form D series-master parsing (not SEC-registered)">
+            via filings
+          </span>
+        </div>
+        <div className="text-[11px] font-mono text-slate-500 mt-2 uppercase tracking-wider">
+          {manager.enrichment_status || 'candidate'}
+          {manager.fund_type && <span className="ml-3 normal-case tracking-normal font-sans">{manager.fund_type}</span>}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5 mt-3">
+          {manager.website_url && (
+            <a href={manager.website_url} target="_blank" rel="noopener noreferrer" className="nport-button">Website</a>
+          )}
+          {manager.linkedin_company_url && (
+            <a href={manager.linkedin_company_url} target="_blank" rel="noopener noreferrer" className="nport-button">LinkedIn</a>
+          )}
+          {manager.twitter_handle && (
+            <a href={`https://twitter.com/${manager.twitter_handle.replace(/^@/, '')}`} target="_blank" rel="noopener noreferrer" className="nport-button">Twitter</a>
+          )}
+        </div>
+      </div>
+
+      <div className="nport-metric-strip nport-metric-strip-3 mb-6">
+        <div>
+          <div className="nport-metric-label">Total holdings</div>
+          <div className="nport-metric-value">{fmtInt(summary?.total_holdings || 0)}</div>
+        </div>
+        <div>
+          <div className="nport-metric-label">Total value</div>
+          <div className="nport-metric-value">{fmtUsdShort(summary?.total_value_usd || 0)}</div>
+        </div>
+        <div>
+          <div className="nport-metric-label">Source</div>
+          <div className="nport-metric-value text-[15px] font-sans normal-case tracking-normal">Form D filings</div>
+        </div>
+      </div>
+
+      {(hasContact || hasGeo) && (
+        <section className="nport-panel mb-6">
+          <div className="nport-panel-header">
+            <h2 className="font-serif text-lg font-semibold text-slate-900">Firm details</h2>
+          </div>
+          <div className="px-5 py-4 grid md:grid-cols-2 gap-5 text-sm">
+            {hasContact && (
+              <div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Contact</div>
+                <div className="space-y-1.5">
+                  {manager.primary_contact_email && (
+                    <div className="flex gap-2"><span className="text-slate-500 w-20 shrink-0">Email</span>
+                      <a href={`mailto:${manager.primary_contact_email}`} className="font-mono text-[12px] text-slate-700 hover:text-slate-900 break-all">{manager.primary_contact_email}</a>
+                    </div>
+                  )}
+                  {manager.phone_number && (
+                    <div className="flex gap-2"><span className="text-slate-500 w-20 shrink-0">Phone</span>
+                      <span className="font-mono text-[12px] text-slate-700">{manager.phone_number}</span>
+                    </div>
+                  )}
+                  {manager.website_url && (
+                    <div className="flex gap-2"><span className="text-slate-500 w-20 shrink-0">Web</span>
+                      <a href={manager.website_url} target="_blank" rel="noopener noreferrer" className="font-mono text-[12px] text-slate-700 hover:text-slate-900 underline break-all">{manager.website_url.replace(/^https?:\/\//, '')}</a>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            {hasGeo && (
+              <div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Headquarters</div>
+                <div className="text-[12px] text-slate-700">
+                  {[manager.headquarters_city, manager.headquarters_state, manager.headquarters_country].filter(Boolean).join(', ')}
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Team members from enriched_managers — only if enrichment found people */}
+      {Array.isArray(manager.team_members) && manager.team_members.length > 0 && (
+        <section className="nport-panel mb-6">
+          <div className="nport-panel-header">
+            <h2 className="font-serif text-lg font-semibold text-slate-900">
+              Team <span className="text-slate-400 text-sm font-normal ml-1">({manager.team_members.length})</span>
+            </h2>
+          </div>
+          <div className="px-5 py-4 grid md:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+            {manager.team_members.map((m, i) => {
+              // Enrichment sources use either `title` or `role` for the
+              // person's role at the firm — accept both.
+              const role = m.title || m.role;
+              return (
+                <div key={i} className="space-y-1">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="font-serif text-[13px] font-semibold text-slate-900">{m.name}</span>
+                    <PersonContactButtons linkedin={m.linkedin || m.linkedin_url} email={m.email} />
+                  </div>
+                  {role && <div className="text-[11px] text-slate-500">{role}</div>}
+                  {m.email && (
+                    <a href={`mailto:${m.email}`} className="text-[11px] font-mono text-slate-600 hover:text-slate-900 break-all block">{m.email}</a>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {holders && holders.length > 0 && (
+        <section className="nport-panel">
+          <div className="nport-panel-header flex items-center justify-between">
+            <h2 className="font-serif text-lg font-semibold text-slate-900">
+              Form D filings <span className="text-slate-400 text-sm font-normal ml-1">({fmtInt(holders.length)})</span>
+            </h2>
+          </div>
+          <div className="p-3">
+            <ul className="divide-y divide-slate-100">
+              {holders.map((h, i) => (
+                <li key={i} className="flex items-center justify-between gap-3 py-2 px-2">
+                  <div className="min-w-0 flex-1">
+                    <a href={`/intel/fund/${encodeURIComponent(h.accession_number)}`}
+                       className="text-[13px] font-serif font-semibold text-slate-900 hover:text-slate-700 hover:underline truncate block">
+                      {h.filer_entityname}
+                    </a>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      {h.company_slug && <a href={`/intel/${encodeURIComponent(h.company_slug)}`} className="hover:text-slate-900 hover:underline">{h.company_slug}</a>}
+                      {h.filing_date && <span className="ml-2">{fmtDate(h.filing_date)}</span>}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0 font-mono text-[12px] font-semibold text-slate-900 tabular-nums">
+                    {fmtUsdShort(h.value_usd)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
+      </div>
+    </AppShell>
+  );
+}
+
+// ============================================================================
+// CRM PAGES (added 2026-05-31)
+// Personal CRM for tracking outreach to fund managers.
+// API: /api/intel/crm/*. Schema: nport/migrations/010_crm_schema.sql.
+// ============================================================================
+
+const CRM_STATUSES = ['cold','researching','outreach_sent','responded','engaged','dormant'];
+const CRM_PRIORITIES = [1, 2, 3, 4, 5];
+
+const fmtUsd = (v) => {
+  if (v == null) return '—';
+  const n = Number(v);
+  if (!Number.isFinite(n) || n === 0) return '—';
+  if (n >= 1e9) return `$${(n/1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `$${(n/1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `$${(n/1e3).toFixed(0)}K`;
+  return `$${n.toFixed(0)}`;
+};
+
+const fmtDate = (s) => {
+  if (!s) return '—';
+  try { return new Date(s).toISOString().slice(0, 10); } catch (e) { return s; }
+};
+
+function CrmPersonListPage() {
+  const [rows, setRows] = React.useState([]);
+  const [total, setTotal] = React.useState(0);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
+  const [filters, setFilters] = React.useState({ status: '', priorityMax: '', tag: '', hasEmail: false });
+
+  React.useEffect(() => {
+    const p = new URLSearchParams({ limit: '500' });
+    if (filters.status) p.set('status', filters.status);
+    if (filters.priorityMax) p.set('priority_max', filters.priorityMax);
+    if (filters.tag) p.set('tag', filters.tag);
+    if (filters.hasEmail) p.set('has_email', '1');
+    setLoading(true);
+    fetch(`/api/intel/crm/people?${p.toString()}`)
+      .then(r => r.json())
+      .then(d => { setRows(d.rows || []); setTotal(d.total || 0); setLoading(false); })
+      .catch(e => { setError(String(e)); setLoading(false); });
+  }, [filters]);
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <div className="max-w-7xl mx-auto px-4 py-6">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-semibold text-slate-900">CRM — People</h1>
+          <div className="flex gap-2 text-sm">
+            <a href="/intel/crm/deals" className="px-3 py-1 bg-white border border-slate-200 rounded hover:bg-slate-100">Deals view</a>
+            <a href="/api/intel/crm/export.csv" className="px-3 py-1 bg-white border border-slate-200 rounded hover:bg-slate-100">Export CSV</a>
+            <button onClick={() => alert('Use the python CLI for now: intelligence/crm/add_person.py')} className="px-3 py-1 bg-slate-900 text-white rounded hover:bg-slate-800">+ Add person</button>
+          </div>
+        </div>
+        <div className="bg-white border border-slate-200 rounded p-3 mb-4 flex flex-wrap gap-3 text-sm">
+          <label>Status:&nbsp;
+            <select value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} className="border border-slate-300 rounded px-2 py-0.5">
+              <option value="">all</option>
+              {CRM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
+          <label>Priority ≤
+            <select value={filters.priorityMax} onChange={e => setFilters({...filters, priorityMax: e.target.value})} className="border border-slate-300 rounded px-2 py-0.5 ml-1">
+              <option value="">any</option>
+              {CRM_PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </label>
+          <label>Tag:&nbsp;
+            <input type="text" value={filters.tag} onChange={e => setFilters({...filters, tag: e.target.value})} placeholder="e.g. anthropic"
+                   className="border border-slate-300 rounded px-2 py-0.5 w-28" />
+          </label>
+          <label className="flex items-center gap-1">
+            <input type="checkbox" checked={filters.hasEmail} onChange={e => setFilters({...filters, hasEmail: e.target.checked})} />
+            has email
+          </label>
+          <span className="ml-auto text-slate-500">{total} {total === 1 ? 'person' : 'people'}</span>
+        </div>
+        {loading && <div className="text-slate-500 text-sm">Loading…</div>}
+        {error && <div className="text-rose-600 text-sm">Error: {error}</div>}
+        {!loading && !error && (
+          <div className="bg-white border border-slate-200 rounded overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-100 text-slate-700">
+                <tr>
+                  <th className="text-left px-3 py-2">Person</th>
+                  <th className="text-left px-3 py-2">Title</th>
+                  <th className="text-left px-3 py-2">Firm</th>
+                  <th className="text-left px-3 py-2">Channels</th>
+                  <th className="text-left px-3 py-2">Exposure</th>
+                  <th className="text-left px-3 py-2">Status</th>
+                  <th className="text-left px-3 py-2">Pri</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.person_id} className="border-t border-slate-100 hover:bg-slate-50">
+                    <td className="px-3 py-2">
+                      <a href={`/intel/crm/person/${r.person_id}`} className="font-medium text-slate-900 hover:text-blue-700 hover:underline">
+                        {r.full_name || r.email || `Person ${r.person_id}`}
+                      </a>
+                      {r.do_not_contact && <span className="ml-2 text-xs text-rose-600 font-semibold">DNC</span>}
+                    </td>
+                    <td className="px-3 py-2 text-slate-700">{r.title || <span className="text-slate-300">—</span>}</td>
+                    <td className="px-3 py-2">
+                      {r.firm ? (
+                        <span>
+                          <span className="font-medium text-slate-800">{r.firm.display_name}</span>
+                          {r.firm.website_url && <a href={r.firm.website_url} target="_blank" rel="noreferrer noopener" title="firm site" className="ml-1 text-slate-400 hover:text-slate-700">↗</a>}
+                          {r.firm.linkedin_company_url && <a href={r.firm.linkedin_company_url} target="_blank" rel="noreferrer noopener" title="firm LinkedIn" className="ml-0.5 text-slate-400 hover:text-blue-600">in</a>}
+                        </span>
+                      ) : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-3 py-2 text-xs space-x-1">
+                      {r.email && <a href={`mailto:${r.email}`} className="text-blue-700 hover:underline">@</a>}
+                      {r.linkedin_url && <a href={r.linkedin_url} target="_blank" rel="noreferrer noopener" className="text-blue-700 hover:underline">in</a>}
+                      {r.twitter_handle && <a href={`https://twitter.com/${r.twitter_handle.replace(/^@/,'')}`} target="_blank" rel="noreferrer noopener" className="text-blue-700 hover:underline">tw</a>}
+                      {r.phone && <span className="text-slate-600">☎</span>}
+                      {!(r.email||r.linkedin_url||r.twitter_handle||r.phone) && <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-3 py-2 text-slate-700">
+                      {r.firm ? <span>{r.firm.exposure_company_count || 0} cos · {fmtUsd((+r.firm.exposure_total_nport_usd||0))}</span> : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      <span className="px-1.5 py-0.5 bg-slate-100 rounded">{r.engagement_status}</span>
+                    </td>
+                    <td className="px-3 py-2 text-center text-slate-700">{r.priority}</td>
+                  </tr>
+                ))}
+                {!rows.length && (
+                  <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-500">No people in CRM yet. Use python intelligence/crm/add_by_tracked_company.py --company &lt;slug&gt; --execute</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
+}
+
+function CrmPersonDetailPage({ id }) {
+  const [data, setData] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  const [showInteraction, setShowInteraction] = React.useState(false);
+  const [showDeal, setShowDeal] = React.useState(false);
+  const [showFollowup, setShowFollowup] = React.useState(false);
+  const reload = React.useCallback(() => {
+    fetch(`/api/intel/crm/people/${id}`).then(r => r.json()).then(setData).catch(e => setError(String(e)));
+  }, [id]);
+  React.useEffect(() => { reload(); }, [reload]);
+
+  if (error) return <div className="p-6 text-rose-600">Error: {error}</div>;
+  if (!data) return <div className="p-6 text-slate-500">Loading…</div>;
+  if (data.error) return <div className="p-6 text-rose-600">{data.error}</div>;
+
+  const p = data.person;
+  const f = data.firm;
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <div className="max-w-5xl mx-auto px-4 py-6">
+        <a href="/intel/crm" className="text-sm text-slate-500 hover:text-slate-700">← All people</a>
+        <div className="mt-3 flex items-baseline justify-between">
+          <h1 className="text-2xl font-semibold text-slate-900">{p.full_name || p.email || `Person ${p.person_id}`}</h1>
+          <div className="text-sm text-slate-500">{p.title} {p.role && <>· {p.role}</>}</div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 mt-4">
+          <section className="bg-white border border-slate-200 rounded p-4">
+            <h2 className="text-sm font-semibold text-slate-700 mb-2">Contact</h2>
+            <dl className="text-sm space-y-1">
+              <div className="flex gap-2"><dt className="text-slate-500 w-20">email:</dt><dd>{p.email ? <a href={`mailto:${p.email}`} className="text-blue-700 hover:underline">{p.email}</a> : '—'}</dd></div>
+              <div className="flex gap-2"><dt className="text-slate-500 w-20">linkedin:</dt><dd>{p.linkedin_url ? <a href={p.linkedin_url} target="_blank" rel="noreferrer noopener" className="text-blue-700 hover:underline truncate">{p.linkedin_url}</a> : '—'}</dd></div>
+              <div className="flex gap-2"><dt className="text-slate-500 w-20">twitter:</dt><dd>{p.twitter_handle ? <a href={`https://twitter.com/${p.twitter_handle.replace(/^@/,'')}`} target="_blank" rel="noreferrer noopener" className="text-blue-700 hover:underline">{p.twitter_handle}</a> : '—'}</dd></div>
+              <div className="flex gap-2"><dt className="text-slate-500 w-20">phone:</dt><dd>{p.phone || '—'}</dd></div>
+            </dl>
+          </section>
+          <section className="bg-white border border-slate-200 rounded p-4">
+            <h2 className="text-sm font-semibold text-slate-700 mb-2">Firm</h2>
+            {f ? (
+              <div className="text-sm space-y-1">
+                <div className="font-medium text-slate-900">{f.display_name}</div>
+                {f.website_url && <a href={f.website_url} target="_blank" rel="noreferrer noopener" className="block text-blue-700 hover:underline truncate">{f.website_url}</a>}
+                {f.linkedin_company_url && <a href={f.linkedin_company_url} target="_blank" rel="noreferrer noopener" className="block text-blue-700 hover:underline truncate">{f.linkedin_company_url}</a>}
+                <div className="text-slate-500 mt-1">{f.exposure_company_count || 0} tracked cos · {fmtUsd(f.exposure_total_nport_usd)} N-PORT · {fmtUsd(f.exposure_total_formd_usd)} Form D</div>
+              </div>
+            ) : <div className="text-slate-400 text-sm">No firm</div>}
+          </section>
+        </div>
+
+        <section className="mt-4 bg-white border border-slate-200 rounded p-4">
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="text-sm font-semibold text-slate-700">CRM state</h2>
+          </div>
+          <div className="text-sm flex flex-wrap gap-3 items-center">
+            <span>Status: <span className="px-2 py-0.5 bg-slate-100 rounded">{p.engagement_status}</span></span>
+            <span>Priority: <span className="font-semibold">{p.priority}</span></span>
+            {p.do_not_contact && <span className="text-rose-700 font-semibold">DO NOT CONTACT{p.do_not_contact_reason ? ` — ${p.do_not_contact_reason}` : ''}</span>}
+            {p.needs_compliance_review && <span className="text-amber-700 font-semibold">⚠ COMPLIANCE REVIEW</span>}
+            <span>Added via: <span className="text-slate-600">{p.added_via}</span></span>
+            {(p.added_for_companies || []).length > 0 && <span>For: {(p.added_for_companies || []).map(s => <a key={s} href={`/intel/${s}`} className="ml-1 text-blue-700 hover:underline">{s}</a>)}</span>}
+          </div>
+        </section>
+
+        <section className="mt-4 bg-white border border-slate-200 rounded p-4">
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="text-sm font-semibold text-slate-700">Timeline ({(data.interactions || []).length})</h2>
+            <button onClick={() => setShowInteraction(true)} className="text-xs px-2 py-1 bg-slate-900 text-white rounded hover:bg-slate-800">+ Log event</button>
+          </div>
+          {(data.interactions || []).length === 0 && <div className="text-slate-400 text-sm">No interactions yet.</div>}
+          <ul className="text-sm space-y-2">
+            {(data.interactions || []).map(i => (
+              <li key={i.interaction_id} className="border-l-2 border-slate-200 pl-3">
+                <div className="flex gap-2 items-baseline">
+                  <span className="text-xs text-slate-500">{fmtDate(i.occurred_at)}</span>
+                  <span className={`text-xs px-1.5 py-0.5 rounded ${i.direction === 'outbound' ? 'bg-blue-100 text-blue-800' : i.direction === 'inbound' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'}`}>{i.direction}</span>
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100">{i.channel}</span>
+                  <span className="text-xs text-slate-500">{i.type}</span>
+                  {i.outcome && <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">{i.outcome}</span>}
+                </div>
+                {i.subject && <div className="font-medium text-slate-800">{i.subject}</div>}
+                {i.body && <div className="text-slate-700 whitespace-pre-wrap">{i.body}</div>}
+                {i.related_company_slug && <div className="text-xs text-slate-500">re: <a href={`/intel/${i.related_company_slug}`} className="text-blue-700 hover:underline">{i.related_company_slug}</a></div>}
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="mt-4 bg-white border border-slate-200 rounded p-4">
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="text-sm font-semibold text-slate-700">Deal interests ({(data.deal_interests || []).length})</h2>
+            <button onClick={() => setShowDeal(true)} className="text-xs px-2 py-1 bg-slate-900 text-white rounded hover:bg-slate-800">+ Add deal interest</button>
+          </div>
+          {(data.deal_interests || []).length === 0 && <div className="text-slate-400 text-sm">No deal interests logged.</div>}
+          <table className="w-full text-sm">
+            <tbody>
+              {(data.deal_interests || []).map(d => (
+                <tr key={d.deal_interest_id} className="border-t border-slate-100">
+                  <td className="py-1 pr-3"><a href={`/intel/${d.company_slug}`} className="text-blue-700 hover:underline">{d.company_slug}</a></td>
+                  <td className="py-1 pr-3"><span className={d.side === 'buy' ? 'text-emerald-700 font-semibold' : d.side === 'sell' ? 'text-rose-700 font-semibold' : 'text-slate-700'}>{d.side}</span></td>
+                  <td className="py-1 pr-3">{d.state}</td>
+                  <td className="py-1 pr-3 text-slate-700">{d.price_per_share_min ? `$${d.price_per_share_min}` : '—'}{d.price_per_share_max && d.price_per_share_max !== d.price_per_share_min ? `–$${d.price_per_share_max}` : ''} / sh</td>
+                  <td className="py-1 pr-3 text-slate-700">{fmtUsd(d.size_usd)}</td>
+                  <td className="py-1 text-xs text-slate-500">{d.notes}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+
+        <section className="mt-4 mb-8 bg-white border border-slate-200 rounded p-4">
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="text-sm font-semibold text-slate-700">Follow-ups ({(data.followups || []).filter(x => x.status === 'open').length} open)</h2>
+            <button onClick={() => setShowFollowup(true)} className="text-xs px-2 py-1 bg-slate-900 text-white rounded hover:bg-slate-800">+ Schedule</button>
+          </div>
+          <ul className="text-sm space-y-1">
+            {(data.followups || []).map(f => (
+              <li key={f.followup_id} className={`flex gap-3 items-center ${f.status !== 'open' ? 'text-slate-400 line-through' : ''}`}>
+                <span className="text-xs text-slate-500 w-20">{fmtDate(f.due_at)}</span>
+                <span>{f.reason}</span>
+                <span className="text-xs text-slate-500 ml-auto">{f.status}</span>
+              </li>
+            ))}
+            {(data.followups || []).length === 0 && <div className="text-slate-400 text-sm">No followups scheduled.</div>}
+          </ul>
+        </section>
+
+        {showInteraction && <InteractionModal personId={id} onClose={() => setShowInteraction(false)} onSaved={() => { setShowInteraction(false); reload(); }} />}
+        {showDeal && <DealInterestModal personId={id} onClose={() => setShowDeal(false)} onSaved={() => { setShowDeal(false); reload(); }} />}
+        {showFollowup && <FollowupModal personId={id} onClose={() => setShowFollowup(false)} onSaved={() => { setShowFollowup(false); reload(); }} />}
+      </div>
+    </div>
+  );
+}
+
+function InteractionModal({ personId, onClose, onSaved }) {
+  const [form, setForm] = React.useState({
+    occurred_at: new Date().toISOString().slice(0, 16),
+    direction: 'outbound', channel: 'email', type: 'intro',
+    subject: '', body: '', outcome: '', sentiment: '', related_company_slug: '',
+  });
+  const submit = async () => {
+    const payload = { ...form };
+    if (form.occurred_at) payload.occurred_at = new Date(form.occurred_at).toISOString();
+    Object.keys(payload).forEach(k => { if (payload[k] === '') delete payload[k]; });
+    const r = await fetch(`/api/intel/crm/people/${personId}/interactions`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
+    });
+    if (!r.ok) { alert(`Error: ${await r.text()}`); return; }
+    onSaved();
+  };
+  return (
+    <Modal title="Log interaction" onClose={onClose} onSubmit={submit}>
+      <Field label="When"><input type="datetime-local" value={form.occurred_at} onChange={e => setForm({...form, occurred_at: e.target.value})} /></Field>
+      <Field label="Direction"><Select v={form.direction} on={v => setForm({...form, direction: v})} opts={['outbound','inbound','internal_note']} /></Field>
+      <Field label="Channel"><Select v={form.channel} on={v => setForm({...form, channel: v})} opts={['email','linkedin_msg','twitter_dm','phone','meeting','sms','event','referral','note']} /></Field>
+      <Field label="Type"><Select v={form.type} on={v => setForm({...form, type: v})} opts={['intro','followup','deal_pitch','response','meeting','call_summary','internal_note']} /></Field>
+      <Field label="Subject"><input value={form.subject} onChange={e => setForm({...form, subject: e.target.value})} /></Field>
+      <Field label="Body"><textarea value={form.body} onChange={e => setForm({...form, body: e.target.value})} rows={4} /></Field>
+      <Field label="Outcome"><Select v={form.outcome} on={v => setForm({...form, outcome: v})} opts={['','sent','replied','no_reply','meeting_booked','interested','not_interested','out_of_scope','wrong_person']} /></Field>
+      <Field label="Sentiment"><Select v={form.sentiment} on={v => setForm({...form, sentiment: v})} opts={['','positive','neutral','negative','no_signal']} /></Field>
+      <Field label="Re: company (slug)"><input value={form.related_company_slug} onChange={e => setForm({...form, related_company_slug: e.target.value})} placeholder="anthropic" /></Field>
+    </Modal>
+  );
+}
+
+function DealInterestModal({ personId, onClose, onSaved }) {
+  const [form, setForm] = React.useState({
+    company_slug: '', side: 'buy', state: 'open',
+    security_type: '', share_class: '', structure: '',
+    price_per_share_min: '', price_per_share_max: '',
+    size_usd: '', conditions: '', notes: '',
+  });
+  const submit = async () => {
+    const payload = { ...form };
+    Object.keys(payload).forEach(k => { if (payload[k] === '') delete payload[k]; });
+    const r = await fetch(`/api/intel/crm/people/${personId}/deal-interests`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
+    });
+    if (!r.ok) { alert(`Error: ${await r.text()}`); return; }
+    onSaved();
+  };
+  return (
+    <Modal title="Log deal interest" onClose={onClose} onSubmit={submit}>
+      <Field label="Company slug *"><input value={form.company_slug} onChange={e => setForm({...form, company_slug: e.target.value})} placeholder="anthropic" required /></Field>
+      <Field label="Side"><Select v={form.side} on={v => setForm({...form, side: v})} opts={['buy','sell','either']} /></Field>
+      <Field label="State"><Select v={form.state} on={v => setForm({...form, state: v})} opts={['open','soft','firm','matched','negotiating','passed','stale','compliance_review']} /></Field>
+      <Field label="Security type"><input value={form.security_type} onChange={e => setForm({...form, security_type: e.target.value})} placeholder="common / preferred / SAFE / LP_interest" /></Field>
+      <Field label="Share class"><input value={form.share_class} onChange={e => setForm({...form, share_class: e.target.value})} placeholder="Series F-1" /></Field>
+      <Field label="Structure"><input value={form.structure} onChange={e => setForm({...form, structure: e.target.value})} placeholder="secondary / primary / SPV / forward / tender" /></Field>
+      <Field label="Price/share min"><input type="number" step="any" value={form.price_per_share_min} onChange={e => setForm({...form, price_per_share_min: e.target.value})} /></Field>
+      <Field label="Price/share max"><input type="number" step="any" value={form.price_per_share_max} onChange={e => setForm({...form, price_per_share_max: e.target.value})} /></Field>
+      <Field label="Size $"><input type="number" step="any" value={form.size_usd} onChange={e => setForm({...form, size_usd: e.target.value})} /></Field>
+      <Field label="Conditions"><textarea rows={2} value={form.conditions} onChange={e => setForm({...form, conditions: e.target.value})} /></Field>
+      <Field label="Notes"><textarea rows={2} value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} /></Field>
+    </Modal>
+  );
+}
+
+function FollowupModal({ personId, onClose, onSaved }) {
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const [form, setForm] = React.useState({ due_at: tomorrow, reason: '' });
+  const submit = async () => {
+    const payload = { due_at: new Date(form.due_at).toISOString(), reason: form.reason };
+    const r = await fetch(`/api/intel/crm/people/${personId}/followups`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
+    });
+    if (!r.ok) { alert(`Error: ${await r.text()}`); return; }
+    onSaved();
+  };
+  return (
+    <Modal title="Schedule followup" onClose={onClose} onSubmit={submit}>
+      <Field label="Due"><input type="date" value={form.due_at} onChange={e => setForm({...form, due_at: e.target.value})} /></Field>
+      <Field label="Reason"><input value={form.reason} onChange={e => setForm({...form, reason: e.target.value})} required placeholder="30-day check-in" /></Field>
+    </Modal>
+  );
+}
+
+function CrmDealsPage() {
+  const [rows, setRows] = React.useState([]);
+  const [error, setError] = React.useState(null);
+  const params = new URLSearchParams(window.location.search);
+  const companyFilter = params.get('company') || '';
+  React.useEffect(() => {
+    const p = new URLSearchParams();
+    if (companyFilter) p.set('company', companyFilter);
+    fetch(`/api/intel/crm/deal-interests?${p.toString()}`)
+      .then(r => r.json()).then(d => setRows(d.rows || []))
+      .catch(e => setError(String(e)));
+  }, [companyFilter]);
+
+  // Group by company
+  const byCompany = {};
+  for (const r of rows) {
+    if (!byCompany[r.company_slug]) byCompany[r.company_slug] = { buy: [], sell: [], either: [] };
+    byCompany[r.company_slug][r.side].push(r);
+  }
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <div className="max-w-6xl mx-auto px-4 py-6">
+        <a href="/intel/crm" className="text-sm text-slate-500 hover:text-slate-700">← All people</a>
+        <h1 className="text-2xl font-semibold text-slate-900 mt-3 mb-4">CRM — Deal interests by company</h1>
+        {error && <div className="text-rose-600 text-sm">Error: {error}</div>}
+        {Object.entries(byCompany).map(([slug, sides]) => (
+          <div key={slug} className="bg-white border border-slate-200 rounded mb-4 p-4">
+            <h2 className="font-semibold text-slate-900 mb-2"><a href={`/intel/${slug}`} className="hover:underline">{slug}</a></h2>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="text-xs uppercase tracking-wide text-emerald-700 mb-1">Buy ({sides.buy.length})</div>
+                {sides.buy.sort((a,b) => (+b.price_per_share_max||0) - (+a.price_per_share_max||0)).map(d => (
+                  <DealRow key={d.deal_interest_id} d={d} />
+                ))}
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-wide text-rose-700 mb-1">Sell ({sides.sell.length})</div>
+                {sides.sell.sort((a,b) => (+a.price_per_share_min||9e9) - (+b.price_per_share_min||9e9)).map(d => (
+                  <DealRow key={d.deal_interest_id} d={d} />
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+        {!Object.keys(byCompany).length && <div className="text-slate-500">No open deal interests.</div>}
+      </div>
+    </div>
+  );
+}
+
+function DealRow({ d }) {
+  const p = d.crm_person || {};
+  const f = d.crm_firm || {};
+  return (
+    <div className="text-sm border-l-2 border-slate-200 pl-2 mb-1">
+      <div>
+        <a href={`/intel/crm/person/${p.person_id}`} className="text-blue-700 hover:underline">{p.full_name || p.email || 'Unknown'}</a>
+        {f.display_name && <span className="text-slate-500"> · {f.display_name}</span>}
+      </div>
+      <div className="text-xs text-slate-600">
+        ${d.price_per_share_min || '—'}{d.price_per_share_max && d.price_per_share_max !== d.price_per_share_min ? `–$${d.price_per_share_max}` : ''} / sh
+        {d.size_usd && ` · ${fmtUsd(d.size_usd)}`}
+        <span className="ml-1 px-1 bg-slate-100 rounded">{d.state}</span>
+      </div>
+    </div>
+  );
+}
+
+// Tiny modal + form helpers
+function Modal({ title, onClose, onSubmit, children }) {
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-white rounded shadow-xl p-5 max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="font-semibold text-slate-900">{title}</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700">✕</button>
+        </div>
+        <div className="space-y-2">{children}</div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-1 text-sm border border-slate-300 rounded hover:bg-slate-100">Cancel</button>
+          <button onClick={onSubmit} className="px-3 py-1 text-sm bg-slate-900 text-white rounded hover:bg-slate-800">Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+function Field({ label, children }) {
+  return <label className="block text-sm"><span className="block text-xs text-slate-500 mb-0.5">{label}</span>{React.cloneElement(children, { className: 'w-full border border-slate-300 rounded px-2 py-1 text-sm' })}</label>;
+}
+function Select({ v, on, opts }) {
+  return <select value={v} onChange={e => on(e.target.value)}>{opts.map(o => <option key={o} value={o}>{o || '—'}</option>)}</select>;
 }
 
 // --- bootstrap --------------------------------------------------------------
 
 window.mountIntelRouter = function () {
   const path = window.location.pathname;
-  const searchMatch = path === '/intel/search';
-  const fundMatch = path.match(/^\/intel\/fund\/([^\/]+)/);
-  const adviserMatch = path.match(/^\/intel\/adviser\/([^\/]+)/);
-  const companyMatch = path.match(/^\/intel\/([^\/]+)/);
   const root = document.getElementById('root');
   if (!root) return false;
-  if (searchMatch) {
-    const params = new URLSearchParams(window.location.search);
-    const initialQuery = params.get('q') || '';
-    ReactDOM.createRoot(root).render(<SearchPage initialQuery={initialQuery} />);
-    return true;
-  }
-  if (fundMatch) {
-    const accession = decodeURIComponent(fundMatch[1]);
-    ReactDOM.createRoot(root).render(<FundPage accession={accession} />);
-    return true;
-  }
-  if (adviserMatch) {
-    const crd = decodeURIComponent(adviserMatch[1]);
-    ReactDOM.createRoot(root).render(<AdviserPage crd={crd} />);
-    return true;
-  }
-  if (companyMatch) {
-    const slug = decodeURIComponent(companyMatch[1]);
-    ReactDOM.createRoot(root).render(<IntelPage slug={slug} />);
-    return true;
+
+  // Reserved cross-cutting routes — must come BEFORE the generic
+  // /intel/<slug> match so they don't get swallowed.
+  // Order matters: more-specific routes first.
+  const routes = [
+    { match: /^\/intel\/?$/, render: () => <DashboardPage /> },
+    { match: /^\/intel\/search\/?$/, render: () => {
+      const params = new URLSearchParams(window.location.search);
+      return <SearchPage initialQuery={params.get('q') || ''} />;
+    } },
+    { match: /^\/intel\/companies\/?$/, render: () => <AllCompaniesPage /> },
+    { match: /^\/intel\/managers\/?$/, render: () => <AllManagersPage /> },
+    { match: /^\/intel\/funds\/?$/, render: () => <AllFundsPage /> },
+    { match: /^\/intel\/spvs\/?$/, render: () => <AllSpvsPage /> },
+    { match: /^\/intel\/people\/?$/, render: () => <PeoplePage /> },
+    { match: /^\/intel\/timeline\/?$/, render: () => <TimelinePage /> },
+    // CRM routes (more-specific than the generic /intel/<slug>)
+    { match: /^\/intel\/crm\/?$/, render: () => <CrmPersonListPage /> },
+    { match: /^\/intel\/crm\/deals\/?$/, render: () => <CrmDealsPage /> },
+    { match: /^\/intel\/crm\/person\/([^\/]+)/, render: (m) => <CrmPersonDetailPage id={decodeURIComponent(m[1])} /> },
+    { match: /^\/intel\/fund\/([^\/]+)/, render: (m) => <FundPage accession={decodeURIComponent(m[1])} /> },
+    { match: /^\/intel\/adviser\/([^\/]+)/, render: (m) => <AdviserPage crd={decodeURIComponent(m[1])} /> },
+    { match: /^\/intel\/discovered\/([^\/]+)/, render: (m) => <DiscoveredPage id={decodeURIComponent(m[1])} /> },
+    // Catch-all: any other /intel/<slug> is a company page.
+    { match: /^\/intel\/([^\/]+)/, render: (m) => <IntelPage slug={decodeURIComponent(m[1])} /> },
+  ];
+
+  for (const route of routes) {
+    const m = path.match(route.match);
+    if (m) {
+      ReactDOM.createRoot(root).render(route.render(m));
+      return true;
+    }
   }
   return false;
 };
