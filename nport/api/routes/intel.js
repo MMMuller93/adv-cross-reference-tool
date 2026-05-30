@@ -415,6 +415,351 @@ function teamMembersToText(value) {
   return structured.map(m => m.title ? `${m.name} (${m.title})` : m.name).join('; ');
 }
 
+// ============================================================================
+// Cross-cutting routes (added 2026-05-26, Direction B Phase 3)
+//
+// These power the rail's Modules section:
+//   - /api/intel/companies               → AllCompaniesPage
+//   - /api/intel/dashboard               → DashboardPage (recent activity)
+//   - /api/intel/managers-rollup         → AllManagersPage
+//   - /api/intel/spvs-rollup             → AllSpvsPage
+//   - /api/intel/funds-rollup            → AllFundsPage
+// ============================================================================
+
+// --- GET /api/intel/companies — all tracked companies + holder counts ------
+router.get('/companies', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    // 1. All companies, paginated. 843 rows; keyset by created_at to be safe.
+    const companies = [];
+    let lastId = '';
+    while (true) {
+      let q = deps.nportClient.from('private_companies')
+        .select('slug,display_name,sector,founded_year,primary_domain,latest_known_valuation_usd,latest_known_valuation_date,most_recent_round,most_recent_round_date,lifecycle_status,is_public,is_acquired,hq_country,hq_state,total_funding_usd')
+        .order('slug')
+        .limit(1000);
+      if (lastId) q = q.gt('slug', lastId);
+      const { data, error } = await q;
+      if (error) throw error;
+      const batch = data || [];
+      if (!batch.length) break;
+      companies.push(...batch);
+      lastId = batch[batch.length - 1].slug;
+      if (batch.length < 1000) break;
+    }
+
+    // 2. Aggregate holder counts per company from v_intel_company_holders.
+    //    Single pass; cheap because the view is already indexed by company_slug.
+    const counts = {}; // slug → { nport, formd, distinctAdvisers (set), totalHeldUsd }
+    let pageStart = 0;
+    while (true) {
+      const { data, error } = await deps.nportClient
+        .from('v_intel_company_holders')
+        .select('company_slug,source_type,value_usd,adviser_crd,discovered_manager_id,evidence_id,status_at_evidence_date')
+        .gt('evidence_id', pageStart)
+        .order('evidence_id')
+        .limit(1000);
+      if (error) throw error;
+      const batch = data || [];
+      if (!batch.length) break;
+      for (const r of batch) {
+        // Default: count only when company was private at evidence date,
+        // mirroring the per-company holders endpoint's audit-off default.
+        if (r.status_at_evidence_date && r.status_at_evidence_date !== 'private' && r.status_at_evidence_date !== 'unknown') continue;
+        const slug = r.company_slug;
+        if (!counts[slug]) counts[slug] = { nport: 0, formd: 0, advisers: new Set(), totalHeldUsd: 0 };
+        if (r.source_type === 'nport') counts[slug].nport++;
+        if (r.source_type === 'formd_pooled_vehicle') counts[slug].formd++;
+        if (r.adviser_crd) counts[slug].advisers.add(r.adviser_crd);
+        if (r.discovered_manager_id) counts[slug].advisers.add('d:' + r.discovered_manager_id);
+        if (r.value_usd) counts[slug].totalHeldUsd += parseFloat(r.value_usd);
+      }
+      pageStart = parseInt(batch[batch.length - 1].evidence_id, 10);
+      if (batch.length < 1000) break;
+    }
+
+    // 3. Annotate companies with their counts (0 if no evidence yet).
+    const rows = companies.map(c => {
+      const k = counts[c.slug] || null;
+      return {
+        ...c,
+        latest_known_valuation_usd: c.latest_known_valuation_usd ? parseFloat(c.latest_known_valuation_usd) : null,
+        nport_count: k ? k.nport : 0,
+        formd_count: k ? k.formd : 0,
+        distinct_advisers: k ? k.advisers.size : 0,
+        total_held_usd: k ? k.totalHeldUsd : 0,
+      };
+    });
+
+    return res.json({
+      total: rows.length,
+      total_with_evidence: rows.filter(r => r.distinct_advisers > 0).length,
+      companies: rows,
+    });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- GET /api/intel/dashboard — recent activity feed -----------------------
+router.get('/dashboard', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
+
+    // Recent Form D pooled-vehicle offerings across all companies.
+    const { data: recentFormd, error: e1 } = await deps.nportClient
+      .from('intel_formd_pooled_vehicle_offering')
+      .select('company_slug,filer_entityname,filing_date,total_offering_amount,accession_number,filer_cik')
+      .order('filing_date', { ascending: false })
+      .limit(limit);
+    if (e1) throw e1;
+
+    // Recent lifecycle events.
+    const { data: recentEvents, error: e2 } = await deps.nportClient
+      .from('company_lifecycle_events')
+      .select('company_slug,event_date,event_type,status_after,source_name,source_url,notes')
+      .order('event_date', { ascending: false })
+      .limit(limit);
+    if (e2) throw e2;
+
+    // Look up display names for the slugs referenced.
+    const allSlugs = Array.from(new Set([
+      ...(recentFormd || []).map(r => r.company_slug),
+      ...(recentEvents || []).map(r => r.company_slug),
+    ]));
+    const companyMeta = {};
+    if (allSlugs.length) {
+      for (let i = 0; i < allSlugs.length; i += 200) {
+        const chunk = allSlugs.slice(i, i + 200);
+        const { data, error } = await deps.nportClient
+          .from('private_companies')
+          .select('slug,display_name,sector')
+          .in('slug', chunk);
+        if (error) throw error;
+        for (const row of (data || [])) companyMeta[row.slug] = row;
+      }
+    }
+
+    // Merge into a single activity stream sorted by date.
+    const activity = [
+      ...(recentFormd || []).map(r => ({
+        kind: 'form_d',
+        date: r.filing_date,
+        company_slug: r.company_slug,
+        company_name: (companyMeta[r.company_slug] || {}).display_name || r.company_slug,
+        title: r.filer_entityname,
+        value_usd: r.total_offering_amount ? parseFloat(r.total_offering_amount) : null,
+        accession_number: r.accession_number,
+      })),
+      ...(recentEvents || []).map(r => ({
+        kind: 'lifecycle',
+        date: r.event_date,
+        company_slug: r.company_slug,
+        company_name: (companyMeta[r.company_slug] || {}).display_name || r.company_slug,
+        title: r.event_type,
+        status_after: r.status_after,
+        source_name: r.source_name,
+        source_url: r.source_url,
+        notes: r.notes,
+      })),
+    ].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+
+    return res.json({
+      activity: activity.slice(0, limit),
+      counts: {
+        total_companies: Object.keys(companyMeta).length,
+      },
+    });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- GET /api/intel/managers-rollup — all managers across all companies ---
+router.get('/managers-rollup', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    // Aggregate intel_adviser_resolution + v_intel_company_holders to build
+    // a per-CRD rollup: total exposure $, # companies, # filings, top company.
+    const rollup = {}; // crd → { name, totalUsd, companies (set), filings, topCompany, topUsd }
+    let pageStart = 0;
+    while (true) {
+      const { data, error } = await deps.nportClient
+        .from('v_intel_company_holders')
+        .select('company_slug,adviser_crd,value_usd,evidence_id,status_at_evidence_date')
+        .not('adviser_crd', 'is', null)
+        .gt('evidence_id', pageStart)
+        .order('evidence_id')
+        .limit(1000);
+      if (error) throw error;
+      const batch = data || [];
+      if (!batch.length) break;
+      for (const r of batch) {
+        if (r.status_at_evidence_date && r.status_at_evidence_date !== 'private' && r.status_at_evidence_date !== 'unknown') continue;
+        const crd = String(r.adviser_crd);
+        if (!rollup[crd]) rollup[crd] = { crd, totalUsd: 0, companies: new Set(), filings: 0, perCompany: {} };
+        const v = r.value_usd ? parseFloat(r.value_usd) : 0;
+        rollup[crd].totalUsd += v;
+        rollup[crd].companies.add(r.company_slug);
+        rollup[crd].filings++;
+        rollup[crd].perCompany[r.company_slug] = (rollup[crd].perCompany[r.company_slug] || 0) + v;
+      }
+      pageStart = parseInt(batch[batch.length - 1].evidence_id, 10);
+      if (batch.length < 1000) break;
+    }
+
+    // Resolve adviser names + AUM via ADV.
+    const crds = Object.keys(rollup);
+    const adviserDetails = await fetchAdviserDetails(deps.advClient, crds);
+    const companyMeta = {};
+    const allCompanySlugs = Array.from(new Set(Object.values(rollup).flatMap(r => Array.from(r.companies))));
+    for (let i = 0; i < allCompanySlugs.length; i += 200) {
+      const chunk = allCompanySlugs.slice(i, i + 200);
+      const { data, error } = await deps.nportClient
+        .from('private_companies').select('slug,display_name').in('slug', chunk);
+      if (error) throw error;
+      for (const row of (data || [])) companyMeta[row.slug] = row;
+    }
+
+    const rows = crds.map(crd => {
+      const r = rollup[crd];
+      const adv = adviserDetails[crd] || {};
+      const topEntry = Object.entries(r.perCompany).sort((a, b) => b[1] - a[1])[0] || [null, 0];
+      return {
+        crd,
+        name: adv.name || `(CRD ${crd})`,
+        total_aum: adv.total_aum ? parseFloat(adv.total_aum) : null,
+        total_held_usd: r.totalUsd,
+        company_count: r.companies.size,
+        filing_count: r.filings,
+        top_company_slug: topEntry[0],
+        top_company_name: topEntry[0] ? ((companyMeta[topEntry[0]] || {}).display_name || topEntry[0]) : null,
+        top_company_usd: topEntry[1],
+      };
+    }).sort((a, b) => b.total_held_usd - a.total_held_usd);
+
+    return res.json({ total: rows.length, managers: rows });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- GET /api/intel/spvs-rollup — all Form D SPVs across all companies ----
+router.get('/spvs-rollup', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const all = [];
+    let pageStart = 0;
+    while (true) {
+      const { data, error } = await deps.nportClient
+        .from('intel_formd_pooled_vehicle_offering')
+        .select('offering_id,company_slug,filer_entityname,filing_date,total_offering_amount,filer_cik,accession_number,match_method')
+        .gt('offering_id', pageStart)
+        .order('offering_id')
+        .limit(1000);
+      if (error) throw error;
+      const batch = data || [];
+      if (!batch.length) break;
+      all.push(...batch);
+      pageStart = parseInt(batch[batch.length - 1].offering_id, 10);
+      if (batch.length < 1000) break;
+    }
+
+    const slugs = Array.from(new Set(all.map(r => r.company_slug)));
+    const companyMeta = {};
+    for (let i = 0; i < slugs.length; i += 200) {
+      const { data } = await deps.nportClient.from('private_companies').select('slug,display_name').in('slug', slugs.slice(i, i + 200));
+      for (const row of (data || [])) companyMeta[row.slug] = row;
+    }
+
+    // Apply the same self-fund filter we do on the per-company holders route.
+    const SELF_FUND_PATTERNS = { openai: [/openai\s+startup\s+fund/i] };
+    const filtered = all.filter(r => {
+      const pats = SELF_FUND_PATTERNS[String(r.company_slug || '').toLowerCase()] || [];
+      const label = r.filer_entityname || '';
+      return !pats.some(re => re.test(label));
+    });
+
+    return res.json({
+      total: filtered.length,
+      spvs: filtered.map(r => ({
+        offering_id: r.offering_id,
+        company_slug: r.company_slug,
+        company_name: (companyMeta[r.company_slug] || {}).display_name || r.company_slug,
+        filer_entityname: r.filer_entityname,
+        filer_cik: r.filer_cik,
+        accession_number: r.accession_number,
+        filing_date: r.filing_date,
+        offering_usd: r.total_offering_amount ? parseFloat(r.total_offering_amount) : null,
+        match_method: r.match_method,
+      })),
+    });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- GET /api/intel/funds-rollup — N-PORT funds across all companies ------
+router.get('/funds-rollup', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    // Aggregate by (registrant_cik, series_id) — each unique fund.
+    const fundRollup = {}; // key → { cik, series_id, label, companies, totalUsd, positions }
+    let pageStart = 0;
+    while (true) {
+      const { data, error } = await deps.nportClient
+        .from('intel_nport_position')
+        .select('position_id,company_slug,registrant_cik,series_id,issuer_title,value_usd,as_of_date')
+        .gt('position_id', pageStart)
+        .order('position_id')
+        .limit(1000);
+      if (error) throw error;
+      const batch = data || [];
+      if (!batch.length) break;
+      for (const r of batch) {
+        const key = `${r.registrant_cik}|${r.series_id || ''}`;
+        if (!fundRollup[key]) {
+          fundRollup[key] = {
+            cik: r.registrant_cik,
+            series_id: r.series_id,
+            companies: new Set(),
+            totalUsd: 0,
+            positions: 0,
+            adviser_crd: null,
+          };
+        }
+        fundRollup[key].companies.add(r.company_slug);
+        fundRollup[key].totalUsd += r.value_usd ? parseFloat(r.value_usd) : 0;
+        fundRollup[key].positions++;
+      }
+      pageStart = parseInt(batch[batch.length - 1].position_id, 10);
+      if (batch.length < 1000) break;
+    }
+
+    // Note: adviser CRD for each fund comes from a join through
+    // intel_adviser_resolution (one row per position bridged to a CRD).
+    // For v1 we skip that join; adviser_name will come from a follow-up
+    // batch query in a later iteration. Funds rollup currently shows fund
+    // identity + reach (positions, companies, held $).
+
+    const rows = Object.entries(fundRollup).map(([key, f]) => ({
+      key,
+      cik: f.cik,
+      series_id: f.series_id,
+      total_held_usd: f.totalUsd,
+      position_count: f.positions,
+      company_count: f.companies.size,
+      adviser_crd: null,
+      adviser_name: null,
+    })).sort((a, b) => b.total_held_usd - a.total_held_usd);
+
+    return res.json({ total: rows.length, funds: rows });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
 // ----------------------------------------------------------------------------
 // GET /api/intel/companies/:slug/holders
 // ----------------------------------------------------------------------------
@@ -453,8 +798,37 @@ router.get('/companies/:slug/holders', async (req, res) => {
       || (companyRow.is_public ? 'public' : (companyRow.is_acquired ? 'acquired' : 'private'));
 
     // 4. Holder evidence (filtered by lifecycle eligibility unless ?audit=1)
-    const nportRows = await paginateHolders(deps.nportClient, slug, 'nport');
-    const formdRows = await paginateHolders(deps.nportClient, slug, 'formd_pooled_vehicle');
+    let nportRows = await paginateHolders(deps.nportClient, slug, 'nport');
+    let formdRows = await paginateHolders(deps.nportClient, slug, 'formd_pooled_vehicle');
+
+    // Self-fund exclusion: drop filings BY a fund-of vehicle owned by the
+    // tracked company itself. E.g. "OpenAI Startup Fund SPV N, L.P." is
+    // OpenAI's own VC arm that invests IN startups — NOT a holder OF
+    // OpenAI. Same pattern likely applies to any company that operates
+    // a strategic-investment subsidiary. Hardcoded per company; mirror of
+    // intelligence/materialize_holders.py NEGATIVE_PATTERNS_BY_COMPANY.
+    // Filter at source so both `annotatedFormd` and the adviser rollup
+    // see the filtered set.
+    const SELF_FUND_PATTERNS = {
+      openai: [/openai\s+startup\s+fund/i],
+      // anthropic: [/anthropic\s+capital\s+fund/i],  // already in materializer denylist
+    };
+    const selfFundRegexes = SELF_FUND_PATTERNS[slug.toLowerCase()] || [];
+    if (selfFundRegexes.length) {
+      const beforeFormd = formdRows.length;
+      const beforeNport = nportRows.length;
+      const isSelf = (r) => {
+        const label = r.evidence_label || '';
+        return selfFundRegexes.some(re => re.test(label));
+      };
+      formdRows = formdRows.filter(r => !isSelf(r));
+      nportRows = nportRows.filter(r => !isSelf(r));
+      const removed = (beforeFormd - formdRows.length) + (beforeNport - nportRows.length);
+      if (removed > 0) {
+        console.log(`[INTEL holders] ${slug}: filtered ${removed} self-fund rows (e.g. OpenAI Startup Fund SPVs invest IN startups, not held BY external)`);
+      }
+    }
+
     let allRows = [...nportRows, ...formdRows];
     if (!audit) {
       allRows = allRows.filter(r => r.status_at_evidence_date === 'private' || r.status_at_evidence_date === 'unknown');
@@ -523,37 +897,59 @@ router.get('/companies/:slug/holders', async (req, res) => {
     // 7. Split returned rows into N-PORT vs Form D buckets for the UI tables
     const annotatedNport = nportRows
       .filter(r => audit || r.status_at_evidence_date === 'private' || r.status_at_evidence_date === 'unknown')
-      .map(r => ({
-        evidence_id: r.evidence_id,
-        registrant_cik: r.evidence_cik,
-        series_id: r.evidence_series_id,
-        issuer_title: r.evidence_label,
-        value_usd: r.value_usd ? parseFloat(r.value_usd) : null,
-        evidence_date: r.evidence_date,
-        accession_number: r.accession_number,
-        adviser_crd: r.adviser_crd || null,
-        adviser_name: (adviserRollup[r.adviser_crd] || {}).name || null,
-        adviser_method: r.adviser_resolution_method,
-        status_at_evidence_date: r.status_at_evidence_date,
-        was_private_at_evidence_date: r.was_private_at_evidence_date,
-      }))
+      .map(r => {
+        const crdName = (adviserRollup[r.adviser_crd] || {}).name || null;
+        return {
+          evidence_id: r.evidence_id,
+          registrant_cik: r.evidence_cik,
+          series_id: r.evidence_series_id,
+          issuer_title: r.evidence_label,
+          value_usd: r.value_usd ? parseFloat(r.value_usd) : null,
+          evidence_date: r.evidence_date,
+          accession_number: r.accession_number,
+          adviser_crd: r.adviser_crd || null,
+          adviser_name: crdName,
+          adviser_method: r.adviser_resolution_method,
+          status_at_evidence_date: r.status_at_evidence_date,
+          was_private_at_evidence_date: r.was_private_at_evidence_date,
+          // Structured manager object. N-PORT rows always resolve via CRD.
+          manager: r.adviser_crd
+            ? { kind: 'crd', name: crdName, crd: r.adviser_crd, discovered_manager_id: null, url: `/intel/adviser/${encodeURIComponent(r.adviser_crd)}`, confidence: null }
+            : { kind: 'unknown', name: null, crd: null, discovered_manager_id: null, url: null, confidence: null },
+        };
+      })
       .sort((a, b) => (b.value_usd || 0) - (a.value_usd || 0));
 
     const annotatedFormd = formdRows
       .filter(r => audit || r.status_at_evidence_date === 'private' || r.status_at_evidence_date === 'unknown')
-      .map(r => ({
-        evidence_id: r.evidence_id,
-        filer_cik: r.evidence_cik,
-        filer_entityname: r.evidence_label,
-        value_usd: r.value_usd ? parseFloat(r.value_usd) : null,
-        filing_date: r.evidence_date,
-        accession_number: r.accession_number,
-        adviser_crd: r.adviser_crd || null,
-        adviser_name: (adviserRollup[r.adviser_crd] || {}).name || null,
-        adviser_method: r.adviser_resolution_method,
-        status_at_evidence_date: r.status_at_evidence_date,
-        was_private_at_evidence_date: r.was_private_at_evidence_date,
-      }))
+      .map(r => {
+        const crdName = (adviserRollup[r.adviser_crd] || {}).name || null;
+        // For discovered-manager rows, populate adviser_name from the discovered
+        // manager so legacy callers that read only adviser_name get a display name.
+        const adviserName = r.adviser_crd ? crdName : (r.discovered_manager_id ? r.discovered_manager_name : null);
+        return {
+          evidence_id: r.evidence_id,
+          filer_cik: r.evidence_cik,
+          filer_entityname: r.evidence_label,
+          value_usd: r.value_usd ? parseFloat(r.value_usd) : null,
+          filing_date: r.evidence_date,
+          accession_number: r.accession_number,
+          adviser_crd: r.adviser_crd || null,
+          adviser_name: adviserName,
+          adviser_method: r.adviser_resolution_method,
+          status_at_evidence_date: r.status_at_evidence_date,
+          was_private_at_evidence_date: r.was_private_at_evidence_date,
+          // Structured manager object — one of three kinds:
+          //   'crd'        — resolved to a registered adviser (adviser_crd set)
+          //   'discovered' — matched to enriched_managers (non-CRD VC/PE firm)
+          //   'unknown'    — no resolution found for this filing
+          manager: r.adviser_crd
+            ? { kind: 'crd', name: crdName, crd: r.adviser_crd, discovered_manager_id: null, url: `/intel/adviser/${encodeURIComponent(r.adviser_crd)}`, confidence: null }
+            : r.discovered_manager_id
+            ? { kind: 'discovered', name: r.discovered_manager_name, crd: null, discovered_manager_id: r.discovered_manager_id, url: `/intel/discovered/${encodeURIComponent(r.discovered_manager_id)}`, confidence: r.adviser_resolution_method || null }
+            : { kind: 'unknown', name: null, crd: null, discovered_manager_id: null, url: null, confidence: null },
+        };
+      })
       .sort((a, b) => (b.value_usd || 0) - (a.value_usd || 0));
 
     return res.json({
@@ -589,6 +985,119 @@ router.get('/companies/:slug/holders', async (req, res) => {
       nport_holders: annotatedNport,
       formd_holders: annotatedFormd,
       advisers,
+    });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// ----------------------------------------------------------------------------
+// Discovered-manager endpoint — non-CRD VC/PE firm from enriched_managers.
+// Mirrors /advisers/:crd in shape. Uses deps.formdClient (Form D project).
+// ----------------------------------------------------------------------------
+
+router.get('/discovered/:id', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const id = String(req.params.id || '').trim();
+    if (!/^[0-9a-f-]{36}$/i.test(id)) {
+      return res.status(400).json({ error: 'invalid id', code: 'INVALID_ID' });
+    }
+
+    // 1. Fetch the enriched_managers row from the Form D Supabase project.
+    //    `team_members` is JSONB on the table — surface it so the
+    //    DiscoveredPage React component can render the Team section.
+    //    `linked_crd` lets the UI offer "View linked adviser" navigation.
+    const { data: mgr, error: mgrErr } = await deps.formdClient
+      .from('enriched_managers')
+      .select('id,series_master_llc,website_url,linkedin_company_url,twitter_handle,fund_type,investment_stage,enrichment_status,primary_contact_email,phone_number,headquarters_city,headquarters_state,headquarters_country,last_updated,team_members,linked_crd,portfolio_companies,notable_portfolio_companies')
+      .eq('id', id)
+      .maybeSingle();
+    if (mgrErr) throw mgrErr;
+    if (!mgr) return notFound(res, `Discovered manager ${id} not found`, 'MANAGER_NOT_FOUND');
+
+    // 2. All holder evidence rows that resolved to this discovered manager.
+    //    Keyset-paginate v_intel_company_holders on evidence_id.
+    const allRows = [];
+    let lastId = 0;
+    while (true) {
+      const { data, error } = await deps.nportClient
+        .from('v_intel_company_holders')
+        .select('company_slug,evidence_id,evidence_cik,evidence_label,value_usd,evidence_date,accession_number,adviser_resolution_method,status_at_evidence_date')
+        .eq('discovered_manager_id', id)
+        .gt('evidence_id', lastId)
+        .order('evidence_id')
+        .limit(1000);
+      if (error) throw error;
+      const batch = data || [];
+      if (!batch.length) break;
+      allRows.push(...batch);
+      lastId = parseInt(batch[batch.length - 1].evidence_id, 10);
+      if (batch.length < 1000) break;
+    }
+
+    // 3. Fetch display names for each company that appears in the holdings.
+    const companySlugs = Array.from(new Set(allRows.map(r => r.company_slug).filter(Boolean)));
+    const companyMeta = {};
+    if (companySlugs.length) {
+      for (let i = 0; i < companySlugs.length; i += 200) {
+        const chunk = companySlugs.slice(i, i + 200);
+        const { data, error } = await deps.nportClient
+          .from('private_companies')
+          .select('slug,display_name')
+          .in('slug', chunk);
+        if (error) throw error;
+        for (const row of (data || [])) companyMeta[row.slug] = row;
+      }
+    }
+
+    // 4. Shape holder rows for the response.
+    const holders = allRows.map(r => ({
+      company_slug: r.company_slug,
+      company_name: (companyMeta[r.company_slug] || {}).display_name || r.company_slug,
+      accession_number: r.accession_number,
+      filer_entityname: r.evidence_label,
+      filing_date: r.evidence_date,
+      value_usd: r.value_usd ? parseFloat(r.value_usd) : null,
+    })).sort((a, b) => (b.value_usd || 0) - (a.value_usd || 0));
+
+    // Parse team_members JSONB if it arrived as a string (Supabase
+    // sometimes returns JSONB as a string depending on PostgREST settings).
+    let teamMembers = mgr.team_members;
+    if (typeof teamMembers === 'string') {
+      try { teamMembers = JSON.parse(teamMembers); } catch (_) { teamMembers = null; }
+    }
+    let portfolio = mgr.portfolio_companies;
+    if (typeof portfolio === 'string') {
+      try { portfolio = JSON.parse(portfolio); } catch (_) { portfolio = null; }
+    }
+
+    return res.json({
+      manager: {
+        id: mgr.id,
+        name: mgr.series_master_llc,
+        website_url: mgr.website_url || null,
+        linkedin_company_url: mgr.linkedin_company_url || null,
+        twitter_handle: mgr.twitter_handle || null,
+        fund_type: mgr.fund_type || null,
+        investment_stage: mgr.investment_stage || null,
+        enrichment_status: mgr.enrichment_status || null,
+        primary_contact_email: mgr.primary_contact_email || null,
+        phone_number: mgr.phone_number || null,
+        headquarters_city: mgr.headquarters_city || null,
+        headquarters_state: mgr.headquarters_state || null,
+        headquarters_country: mgr.headquarters_country || null,
+        last_updated: mgr.last_updated || null,
+        team_members: Array.isArray(teamMembers) ? teamMembers : null,
+        linked_crd: mgr.linked_crd || null,
+        portfolio_companies: Array.isArray(portfolio) ? portfolio : null,
+        notable_portfolio_companies: mgr.notable_portfolio_companies || null,
+      },
+      summary: {
+        total_holdings: holders.length,
+        total_value_usd: holders.reduce((acc, h) => acc + (h.value_usd || 0), 0),
+      },
+      holders_using_this_manager: holders,
     });
   } catch (err) {
     return serverError(res, err);
@@ -1187,6 +1696,456 @@ router.get('/companies/:slug/holders/formd.csv', async (req, res) => {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${slug}-formd-holders.csv"`);
     res.send(rowsToCsv(headers, sorted, accessors));
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// ============================================================================
+// CRM ROUTES (added 2026-05-31)
+// Personal CRM for tracking outreach to fund managers.
+// Spec: intelligence/CRM_SPEC.md on fund-holders-intel branch.
+// Schema: nport/migrations/010_crm_schema.sql
+// All routes under /api/intel/crm/*
+// ============================================================================
+
+// Whitelist of fields a PATCH /people/:id is allowed to update
+// (prevents overwriting source-derived fields like full_name, source_evidence)
+const CRM_PERSON_PATCHABLE = new Set([
+  'engagement_status', 'priority', 'tags', 'do_not_contact',
+  'do_not_contact_reason', 'needs_compliance_review', 'restriction_notes',
+  'notes', 'title', 'role', 'email', 'linkedin_url', 'twitter_handle', 'phone',
+]);
+
+const CRM_DEAL_PATCHABLE = new Set([
+  'state', 'security_type', 'share_class', 'structure', 'currency',
+  'price_per_share_min', 'price_per_share_max',
+  'implied_valuation_min', 'implied_valuation_max',
+  'size_shares', 'size_usd', 'conditions', 'expires_at', 'notes',
+]);
+
+const CRM_FOLLOWUP_PATCHABLE = new Set([
+  'status', 'due_at', 'reason', 'completed_at', 'snoozed_until',
+  'cancelled_reason', 'related_deal_interest_id',
+]);
+
+function pickAllowedFields(body, allowSet) {
+  const out = {};
+  for (const k of Object.keys(body || {})) {
+    if (allowSet.has(k)) out[k] = body[k];
+  }
+  return out;
+}
+
+// --- GET /api/intel/crm/people ---------------------------------------------
+router.get('/crm/people', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const status = req.query.status;       // filter
+    const priorityMax = req.query.priority_max;
+    const tag = req.query.tag;
+    const hasEmail = req.query.has_email === '1';
+
+    let q = deps.nportClient.from('crm_person')
+      .select('person_id,firm_id,full_name,title,role,email,linkedin_url,twitter_handle,phone,engagement_status,priority,tags,do_not_contact,added_via,added_for_companies,updated_at,created_at', { count: 'exact' })
+      .order('priority', { ascending: true })
+      .order('updated_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (status) q = q.eq('engagement_status', status);
+    if (priorityMax) q = q.lte('priority', parseInt(priorityMax, 10));
+    if (tag) q = q.contains('tags', [tag]);
+    if (hasEmail) q = q.not('email', 'is', null);
+
+    const { data: people, count, error } = await q;
+    if (error) throw error;
+
+    // Fetch firm rows for the people in this page
+    const firmIds = Array.from(new Set((people || []).map(p => p.firm_id).filter(Boolean)));
+    let firmsById = {};
+    if (firmIds.length) {
+      const { data: firms } = await deps.nportClient
+        .from('crm_firm')
+        .select('firm_id,display_name,website_url,linkedin_company_url,exposure_company_count,exposure_total_nport_usd,exposure_total_formd_usd')
+        .in('firm_id', firmIds);
+      firmsById = Object.fromEntries((firms || []).map(f => [f.firm_id, f]));
+    }
+
+    const rows = (people || []).map(p => ({
+      ...p,
+      firm: p.firm_id ? firmsById[p.firm_id] : null,
+    }));
+    return res.json({ total: count, limit, offset, rows });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- GET /api/intel/crm/people/:id ------------------------------------------
+router.get('/crm/people/:id', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
+
+    const { data: person, error: e1 } = await deps.nportClient
+      .from('crm_person').select('*').eq('person_id', id).maybeSingle();
+    if (e1) throw e1;
+    if (!person) return notFound(res, 'person not found', 'CRM_PERSON_NOT_FOUND');
+
+    let firm = null;
+    if (person.firm_id) {
+      const { data: f } = await deps.nportClient
+        .from('crm_firm').select('*').eq('firm_id', person.firm_id).maybeSingle();
+      firm = f;
+    }
+    const { data: interactions } = await deps.nportClient
+      .from('crm_interaction').select('*').eq('person_id', id)
+      .order('occurred_at', { ascending: false }).limit(100);
+    const { data: deals } = await deps.nportClient
+      .from('crm_deal_interest').select('*').eq('person_id', id)
+      .order('updated_at', { ascending: false });
+    const { data: followups } = await deps.nportClient
+      .from('crm_followup').select('*').eq('person_id', id)
+      .order('due_at', { ascending: true });
+
+    return res.json({ person, firm, interactions: interactions || [], deal_interests: deals || [], followups: followups || [] });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- POST /api/intel/crm/people --------------------------------------------
+router.post('/crm/people', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const b = req.body || {};
+    if (!b.full_name && !b.email) {
+      return res.status(400).json({ error: 'full_name or email required' });
+    }
+    const payload = {
+      firm_id: b.firm_id || null,
+      full_name: b.full_name || null,
+      first_name: b.first_name || null,
+      last_name: b.last_name || null,
+      title: b.title || null,
+      role: b.role || 'manual',
+      email: b.email ? b.email.toLowerCase().trim() : null,
+      linkedin_url: b.linkedin_url || null,
+      twitter_handle: b.twitter_handle || null,
+      phone: b.phone || null,
+      source_tag: 'manual',
+      source_evidence: [{ from: 'api_manual_add', at: new Date().toISOString() }],
+      added_via: 'manual',
+      notes: b.notes || null,
+    };
+    const { data, error } = await deps.nportClient
+      .from('crm_person').insert(payload).select().maybeSingle();
+    if (error) throw error;
+    return res.status(201).json({ person: data });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- PATCH /api/intel/crm/people/:id ---------------------------------------
+router.patch('/crm/people/:id', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
+    const updates = pickAllowedFields(req.body, CRM_PERSON_PATCHABLE);
+    if (!Object.keys(updates).length) return res.status(400).json({ error: 'no allowed fields in body' });
+    if (updates.email) updates.email = updates.email.toLowerCase().trim();
+    const { data, error } = await deps.nportClient
+      .from('crm_person').update(updates).eq('person_id', id).select().maybeSingle();
+    if (error) throw error;
+    if (!data) return notFound(res, 'person not found', 'CRM_PERSON_NOT_FOUND');
+    return res.json({ person: data });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- DELETE /api/intel/crm/people/:id --------------------------------------
+router.delete('/crm/people/:id', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
+    const { error } = await deps.nportClient
+      .from('crm_person').delete().eq('person_id', id);
+    if (error) throw error;
+    return res.status(204).end();
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- POST /api/intel/crm/people/:id/interactions ----------------------------
+router.post('/crm/people/:id/interactions', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
+    const b = req.body || {};
+    const required = ['occurred_at', 'direction', 'channel', 'type'];
+    for (const k of required) {
+      if (!b[k]) return res.status(400).json({ error: `${k} required` });
+    }
+    // Look up firm_id from person for denormalization
+    const { data: person } = await deps.nportClient
+      .from('crm_person').select('firm_id').eq('person_id', id).maybeSingle();
+
+    const payload = {
+      person_id: id,
+      firm_id: person ? person.firm_id : null,
+      occurred_at: b.occurred_at,
+      direction: b.direction,
+      channel: b.channel,
+      type: b.type,
+      subject: b.subject || null,
+      body: b.body || null,
+      body_url: b.body_url || null,
+      is_sensitive: !!b.is_sensitive,
+      sentiment: b.sentiment || null,
+      outcome: b.outcome || null,
+      related_company_slug: b.related_company_slug || null,
+      related_deal_interest_id: b.related_deal_interest_id || null,
+    };
+    const { data, error } = await deps.nportClient
+      .from('crm_interaction').insert(payload).select().maybeSingle();
+    if (error) throw error;
+    return res.status(201).json({ interaction: data });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- GET /api/intel/crm/people/:id/interactions ----------------------------
+router.get('/crm/people/:id/interactions', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const id = parseInt(req.params.id, 10);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const { data, error } = await deps.nportClient
+      .from('crm_interaction').select('*').eq('person_id', id)
+      .order('occurred_at', { ascending: false }).limit(limit);
+    if (error) throw error;
+    return res.json({ rows: data || [] });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- POST /api/intel/crm/people/:id/deal-interests --------------------------
+router.post('/crm/people/:id/deal-interests', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
+    const b = req.body || {};
+    if (!b.company_slug) return res.status(400).json({ error: 'company_slug required' });
+    if (!b.side) return res.status(400).json({ error: 'side required' });
+
+    const { data: person } = await deps.nportClient
+      .from('crm_person').select('firm_id').eq('person_id', id).maybeSingle();
+    const payload = {
+      person_id: id,
+      firm_id: person ? person.firm_id : null,
+      company_slug: b.company_slug,
+      side: b.side,
+      state: b.state || 'open',
+      security_type: b.security_type || null,
+      share_class: b.share_class || null,
+      structure: b.structure || null,
+      currency: b.currency || 'USD',
+      price_per_share_min: b.price_per_share_min || null,
+      price_per_share_max: b.price_per_share_max || null,
+      implied_valuation_min: b.implied_valuation_min || null,
+      implied_valuation_max: b.implied_valuation_max || null,
+      size_shares: b.size_shares || null,
+      size_usd: b.size_usd || null,
+      conditions: b.conditions || null,
+      expires_at: b.expires_at || null,
+      source_interaction_id: b.source_interaction_id || null,
+      notes: b.notes || null,
+    };
+    const { data, error } = await deps.nportClient
+      .from('crm_deal_interest').insert(payload).select().maybeSingle();
+    if (error) throw error;
+    return res.status(201).json({ deal_interest: data });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- PATCH /api/intel/crm/deal-interests/:id --------------------------------
+router.patch('/crm/deal-interests/:id', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const id = parseInt(req.params.id, 10);
+    const updates = pickAllowedFields(req.body, CRM_DEAL_PATCHABLE);
+    if (!Object.keys(updates).length) return res.status(400).json({ error: 'no allowed fields' });
+    const { data, error } = await deps.nportClient
+      .from('crm_deal_interest').update(updates).eq('deal_interest_id', id).select().maybeSingle();
+    if (error) throw error;
+    if (!data) return notFound(res, 'deal interest not found', 'CRM_DEAL_NOT_FOUND');
+    return res.json({ deal_interest: data });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- GET /api/intel/crm/deal-interests?company=... --------------------------
+router.get('/crm/deal-interests', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const company = req.query.company;
+    const state = req.query.state;
+    let q = deps.nportClient.from('crm_deal_interest')
+      .select('*,crm_person(person_id,full_name,email,linkedin_url,firm_id),crm_firm:firm_id(display_name)')
+      .order('side').order('price_per_share_max', { ascending: false });
+    if (company) q = q.eq('company_slug', company);
+    if (state) q = q.eq('state', state);
+    else q = q.in('state', ['open', 'soft', 'firm', 'negotiating']);
+
+    const { data, error } = await q.limit(500);
+    if (error) throw error;
+    return res.json({ rows: data || [] });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- POST /api/intel/crm/people/:id/followups -------------------------------
+router.post('/crm/people/:id/followups', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const id = parseInt(req.params.id, 10);
+    const b = req.body || {};
+    if (!b.due_at || !b.reason) return res.status(400).json({ error: 'due_at + reason required' });
+    const payload = {
+      person_id: id,
+      due_at: b.due_at,
+      reason: b.reason,
+      related_deal_interest_id: b.related_deal_interest_id || null,
+      triggered_by_interaction_id: b.triggered_by_interaction_id || null,
+    };
+    const { data, error } = await deps.nportClient
+      .from('crm_followup').insert(payload).select().maybeSingle();
+    if (error) throw error;
+    return res.status(201).json({ followup: data });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- PATCH /api/intel/crm/followups/:id -------------------------------------
+router.patch('/crm/followups/:id', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const id = parseInt(req.params.id, 10);
+    const updates = pickAllowedFields(req.body, CRM_FOLLOWUP_PATCHABLE);
+    if (!Object.keys(updates).length) return res.status(400).json({ error: 'no allowed fields' });
+    const { data, error } = await deps.nportClient
+      .from('crm_followup').update(updates).eq('followup_id', id).select().maybeSingle();
+    if (error) throw error;
+    if (!data) return notFound(res, 'followup not found', 'CRM_FOLLOWUP_NOT_FOUND');
+    return res.json({ followup: data });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- GET /api/intel/crm/followups?due_before=... ----------------------------
+router.get('/crm/followups', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const dueBefore = req.query.due_before || new Date().toISOString();
+    const status = req.query.status || 'open';
+    const { data, error } = await deps.nportClient
+      .from('crm_followup')
+      .select('*,crm_person(person_id,full_name,firm_id)')
+      .lte('due_at', dueBefore)
+      .eq('status', status)
+      .order('due_at', { ascending: true })
+      .limit(200);
+    if (error) throw error;
+    return res.json({ rows: data || [] });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- GET /api/intel/crm/firms/:id -------------------------------------------
+router.get('/crm/firms/:id', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { data: firm } = await deps.nportClient
+      .from('crm_firm').select('*').eq('firm_id', id).maybeSingle();
+    if (!firm) return notFound(res, 'firm not found', 'CRM_FIRM_NOT_FOUND');
+    const { data: identities } = await deps.nportClient
+      .from('crm_firm_identity').select('*').eq('firm_id', id);
+    const { data: people } = await deps.nportClient
+      .from('crm_person').select('person_id,full_name,title,role,email,engagement_status,priority')
+      .eq('firm_id', id)
+      .order('priority').order('full_name');
+    const { data: summary } = await deps.nportClient
+      .from('crm_firm_exposure_summary').select('*').eq('firm_id', id).maybeSingle();
+    return res.json({ firm, identities: identities || [], people: people || [], exposure: summary || null });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- POST /api/intel/crm/firms/:id/refresh-exposure -------------------------
+router.post('/crm/firms/:id/refresh-exposure', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    // Triggers a full MV refresh — cheap with ~thousands of firms.
+    const { error } = await deps.nportClient.rpc('refresh_crm_firm_exposure');
+    if (error) {
+      // RPC may not exist yet; fall back to manual REFRESH via a separate
+      // privileged path. For now just signal that the MV refresh failed and
+      // the caller should run it server-side.
+      return res.status(501).json({
+        error: 'MV refresh RPC not configured; run REFRESH MATERIALIZED VIEW CONCURRENTLY crm_firm_exposure_summary server-side',
+      });
+    }
+    return res.json({ refreshed: true });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- GET /api/intel/crm/export.csv ------------------------------------------
+router.get('/crm/export.csv', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const rows = [];
+    let from = 0;
+    const pageSize = 1000;
+    while (true) {
+      const { data, error } = await deps.nportClient
+        .from('crm_person')
+        .select('person_id,firm_id,full_name,title,role,email,linkedin_url,twitter_handle,engagement_status,priority,tags,do_not_contact,added_via,added_for_companies,created_at,updated_at')
+        .order('person_id')
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      if (!data || !data.length) break;
+      rows.push(...data);
+      if (data.length < pageSize) break;
+      from += pageSize;
+    }
+    const headers = ['person_id','firm_id','full_name','title','role','email','linkedin_url','twitter_handle','engagement_status','priority','tags','do_not_contact','added_via','added_for_companies','created_at','updated_at'];
+    const accessors = headers.map(h => (r) => r[h]);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="crm-people.csv"`);
+    res.send(rowsToCsv(headers, rows, accessors));
   } catch (err) {
     return serverError(res, err);
   }
