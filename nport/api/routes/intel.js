@@ -2178,6 +2178,102 @@ router.post('/crm/firms/:id/refresh-exposure', async (req, res) => {
   }
 });
 
+// --- POST /api/intel/crm/add-by-company ------------------------------------
+// Triggers the Python seed script in fund-holders-intel worktree.
+// Default dry-run (preview); pass execute=true to write.
+const { spawn } = require('child_process');
+const fs = require('fs');
+
+const INTEL_WORKTREE = '/Users/Miles/projects/PrivateFundsRadar-fund-holders-intel';
+const VENV_PYTHON = `${INTEL_WORKTREE}/.venv/bin/python`;
+
+function runSeedScript(scriptArgs) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(VENV_PYTHON, scriptArgs, {
+      cwd: INTEL_WORKTREE,
+      timeout: 180000,  // 3min cap
+    });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', d => { stdout += d; });
+    proc.stderr.on('data', d => { stderr += d; });
+    proc.on('error', reject);
+    proc.on('close', code => resolve({ code, stdout, stderr }));
+  });
+}
+
+router.post('/crm/add-by-company', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const b = req.body || {};
+    if (!b.company_slug) return badRequest(res, 'company_slug required');
+    if (!/^[a-z0-9-]+$/.test(b.company_slug)) return badRequest(res, 'invalid company_slug format');
+    const dryRun = b.execute !== true;  // default to dry-run for safety
+
+    const args = ['intelligence/crm/add_by_tracked_company.py', '--company', b.company_slug];
+    if (!dryRun) args.push('--execute');
+    if (b.filter) {
+      if (!['has_contact','email_only','none'].includes(b.filter)) {
+        return badRequest(res, 'invalid filter');
+      }
+      args.push('--filter', b.filter);
+    }
+    if (b.include_owners) args.push('--include-owners');
+
+    const { code, stdout, stderr } = await runSeedScript(args);
+    if (code !== 0) {
+      return res.status(500).json({ error: 'seed failed', code, stderr: stderr.slice(0, 500) });
+    }
+    // Read audit report
+    const reportPath = `${INTEL_WORKTREE}/intelligence/out/crm_add_by_tracked_company_${b.company_slug}.json`;
+    let audit = null;
+    if (fs.existsSync(reportPath)) {
+      try {
+        audit = JSON.parse(fs.readFileSync(reportPath, 'utf-8'));
+      } catch (e) { /* skip */ }
+    }
+    return res.json({ dry_run: dryRun, exit_code: code, audit, stdout_tail: stdout.split('\n').slice(-20).join('\n') });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- POST /api/intel/crm/add-by-firm ---------------------------------------
+router.post('/crm/add-by-firm', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const b = req.body || {};
+    if (!b.crd && !b.enriched_manager_id) {
+      return badRequest(res, 'crd or enriched_manager_id required');
+    }
+    if (b.crd && b.enriched_manager_id) {
+      return badRequest(res, 'pass crd OR enriched_manager_id, not both');
+    }
+    const dryRun = b.execute !== true;
+    const args = ['intelligence/crm/add_by_firm.py'];
+    if (b.crd) {
+      if (!/^[0-9]+$/.test(String(b.crd))) return badRequest(res, 'crd must be numeric');
+      args.push('--crd', String(b.crd));
+    } else {
+      if (!/^[0-9a-f-]{36}$/i.test(String(b.enriched_manager_id))) return badRequest(res, 'invalid uuid');
+      args.push('--enriched-manager-id', b.enriched_manager_id);
+    }
+    if (!dryRun) args.push('--execute');
+    if (b.filter && ['has_contact','email_only','none'].includes(b.filter)) {
+      args.push('--filter', b.filter);
+    }
+    if (b.include_owners) args.push('--include-owners');
+
+    const { code, stdout, stderr } = await runSeedScript(args);
+    if (code !== 0) {
+      return res.status(500).json({ error: 'seed failed', code, stderr: stderr.slice(0, 500) });
+    }
+    return res.json({ dry_run: dryRun, exit_code: code, stdout_tail: stdout.split('\n').slice(-30).join('\n') });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
 // --- GET /api/intel/crm/export.csv ------------------------------------------
 router.get('/crm/export.csv', async (req, res) => {
   if (!configGuard(res)) return;

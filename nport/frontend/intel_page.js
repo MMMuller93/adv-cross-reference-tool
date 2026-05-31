@@ -1969,6 +1969,9 @@ function IntelPage({ slug }) {
               )}
             </div>
           </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <AddToCrmButton kind="company" slug={slug} label="Add managers to CRM" />
+          </div>
           {company.latest_known_valuation_usd && (
             <div className="text-right shrink-0">
               <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Last valuation</div>
@@ -2174,9 +2177,12 @@ function AdviserPage({ crd }) {
       <div className="intel-page">
       {/* Header */}
       <div className="mt-1 mb-6">
-        <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900">
-          {adviser.name || 'Unidentified firm'}
-        </h1>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900">
+            {adviser.name || 'Unidentified firm'}
+          </h1>
+          <AddToCrmButton kind="firm" crd={adviser.crd} label="Add firm's people to CRM" />
+        </div>
         <div className="text-xs font-mono text-slate-500 mt-1">CRD {adviser.crd}</div>
         <div className="flex flex-wrap items-center gap-1.5 mt-3">
           {adviser.website && (
@@ -2843,14 +2849,17 @@ function DiscoveredPage({ id }) {
     >
       <div className="intel-page">
       <div className="mt-1 mb-6">
-        <div className="flex items-baseline gap-3 flex-wrap">
-          <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900">
-            {manager.name}
-          </h1>
-          <span className="text-[10px] uppercase tracking-widest font-semibold font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500"
-                title="Manager discovered via Form D series-master parsing (not SEC-registered)">
-            via filings
-          </span>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex items-baseline gap-3 flex-wrap">
+            <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900">
+              {manager.name}
+            </h1>
+            <span className="text-[10px] uppercase tracking-widest font-semibold font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500"
+                  title="Manager discovered via Form D series-master parsing (not SEC-registered)">
+              via filings
+            </span>
+          </div>
+          <AddToCrmButton kind="firm" enrichedManagerId={manager.id || id} label="Add firm's people to CRM" />
         </div>
         <div className="text-[11px] font-mono text-slate-500 mt-2 uppercase tracking-wider">
           {manager.enrichment_status || 'candidate'}
@@ -2997,6 +3006,155 @@ function DiscoveredPage({ id }) {
 
 const CRM_STATUSES = ['cold','researching','outreach_sent','responded','engaged','dormant'];
 const CRM_PRIORITIES = [1, 2, 3, 4, 5];
+
+// ----------------------------------------------------------------------------
+// AddToCrmButton — reusable "Add manager-people to CRM" trigger for
+// /intel/<slug>, /intel/discovered/<id>, /intel/adviser/<crd>.
+// Two-step flow: preview (dry-run) → confirm (execute).
+// ----------------------------------------------------------------------------
+function AddToCrmButton({ kind, slug, crd, enrichedManagerId, label }) {
+  const [open, setOpen] = React.useState(false);
+  const [stage, setStage] = React.useState('idle'); // idle | preview | preview_done | executing | done | error
+  const [preview, setPreview] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  const [result, setResult] = React.useState(null);
+
+  const apiPath = kind === 'company' ? '/api/intel/crm/add-by-company' : '/api/intel/crm/add-by-firm';
+  const apiBody = kind === 'company'
+    ? { company_slug: slug }
+    : crd ? { crd } : { enriched_manager_id: enrichedManagerId };
+
+  async function runPreview() {
+    setStage('preview');
+    setError(null);
+    try {
+      const r = await fetch(apiPath, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...apiBody, execute: false }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setPreview(d);
+      setStage('preview_done');
+    } catch (e) {
+      setError(String(e));
+      setStage('error');
+    }
+  }
+
+  async function runExecute() {
+    setStage('executing');
+    setError(null);
+    try {
+      const r = await fetch(apiPath, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...apiBody, execute: true }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setResult(d);
+      setStage('done');
+    } catch (e) {
+      setError(String(e));
+      setStage('error');
+    }
+  }
+
+  function openModal() {
+    setOpen(true);
+    setStage('idle');
+    setPreview(null);
+    setResult(null);
+    setError(null);
+    runPreview();
+  }
+
+  return (
+    <>
+      <button
+        onClick={openModal}
+        className="inline-flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-400"
+        title="Add the people we have contact info for at this firm / company's manager firms to the CRM"
+      >
+        <svg viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+          <path d="M10 4a1 1 0 011 1v4h4a1 1 0 110 2h-4v4a1 1 0 11-2 0v-4H5a1 1 0 110-2h4V5a1 1 0 011-1z" />
+        </svg>
+        {label || 'Add to CRM'}
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4" onClick={() => setOpen(false)}>
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-slate-900 mb-3">Add to CRM</h3>
+            {stage === 'preview' && <div className="text-sm text-slate-600">Computing preview…</div>}
+            {stage === 'error' && (
+              <div className="text-sm text-rose-700">Error: {error}</div>
+            )}
+            {stage === 'preview_done' && preview?.audit && (
+              <div className="space-y-3">
+                <div className="text-sm text-slate-700">This will add the following to your CRM:</div>
+                <table className="text-[12px] w-full">
+                  <tbody className="font-mono">
+                    <tr><td className="text-slate-500 pr-3">Firms exposed</td><td className="font-semibold">{preview.audit.firms_total}</td></tr>
+                    <tr><td className="text-slate-500 pr-3">People we have contact for</td><td className="font-semibold">{preview.audit.persons_after_filter}</td></tr>
+                    <tr><td className="text-slate-500 pr-3">Filter</td><td>has email/linkedin/twitter</td></tr>
+                  </tbody>
+                </table>
+                <div className="text-[11px] text-slate-500 italic">
+                  Existing CRM rows won't be duplicated — re-running is idempotent.
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <button onClick={runExecute}
+                          className="px-3 py-1.5 text-[12px] font-medium bg-slate-900 text-white rounded hover:bg-slate-800">
+                    Confirm — add {preview.audit.persons_after_filter} people
+                  </button>
+                  <button onClick={() => setOpen(false)}
+                          className="px-3 py-1.5 text-[12px] font-medium text-slate-600 hover:text-slate-900">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            {stage === 'preview_done' && !preview?.audit && (
+              <div className="text-sm text-slate-700">
+                Preview not available — the seed script may not produce an audit JSON for this kind. Click below to proceed.
+                <div className="mt-3">
+                  <button onClick={runExecute} className="px-3 py-1.5 text-[12px] font-medium bg-slate-900 text-white rounded hover:bg-slate-800">
+                    Add to CRM
+                  </button>
+                </div>
+              </div>
+            )}
+            {stage === 'executing' && <div className="text-sm text-slate-600">Adding to CRM…</div>}
+            {stage === 'done' && (
+              <div className="space-y-3">
+                <div className="text-sm text-emerald-700 font-medium">✓ Added to CRM</div>
+                {result?.audit && (
+                  <table className="text-[12px] w-full font-mono">
+                    <tbody>
+                      <tr><td className="text-slate-500 pr-3">Firms upserted</td><td>{result.audit.firms_upserted ?? '—'}</td></tr>
+                      <tr><td className="text-slate-500 pr-3">Persons upserted</td><td>{result.audit.persons_upserted ?? '—'}</td></tr>
+                    </tbody>
+                  </table>
+                )}
+                <div className="flex gap-2 pt-2">
+                  <a href="/intel/crm" className="px-3 py-1.5 text-[12px] font-medium bg-slate-900 text-white rounded hover:bg-slate-800 no-underline">
+                    Open CRM
+                  </a>
+                  <button onClick={() => setOpen(false)}
+                          className="px-3 py-1.5 text-[12px] font-medium text-slate-600 hover:text-slate-900">
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 const fmtUsd = (v) => {
   if (v == null) return '—';
