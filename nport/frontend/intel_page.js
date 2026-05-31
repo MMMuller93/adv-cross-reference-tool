@@ -3165,11 +3165,7 @@ const fmtUsd = (v) => {
   if (n >= 1e3) return `$${(n/1e3).toFixed(0)}K`;
   return `$${n.toFixed(0)}`;
 };
-
-const fmtDate = (s) => {
-  if (!s) return '—';
-  try { return new Date(s).toISOString().slice(0, 10); } catch (e) { return s; }
-};
+// NOTE: fmtDate is already defined at line 85 — re-using rather than re-declaring
 
 function CrmPersonListPage() {
   const [rows, setRows] = React.useState([]);
