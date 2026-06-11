@@ -30,18 +30,50 @@ function buildApp() {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
-  // Lightweight CORS for the standalone frontend during development.
-  app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') return res.sendStatus(204);
-    next();
-  });
+  // CORS: the frontend is served same-origin by this process, so no
+  // cross-origin grants are needed. The old wildcard
+  // (Access-Control-Allow-Origin: *) was removed 2026-06-10 per the
+  // systemic security review — it let any website script the API from a
+  // visitor's browser. If a separate dev origin ever needs access, allow
+  // it explicitly via INTEL_CORS_ORIGIN.
+  const corsOrigin = process.env.INTEL_CORS_ORIGIN || null;
+  if (corsOrigin) {
+    app.use((req, res, next) => {
+      res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+      if (req.method === 'OPTIONS') return res.sendStatus(204);
+      next();
+    });
+  }
 
   app.get('/health', (_req, res) => {
     res.json({ ok: true, service: 'nport-api', port: PORT });
   });
+
+  // HTTP Basic auth on everything except /health. Credentials come from
+  // INTEL_BASIC_USER / INTEL_BASIC_PASS (set in .env.nport). Basic was
+  // chosen over an API key because the browser replays credentials
+  // automatically — zero changes needed across the frontend's fetch()
+  // call sites. If the env vars are missing the server still runs but
+  // logs a loud warning each boot (local-dev affordance; set the vars).
+  const BASIC_USER = process.env.INTEL_BASIC_USER || '';
+  const BASIC_PASS = process.env.INTEL_BASIC_PASS || '';
+  if (BASIC_USER && BASIC_PASS) {
+    const expected = 'Basic ' + Buffer.from(`${BASIC_USER}:${BASIC_PASS}`).toString('base64');
+    app.use((req, res, next) => {
+      if (req.path === '/health') return next();
+      const got = req.headers.authorization || '';
+      // timing-safe-ish compare; payloads are small and same-length check first
+      const ok = got.length === expected.length &&
+        require('crypto').timingSafeEqual(Buffer.from(got), Buffer.from(expected));
+      if (ok) return next();
+      res.setHeader('WWW-Authenticate', 'Basic realm="intel"');
+      return res.status(401).json({ error: 'authentication required' });
+    });
+  } else {
+    console.warn('[nport-api] WARNING: INTEL_BASIC_USER/INTEL_BASIC_PASS not set — API is UNAUTHENTICATED. Set them in .env.nport.');
+  }
 
   // Static frontend (../frontend) — convenient single-process dev.
   const path = require('path');
