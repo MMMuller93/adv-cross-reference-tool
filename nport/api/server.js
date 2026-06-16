@@ -114,6 +114,7 @@ function buildApp() {
   app.get('/intel/crm', (_req, res) => res.sendFile(frontendIndex));
   app.get('/intel/crm/deals', (_req, res) => res.sendFile(frontendIndex));
   app.get('/intel/crm/company/:slug', (_req, res) => res.sendFile(frontendIndex));
+  app.get('/intel/crm/firms/:id', (_req, res) => res.sendFile(frontendIndex));
   app.get('/intel/crm/person/:id', (_req, res) => res.sendFile(frontendIndex));
   app.get('/intel/:slug', (_req, res) => res.sendFile(frontendIndex));
   app.get('/fund/:cik', (_req, res) => res.sendFile(frontendIndex));

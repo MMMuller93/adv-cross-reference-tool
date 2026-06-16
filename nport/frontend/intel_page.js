@@ -3295,7 +3295,7 @@ function CrmPersonListPage() {
                     <td className="px-3 py-2">
                       {r.firm ? (
                         <span>
-                          <span className="font-medium text-slate-800">{r.firm.display_name}</span>
+                          <a href={`/intel/crm/firms/${r.firm.firm_id}`} className="font-medium text-slate-800 hover:underline hover:text-blue-700">{r.firm.display_name}</a>
                           {r.firm.website_url && <a href={r.firm.website_url} target="_blank" rel="noreferrer noopener" title="firm site" className="ml-1 text-slate-400 hover:text-slate-700">↗</a>}
                           {r.firm.linkedin_company_url && <a href={r.firm.linkedin_company_url} target="_blank" rel="noreferrer noopener" title="firm LinkedIn" className="ml-0.5 text-slate-400 hover:text-blue-600">in</a>}
                         </span>
@@ -3541,7 +3541,7 @@ function CrmCompanyPage({ slug }) {
         {firms.map(f => (
           <div key={f.firm_id} className="bg-white border border-slate-200 rounded mb-3 p-4">
             <div className="flex items-baseline justify-between gap-3">
-              <h2 className="font-semibold text-slate-900">{f.display_name}</h2>
+              <h2 className="font-semibold text-slate-900"><a href={`/intel/crm/firms/${f.firm_id}`} className="hover:underline">{f.display_name}</a></h2>
               <span className="text-sm text-slate-600 shrink-0">{f.nport_usd ? `${fmtUsd(f.nport_usd)} N-PORT` : ''}{f.formd_usd ? ` · ${fmtUsd(f.formd_usd)} Form D` : ''} · {f.positions}×</span>
             </div>
             {(f.people || []).length > 0 ? (
@@ -3557,6 +3557,60 @@ function CrmCompanyPage({ slug }) {
             ) : <div className="text-xs text-slate-400 mt-1">No CRM contacts at this firm yet.</div>}
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// Firm-centric page: the firm's CRM people + its full tracked-company holdings.
+function CrmFirmPage({ id }) {
+  const [data, setData] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  React.useEffect(() => {
+    fetch(`/api/intel/crm/firms/${encodeURIComponent(id)}`).then(r => r.json())
+      .then(setData).catch(e => setError(String(e)));
+  }, [id]);
+  if (error) return <div className="p-6 text-rose-600">Error: {error}</div>;
+  if (!data) return <div className="min-h-screen bg-slate-50"><div className="p-6 text-slate-500">Loading…</div></div>;
+  if (data.error) return <div className="p-6 text-rose-600">{data.error}</div>;
+  const f = data.firm;
+  const people = data.people || [];
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <CmdKPalette />
+      <div className="max-w-5xl mx-auto px-4 py-6">
+        <a href="/intel/crm" className="text-sm text-slate-500 hover:text-slate-700">← All people</a>
+        <div className="mt-3 flex items-baseline justify-between gap-3">
+          <h1 className="text-2xl font-semibold text-slate-900"><FirmFavicon website={f.website_url} size={20} /> {f.display_name}</h1>
+          <div className="text-sm space-x-3 shrink-0">
+            {f.website_url && <a href={f.website_url} target="_blank" rel="noreferrer noopener" className="text-blue-700 hover:underline">website ↗</a>}
+            {f.linkedin_company_url && <a href={f.linkedin_company_url} target="_blank" rel="noreferrer noopener" className="text-blue-700 hover:underline">LinkedIn ↗</a>}
+          </div>
+        </div>
+        <div className="text-sm text-slate-500 mt-1">
+          {f.exposure_company_count || 0} tracked cos · {fmtUsd(f.exposure_total_nport_usd)} N-PORT · {fmtUsd(f.exposure_total_formd_usd)} Form D
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          <section className="bg-white border border-slate-200 rounded p-4">
+            <h2 className="text-sm font-semibold text-slate-700 mb-2">People ({people.length})</h2>
+            {people.length ? (
+              <ul className="text-sm space-y-2">
+                {people.map(p => (
+                  <li key={p.person_id} className="flex items-center gap-2">
+                    <PersonAvatar name={p.full_name} email={p.email} size={22} />
+                    <a href={`/intel/crm/person/${p.person_id}`} className="text-blue-700 hover:underline font-medium">{p.full_name || p.email || `Person ${p.person_id}`}</a>
+                    {p.title && <span className="text-slate-400 text-xs truncate">{p.title}</span>}
+                    <span className="ml-auto text-xs px-1.5 py-0.5 bg-slate-100 rounded shrink-0">{p.engagement_status}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : <div className="text-slate-400 text-sm">No CRM contacts at this firm yet.</div>}
+          </section>
+          <section className="bg-white border border-slate-200 rounded p-4">
+            <h2 className="text-sm font-semibold text-slate-700 mb-2">Holdings</h2>
+            <FirmExposureList firmId={f.firm_id} />
+          </section>
+        </div>
       </div>
     </div>
   );
@@ -3604,7 +3658,7 @@ function CrmPersonDetailPage({ id }) {
             <h2 className="text-sm font-semibold text-slate-700 mb-2">Firm</h2>
             {f ? (
               <div className="text-sm space-y-1">
-                <div className="font-medium text-slate-900"><FirmFavicon website={f.website_url} /> {f.display_name}</div>
+                <div className="font-medium text-slate-900"><FirmFavicon website={f.website_url} /> <a href={`/intel/crm/firms/${f.firm_id}`} className="hover:underline hover:text-blue-700">{f.display_name}</a></div>
                 {f.website_url && <a href={f.website_url} target="_blank" rel="noreferrer noopener" className="block text-blue-700 hover:underline truncate">{f.website_url}</a>}
                 {f.linkedin_company_url && <a href={f.linkedin_company_url} target="_blank" rel="noreferrer noopener" className="block text-blue-700 hover:underline truncate">{f.linkedin_company_url}</a>}
                 <div className="text-slate-500 mt-1">{f.exposure_company_count || 0} tracked cos · {fmtUsd(f.exposure_total_nport_usd)} N-PORT · {fmtUsd(f.exposure_total_formd_usd)} Form D</div>
@@ -4055,6 +4109,7 @@ window.mountIntelRouter = function () {
     { match: /^\/intel\/crm\/?$/, render: () => <CrmPersonListPage /> },
     { match: /^\/intel\/crm\/deals\/?$/, render: () => <CrmDealsPage /> },
     { match: /^\/intel\/crm\/company\/([^\/]+)/, render: (m) => <CrmCompanyPage slug={decodeURIComponent(m[1])} /> },
+    { match: /^\/intel\/crm\/firms\/([^\/]+)/, render: (m) => <CrmFirmPage id={decodeURIComponent(m[1])} /> },
     { match: /^\/intel\/crm\/person\/([^\/]+)/, render: (m) => <CrmPersonDetailPage id={decodeURIComponent(m[1])} /> },
     { match: /^\/intel\/fund\/([^\/]+)/, render: (m) => <FundPage accession={decodeURIComponent(m[1])} /> },
     { match: /^\/intel\/adviser\/([^\/]+)/, render: (m) => <AdviserPage crd={decodeURIComponent(m[1])} /> },
