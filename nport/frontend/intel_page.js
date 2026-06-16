@@ -3172,7 +3172,10 @@ function CrmPersonListPage() {
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
-  const [filters, setFilters] = React.useState({ status: '', priorityMax: '', tag: '', hasEmail: false });
+  const [filters, setFilters] = React.useState({ status: '', priorityMax: '', tag: '', hasEmail: false, view: '' });
+  const [showAdd, setShowAdd] = React.useState(false);
+  const [today, setToday] = React.useState(null);
+  const [sort, setSort] = React.useState({ key: 'priority', dir: 'asc' });
 
   React.useEffect(() => {
     const p = new URLSearchParams({ limit: '500' });
@@ -3180,6 +3183,7 @@ function CrmPersonListPage() {
     if (filters.priorityMax) p.set('priority_max', filters.priorityMax);
     if (filters.tag) p.set('tag', filters.tag);
     if (filters.hasEmail) p.set('has_email', '1');
+    if (filters.view) p.set('view', filters.view);
     setLoading(true);
     fetch(`/api/intel/crm/people?${p.toString()}`)
       .then(r => r.json())
@@ -3187,17 +3191,52 @@ function CrmPersonListPage() {
       .catch(e => { setError(String(e)); setLoading(false); });
   }, [filters]);
 
+  React.useEffect(() => {
+    fetch('/api/intel/crm/today').then(r => r.json()).then(setToday).catch(() => {});
+  }, []);
+
+  const sortedRows = sort.key === 'last'
+    ? [...rows].sort((a, b) => {
+        const av = a.last_contacted_at ? Date.parse(a.last_contacted_at) : -Infinity;
+        const bv = b.last_contacted_at ? Date.parse(b.last_contacted_at) : -Infinity;
+        return sort.dir === 'desc' ? bv - av : av - bv;
+      })
+    : rows;
+  const toggleLastSort = () => setSort(s => {
+    if (s.key !== 'last') return { key: 'last', dir: 'desc' };
+    if (s.dir === 'desc') return { key: 'last', dir: 'asc' };
+    return { key: 'priority', dir: 'asc' };  // third click → back to default order
+  });
+
   return (
     <div className="min-h-screen bg-slate-50">
+      <CmdKPalette />
       <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-semibold text-slate-900">CRM — People</h1>
           <div className="flex gap-2 text-sm">
+            <span className="px-2 py-1 text-slate-400 hidden sm:inline" title="Press ⌘K to search">⌘K to search</span>
             <a href="/intel/crm/deals" className="px-3 py-1 bg-white border border-slate-200 rounded hover:bg-slate-100">Deals view</a>
             <a href="/api/intel/crm/export.csv" className="px-3 py-1 bg-white border border-slate-200 rounded hover:bg-slate-100">Export CSV</a>
-            <button onClick={() => alert('Use the python CLI for now: intelligence/crm/add_person.py')} className="px-3 py-1 bg-slate-900 text-white rounded hover:bg-slate-800">+ Add person</button>
+            <button onClick={() => setShowAdd(true)} className="px-3 py-1 bg-slate-900 text-white rounded hover:bg-slate-800">+ Add person</button>
           </div>
         </div>
+        {today && (
+          <div className="flex flex-wrap gap-2 mb-4">
+            <div className="px-3 py-2 bg-white border border-slate-200 rounded text-sm">
+              <span className="font-semibold text-rose-700">{today.overdue_followups}</span> <span className="text-slate-600">overdue followups</span>
+            </div>
+            <button onClick={() => setFilters(f => ({ ...f, status: '', view: f.view === 'stale' ? '' : 'stale' }))}
+                    className={`px-3 py-2 border rounded text-sm hover:bg-slate-100 ${filters.view === 'stale' ? 'bg-amber-50 border-amber-300 ring-1 ring-amber-300' : 'bg-white border-slate-200'}`}>
+              <span className="font-semibold text-amber-700">{today.stale_contacts}</span> <span className="text-slate-600">stale contacts</span>
+            </button>
+            <button onClick={() => setFilters(f => ({ ...f, status: '', view: f.view === 'replied' ? '' : 'replied' }))}
+                    className={`px-3 py-2 border rounded text-sm hover:bg-slate-100 ${filters.view === 'replied' ? 'bg-emerald-50 border-emerald-300 ring-1 ring-emerald-300' : 'bg-white border-slate-200'}`}>
+              <span className="font-semibold text-emerald-700">{today.recent_replies}</span> <span className="text-slate-600">recent replies</span>
+            </button>
+            {filters.view && <button onClick={() => setFilters(f => ({ ...f, view: '' }))} className="px-2 py-2 text-xs text-slate-500 hover:text-slate-800 underline">clear view</button>}
+          </div>
+        )}
         <div className="bg-white border border-slate-200 rounded p-3 mb-4 flex flex-wrap gap-3 text-sm">
           <label>Status:&nbsp;
             <select value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} className="border border-slate-300 rounded px-2 py-0.5">
@@ -3235,16 +3274,22 @@ function CrmPersonListPage() {
                   <th className="text-left px-3 py-2">Exposure</th>
                   <th className="text-left px-3 py-2">Status</th>
                   <th className="text-left px-3 py-2">Pri</th>
+                  <th className="text-left px-3 py-2 cursor-pointer select-none hover:text-slate-900" onClick={toggleLastSort}>
+                    Last contacted {sort.key === 'last' ? (sort.dir === 'desc' ? '▼' : '▲') : '↕'}
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map(r => (
+                {sortedRows.map(r => (
                   <tr key={r.person_id} className="border-t border-slate-100 hover:bg-slate-50">
                     <td className="px-3 py-2">
-                      <a href={`/intel/crm/person/${r.person_id}`} className="font-medium text-slate-900 hover:text-blue-700 hover:underline">
-                        {r.full_name || r.email || `Person ${r.person_id}`}
-                      </a>
-                      {r.do_not_contact && <span className="ml-2 text-xs text-rose-600 font-semibold">DNC</span>}
+                      <span className="flex items-center gap-2">
+                        <PersonAvatar name={r.full_name} email={r.email} size={24} />
+                        <a href={`/intel/crm/person/${r.person_id}`} className="font-medium text-slate-900 hover:text-blue-700 hover:underline">
+                          {r.full_name || r.email || `Person ${r.person_id}`}
+                        </a>
+                        {r.do_not_contact && <span className="text-xs text-rose-600 font-semibold">DNC</span>}
+                      </span>
                     </td>
                     <td className="px-3 py-2 text-slate-700">{r.title || <span className="text-slate-300">—</span>}</td>
                     <td className="px-3 py-2">
@@ -3270,15 +3315,131 @@ function CrmPersonListPage() {
                       <span className="px-1.5 py-0.5 bg-slate-100 rounded">{r.engagement_status}</span>
                     </td>
                     <td className="px-3 py-2 text-center text-slate-700">{r.priority}</td>
+                    <td className="px-3 py-2 text-xs text-slate-500" title={r.last_contacted_at ? fmtDate(r.last_contacted_at) : ''}>{fmtRelative(r.last_contacted_at)}</td>
                   </tr>
                 ))}
                 {!rows.length && (
-                  <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-500">No people in CRM yet. Use python intelligence/crm/add_by_tracked_company.py --company &lt;slug&gt; --execute</td></tr>
+                  <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-500">No people in CRM yet. Click <span className="font-medium">+ Add person</span> to get started, or run python intelligence/crm/add_by_tracked_company.py --company &lt;slug&gt; --execute</td></tr>
                 )}
               </tbody>
             </table>
           </div>
         )}
+      </div>
+      {showAdd && <AddPersonModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); setFilters({ ...filters }); }} />}
+    </div>
+  );
+}
+
+function AddPersonModal({ onClose, onSaved }) {
+  const [form, setForm] = React.useState({ full_name: '', email: '', title: '', linkedin_url: '', twitter_handle: '', phone: '', notes: '' });
+  const [firmQuery, setFirmQuery] = React.useState('');
+  const [firmId, setFirmId] = React.useState(null);
+  const [firmName, setFirmName] = React.useState('');
+  const [firmOpts, setFirmOpts] = React.useState([]);
+  const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    if (firmId || firmQuery.trim().length < 2) { setFirmOpts([]); return; }
+    let alive = true;
+    const t = setTimeout(() => {
+      fetch(`/api/intel/crm/firms/search?q=${encodeURIComponent(firmQuery.trim())}`)
+        .then(r => r.json()).then(d => { if (alive) setFirmOpts(d.rows || []); }).catch(() => {});
+    }, 150);
+    return () => { alive = false; clearTimeout(t); };
+  }, [firmQuery, firmId]);
+
+  async function submit() {
+    if (busy) return;
+    if (!form.full_name && !form.email) { alert('Name or email is required'); return; }
+    setBusy(true);
+    const payload = { ...form, firm_id: firmId || null };
+    Object.keys(payload).forEach(k => { if (payload[k] === '') delete payload[k]; });
+    try {
+      const r = await fetch('/api/intel/crm/people', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      if (!r.ok) { alert(`Error: ${await r.text()}`); setBusy(false); return; }
+      onSaved();
+    } catch (e) { alert(String(e)); setBusy(false); }
+  }
+
+  return (
+    <Modal title="Add person" onClose={onClose} onSubmit={submit}>
+      <Field label="Full name"><input value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} placeholder="Jane Doe" /></Field>
+      <Field label="Email"><input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="jane@firm.com" /></Field>
+      <Field label="Firm">
+        <input value={firmQuery} onChange={e => { setFirmId(null); setFirmName(''); setFirmQuery(e.target.value); }} placeholder="type 2+ chars to search existing firms" />
+      </Field>
+      {!firmId && firmOpts.length > 0 && (
+        <div className="border border-slate-200 rounded max-h-32 overflow-y-auto -mt-1 text-sm">
+          {firmOpts.map(o => (
+            <button key={o.firm_id} type="button"
+                    onClick={() => { setFirmId(o.firm_id); setFirmName(o.display_name); setFirmQuery(o.display_name); setFirmOpts([]); }}
+                    className="block w-full text-left px-2 py-1 hover:bg-slate-100">{o.display_name}</button>
+          ))}
+        </div>
+      )}
+      {firmId && <div className="text-xs text-emerald-700">✓ linked to {firmName}</div>}
+      <Field label="Title"><input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Partner" /></Field>
+      <Field label="LinkedIn URL"><input value={form.linkedin_url} onChange={e => setForm({ ...form, linkedin_url: e.target.value })} /></Field>
+      <Field label="Twitter"><input value={form.twitter_handle} onChange={e => setForm({ ...form, twitter_handle: e.target.value })} placeholder="@handle" /></Field>
+      <Field label="Phone"><input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field>
+      <Field label="Notes"><textarea rows={2} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></Field>
+      {busy && <div className="text-xs text-slate-500">Saving…</div>}
+    </Modal>
+  );
+}
+
+// Cmd-K command palette — mounted on CRM pages (which don't use AppShell, so
+// AppShell's own Cmd-K→/intel/search binding never fires here; no double-bind).
+function CmdKPalette() {
+  const [open, setOpen] = React.useState(false);
+  const [q, setQ] = React.useState('');
+  const [results, setResults] = React.useState([]);
+  const [active, setActive] = React.useState(0);
+  React.useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); setOpen(o => !o); }
+      else if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  React.useEffect(() => {
+    if (!open || q.trim().length < 2) { setResults([]); return; }
+    const t = setTimeout(() => {
+      fetch(`/api/intel/search?q=${encodeURIComponent(q.trim())}`)
+        .then(r => r.json()).then(d => { setResults(d.results || []); setActive(0); }).catch(() => {});
+    }, 150);
+    return () => clearTimeout(t);
+  }, [q, open]);
+  if (!open) return null;
+  const go = (r) => { if (r && r.url) window.location.href = r.url; };
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-start justify-center pt-24" onClick={() => setOpen(false)}>
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-xl mx-4" onClick={e => e.stopPropagation()}>
+        <input autoFocus value={q}
+          onChange={e => setQ(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setActive(a => Math.min(a + 1, results.length - 1)); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(a => Math.max(a - 1, 0)); }
+            else if (e.key === 'Enter') { e.preventDefault(); go(results[active]); }
+          }}
+          placeholder="Search people, companies, advisers, funds…"
+          className="w-full px-4 py-3 text-lg border-b border-slate-200 outline-none rounded-t-lg" />
+        <div className="max-h-80 overflow-y-auto">
+          {results.map((r, i) => (
+            <button key={r.type + r.id} onClick={() => go(r)} onMouseEnter={() => setActive(i)}
+              className={`block w-full text-left px-4 py-2 ${i === active ? 'bg-slate-100' : 'hover:bg-slate-50'}`}>
+              <span className="text-xs uppercase text-slate-400 mr-2">{(r.type || '').replace(/_/g, ' ')}</span>
+              <span className="text-slate-900">{r.label}</span>
+              {r.sublabel && <span className="text-slate-500 text-sm ml-2">{r.sublabel}</span>}
+            </button>
+          ))}
+          {q.trim().length >= 2 && !results.length && <div className="px-4 py-3 text-slate-400 text-sm">No matches</div>}
+          {q.trim().length < 2 && <div className="px-4 py-3 text-slate-400 text-sm">Type at least 2 characters…</div>}
+        </div>
       </div>
     </div>
   );
@@ -3304,6 +3465,7 @@ function CrmPersonDetailPage({ id }) {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      <CmdKPalette />
       <div className="max-w-5xl mx-auto px-4 py-6">
         <a href="/intel/crm" className="text-sm text-slate-500 hover:text-slate-700">← All people</a>
         <div className="mt-3 flex items-baseline justify-between">
@@ -3315,8 +3477,8 @@ function CrmPersonDetailPage({ id }) {
           <section className="bg-white border border-slate-200 rounded p-4">
             <h2 className="text-sm font-semibold text-slate-700 mb-2">Contact</h2>
             <dl className="text-sm space-y-1">
-              <div className="flex gap-2"><dt className="text-slate-500 w-20">email:</dt><dd>{p.email ? <a href={`mailto:${p.email}`} className="text-blue-700 hover:underline">{p.email}</a> : '—'}</dd></div>
-              <div className="flex gap-2"><dt className="text-slate-500 w-20">linkedin:</dt><dd>{p.linkedin_url ? <a href={p.linkedin_url} target="_blank" rel="noreferrer noopener" className="text-blue-700 hover:underline truncate">{p.linkedin_url}</a> : '—'}</dd></div>
+              <div className="flex gap-2"><dt className="text-slate-500 w-20">email:</dt><dd>{p.email ? <span><a href={`mailto:${p.email}`} className="text-blue-700 hover:underline">{p.email}</a><CopyButton text={p.email} /></span> : '—'}</dd></div>
+              <div className="flex gap-2"><dt className="text-slate-500 w-20">linkedin:</dt><dd>{p.linkedin_url ? <span><a href={p.linkedin_url} target="_blank" rel="noreferrer noopener" className="text-blue-700 hover:underline truncate">{p.linkedin_url}</a><CopyButton text={p.linkedin_url} /></span> : '—'}</dd></div>
               <div className="flex gap-2"><dt className="text-slate-500 w-20">twitter:</dt><dd>{p.twitter_handle ? <a href={`https://twitter.com/${p.twitter_handle.replace(/^@/,'')}`} target="_blank" rel="noreferrer noopener" className="text-blue-700 hover:underline">{p.twitter_handle}</a> : '—'}</dd></div>
               <div className="flex gap-2"><dt className="text-slate-500 w-20">phone:</dt><dd>{p.phone || '—'}</dd></div>
             </dl>
@@ -3325,7 +3487,7 @@ function CrmPersonDetailPage({ id }) {
             <h2 className="text-sm font-semibold text-slate-700 mb-2">Firm</h2>
             {f ? (
               <div className="text-sm space-y-1">
-                <div className="font-medium text-slate-900">{f.display_name}</div>
+                <div className="font-medium text-slate-900"><FirmFavicon website={f.website_url} /> {f.display_name}</div>
                 {f.website_url && <a href={f.website_url} target="_blank" rel="noreferrer noopener" className="block text-blue-700 hover:underline truncate">{f.website_url}</a>}
                 {f.linkedin_company_url && <a href={f.linkedin_company_url} target="_blank" rel="noreferrer noopener" className="block text-blue-700 hover:underline truncate">{f.linkedin_company_url}</a>}
                 <div className="text-slate-500 mt-1">{f.exposure_company_count || 0} tracked cos · {fmtUsd(f.exposure_total_nport_usd)} N-PORT · {fmtUsd(f.exposure_total_formd_usd)} Form D</div>
@@ -3358,7 +3520,7 @@ function CrmPersonDetailPage({ id }) {
             {(data.interactions || []).map(i => (
               <li key={i.interaction_id} className="border-l-2 border-slate-200 pl-3">
                 <div className="flex gap-2 items-baseline">
-                  <span className="text-xs text-slate-500">{fmtDate(i.occurred_at)}</span>
+                  <span className="text-xs text-slate-500" title={fmtDate(i.occurred_at)}>{fmtRelative(i.occurred_at)}</span>
                   <span className={`text-xs px-1.5 py-0.5 rounded ${i.direction === 'outbound' ? 'bg-blue-100 text-blue-800' : i.direction === 'inbound' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'}`}>{i.direction}</span>
                   <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100">{i.channel}</span>
                   <span className="text-xs text-slate-500">{i.type}</span>
@@ -3502,79 +3664,123 @@ function FollowupModal({ personId, onClose, onSaved }) {
   );
 }
 
+// Kanban columns — grouped by STATE (not side), which is what makes
+// side='either' deals always render (the old buy/sell-only layout dropped them).
+const DEAL_COLUMNS = [
+  { key: 'open',   label: 'Open',        states: ['open'] },
+  { key: 'soft',   label: 'Soft',        states: ['soft'] },
+  { key: 'firm',   label: 'Firm',        states: ['firm'] },
+  { key: 'active', label: 'Negotiating', states: ['negotiating', 'matched'] },
+  { key: 'closed', label: 'Closed',      states: ['passed', 'stale', 'compliance_review'] },
+];
+const DEAL_STATES = ['open', 'soft', 'firm', 'matched', 'negotiating', 'passed', 'stale', 'compliance_review'];
+
 function CrmDealsPage() {
   const [rows, setRows] = React.useState([]);
   const [error, setError] = React.useState(null);
   const params = new URLSearchParams(window.location.search);
   const companyFilter = params.get('company') || '';
+  const [reloadKey, setReloadKey] = React.useState(0);
+  const reload = () => setReloadKey(k => k + 1);
   React.useEffect(() => {
-    const p = new URLSearchParams();
+    const p = new URLSearchParams({ all_states: '1' });
     if (companyFilter) p.set('company', companyFilter);
     fetch(`/api/intel/crm/deal-interests?${p.toString()}`)
       .then(r => r.json()).then(d => setRows(d.rows || []))
       .catch(e => setError(String(e)));
-  }, [companyFilter]);
+  }, [companyFilter, reloadKey]);
 
-  // Group by company
+  // Group by company, then bucket each company's deals into the 5 state columns.
   const byCompany = {};
   for (const r of rows) {
-    if (!byCompany[r.company_slug]) byCompany[r.company_slug] = { buy: [], sell: [], either: [] };
-    byCompany[r.company_slug][r.side].push(r);
+    if (!byCompany[r.company_slug]) byCompany[r.company_slug] = [];
+    byCompany[r.company_slug].push(r);
   }
+  const colOf = (state) => (DEAL_COLUMNS.find(c => c.states.includes(state)) || DEAL_COLUMNS[DEAL_COLUMNS.length - 1]).key;
+
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="max-w-6xl mx-auto px-4 py-6">
+      <CmdKPalette />
+      <div className="max-w-7xl mx-auto px-4 py-6">
         <a href="/intel/crm" className="text-sm text-slate-500 hover:text-slate-700">← All people</a>
-        <h1 className="text-2xl font-semibold text-slate-900 mt-3 mb-4">CRM — Deal interests by company</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 mt-3 mb-4">CRM — Deal pipeline{companyFilter ? ` · ${companyFilter}` : ''}</h1>
         {error && <div className="text-rose-600 text-sm">Error: {error}</div>}
-        {Object.entries(byCompany).map(([slug, sides]) => (
-          <div key={slug} className="bg-white border border-slate-200 rounded mb-4 p-4">
-            <h2 className="font-semibold text-slate-900 mb-2"><a href={`/intel/${slug}`} className="hover:underline">{slug}</a></h2>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <div className="text-xs uppercase tracking-wide text-emerald-700 mb-1">Buy ({sides.buy.length})</div>
-                {sides.buy.sort((a,b) => (+b.price_per_share_max||0) - (+a.price_per_share_max||0)).map(d => (
-                  <DealRow key={d.deal_interest_id} d={d} />
-                ))}
-              </div>
-              <div>
-                <div className="text-xs uppercase tracking-wide text-rose-700 mb-1">Sell ({sides.sell.length})</div>
-                {sides.sell.sort((a,b) => (+a.price_per_share_min||9e9) - (+b.price_per_share_min||9e9)).map(d => (
-                  <DealRow key={d.deal_interest_id} d={d} />
-                ))}
+        {Object.entries(byCompany).map(([slug, deals]) => {
+          const buckets = {}; DEAL_COLUMNS.forEach(c => buckets[c.key] = []);
+          deals.forEach(d => buckets[colOf(d.state)].push(d));
+          return (
+            <div key={slug} className="bg-white border border-slate-200 rounded mb-4 p-4">
+              <h2 className="font-semibold text-slate-900 mb-3"><a href={`/intel/${slug}`} className="hover:underline">{slug}</a> <span className="text-slate-400 text-sm font-normal">· {deals.length}</span></h2>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {DEAL_COLUMNS.map(col => {
+                  const list = buckets[col.key];
+                  const total = list.reduce((s, d) => s + (+d.size_usd || 0), 0);
+                  return (
+                    <div key={col.key} className="bg-slate-50 rounded p-2 min-w-0">
+                      <div className="flex items-baseline justify-between mb-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-600">{col.label} ({list.length})</span>
+                        {total > 0 && <span className="text-xs text-slate-500">{fmtUsd(total)}</span>}
+                      </div>
+                      {list.map(d => <DealCard key={d.deal_interest_id} d={d} onChanged={reload} />)}
+                      {!list.length && <div className="text-xs text-slate-300">—</div>}
+                    </div>
+                  );
+                })}
               </div>
             </div>
-          </div>
-        ))}
-        {!Object.keys(byCompany).length && <div className="text-slate-500">No open deal interests.</div>}
+          );
+        })}
+        {!Object.keys(byCompany).length && <div className="text-slate-500">No deal interests logged yet.</div>}
       </div>
     </div>
   );
 }
 
-function DealRow({ d }) {
+function DealCard({ d, onChanged }) {
   const p = d.crm_person || {};
   const f = d.crm_firm || {};
+  const [busy, setBusy] = React.useState(false);
+  async function setState(state) {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/intel/crm/deal-interests/${d.deal_interest_id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state }),
+      });
+      if (!r.ok) { alert(`Error: ${await r.text()}`); setBusy(false); return; }
+      onChanged();
+    } catch (e) { alert(String(e)); setBusy(false); }
+  }
+  const sideClass = d.side === 'buy' ? 'bg-emerald-100 text-emerald-800'
+    : d.side === 'sell' ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-700';
   return (
-    <div className="text-sm border-l-2 border-slate-200 pl-2 mb-1">
-      <div>
-        <a href={`/intel/crm/person/${p.person_id}`} className="text-blue-700 hover:underline">{p.full_name || p.email || 'Unknown'}</a>
-        {f.display_name && <span className="text-slate-500"> · {f.display_name}</span>}
+    <div className={`bg-white border border-slate-200 rounded p-2 mb-2 text-sm ${busy ? 'opacity-50' : ''}`}>
+      <div className="flex items-center gap-1.5">
+        <PersonAvatar name={p.full_name} email={p.email} size={20} />
+        <a href={`/intel/crm/person/${p.person_id}`} className="text-blue-700 hover:underline truncate">{p.full_name || p.email || 'Unknown'}</a>
+        <span className={`ml-auto text-xs px-1.5 py-0.5 rounded shrink-0 ${sideClass}`}>{d.side === 'either' ? '↔' : d.side}</span>
       </div>
-      <div className="text-xs text-slate-600">
-        ${d.price_per_share_min || '—'}{d.price_per_share_max && d.price_per_share_max !== d.price_per_share_min ? `–$${d.price_per_share_max}` : ''} / sh
-        {d.size_usd && ` · ${fmtUsd(d.size_usd)}`}
-        <span className="ml-1 px-1 bg-slate-100 rounded">{d.state}</span>
+      <div className="text-xs text-slate-600 mt-1">
+        ${d.price_per_share_min || '—'}{d.price_per_share_max && d.price_per_share_max !== d.price_per_share_min ? `–$${d.price_per_share_max}` : ''}/sh{d.size_usd ? ` · ${fmtUsd(d.size_usd)}` : ''}
       </div>
+      {f.display_name && <div className="text-xs text-slate-400 truncate">{f.display_name}</div>}
+      <select value={d.state} disabled={busy} onChange={e => setState(e.target.value)} className="mt-1 text-xs border border-slate-200 rounded px-1 py-0.5 w-full bg-white">
+        {DEAL_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+      </select>
     </div>
   );
 }
 
 // Tiny modal + form helpers
 function Modal({ title, onClose, onSubmit, children }) {
+  useModalKeys(onClose);
+  const panelRef = React.useRef(null);
+  React.useEffect(() => {
+    const el = panelRef.current && panelRef.current.querySelector('input,select,textarea');
+    if (el) el.focus();
+  }, []);
   return (
     <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded shadow-xl p-5 max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div ref={panelRef} className="bg-white rounded shadow-xl p-5 max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-3">
           <h3 className="font-semibold text-slate-900">{title}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700">✕</button>
@@ -3593,6 +3799,68 @@ function Field({ label, children }) {
 }
 function Select({ v, on, opts }) {
   return <select value={v} onChange={e => on(e.target.value)}>{opts.map(o => <option key={o} value={o}>{o || '—'}</option>)}</select>;
+}
+
+// --- CRM daily-use primitives (all top-level names verified unique) ---------
+// Relative time for timelines/last-contacted; falls back to fmtDate (@85) for
+// anything ≥7d or in the future, matching the existing '—' null convention.
+function fmtRelative(d) {
+  if (!d) return '—';
+  const t = new Date(d).getTime();
+  if (!Number.isFinite(t)) return '—';
+  const diff = Date.now() - t;
+  const day = 86400000;
+  if (diff < 0) return fmtDate(d);
+  if (diff < 3600000) { const m = Math.max(1, Math.round(diff / 60000)); return `${m}m ago`; }
+  if (diff < day) return `${Math.round(diff / 3600000)}h ago`;
+  if (diff < 7 * day) return `${Math.round(diff / day)}d ago`;
+  return fmtDate(d);
+}
+
+const AVATAR_COLORS = ['#0ea5e9','#6366f1','#8b5cf6','#ec4899','#f43f5e','#f97316','#eab308','#22c55e','#14b8a6','#06b6d4','#3b82f6','#a855f7','#d946ef','#ef4444','#84cc16','#10b981'];
+function avatarColor(seed) {
+  const s = String(seed || '?');
+  let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+function PersonAvatar({ name, email, size = 28 }) {
+  const label = (name || email || '?').trim();
+  const initials = label.split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase() || '?';
+  return (
+    <span style={{ width: size, height: size, background: avatarColor(label), fontSize: size * 0.42 }}
+          className="inline-flex items-center justify-center rounded-full text-white font-semibold shrink-0">
+      {initials}
+    </span>
+  );
+}
+function FirmFavicon({ website, size = 16 }) {
+  const [failed, setFailed] = React.useState(false);
+  let host = null;
+  try { host = new URL(normalizeHref(website)).hostname; } catch (e) { host = null; }
+  if (!website || !host || failed) {
+    return (<svg width={size} height={size} viewBox="0 0 24 24" className="inline-block text-slate-400 align-text-bottom" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 13h.01M9 17h.01M15 9h.01M15 13h.01M15 17h.01"/></svg>);
+  }
+  return <img src={`https://www.google.com/s2/favicons?domain=${host}&sz=32`} width={size} height={size}
+              className="inline-block rounded-sm align-text-bottom" onError={() => setFailed(true)} alt="" />;
+}
+function CopyButton({ text }) {
+  const [done, setDone] = React.useState(false);
+  if (!text) return null;
+  return (
+    <button onClick={() => { try { navigator.clipboard.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1200); }).catch(() => {}); } catch (e) {} }}
+            className="ml-1 text-xs text-slate-400 hover:text-slate-700 align-text-bottom" title="Copy">
+      {done ? '✓' : '⧉'}
+    </button>
+  );
+}
+// Esc-to-close only (deliberately NOT global Enter-submit — the existing
+// multi-field modals would mis-submit on Enter mid-entry).
+function useModalKeys(onClose) {
+  React.useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); onClose && onClose(); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 }
 
 // --- bootstrap --------------------------------------------------------------

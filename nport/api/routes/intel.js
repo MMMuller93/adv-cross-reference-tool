@@ -1310,8 +1310,15 @@ router.get('/search', async (req, res) => {
       .order('filing_date', { ascending: false })
       .limit(PER_SOURCE);
 
-    const [companiesRes, advisersRes, fundsRes, formdRes] = await Promise.all([
-      companiesP, advisersP, fundsP, formdP,
+    // 5. CRM people (lets the Cmd-K palette / search jump straight to a contact)
+    const crmPeopleP = deps.nportClient
+      .from('crm_person')
+      .select('person_id,full_name,email,title')
+      .ilike('full_name', like)
+      .limit(PER_SOURCE);
+
+    const [companiesRes, advisersRes, fundsRes, formdRes, crmPeopleRes] = await Promise.all([
+      companiesP, advisersP, fundsP, formdP, crmPeopleP,
     ]);
 
     const results = [];
@@ -1376,6 +1383,16 @@ router.get('/search', async (req, res) => {
         url: edgarFilingUrlServer(row.cik, row.accessionnumber),
         external: true,
         rank: score(row.entityname),
+      });
+    }
+    for (const row of (crmPeopleRes.data || [])) {
+      results.push({
+        type: 'crm_person',
+        id: String(row.person_id),
+        label: row.full_name || row.email || `Person ${row.person_id}`,
+        sublabel: `CRM contact${row.title ? ' • ' + row.title : ''}`,
+        url: `/intel/crm/person/${encodeURIComponent(row.person_id)}`,
+        rank: score(row.full_name) + 25,
       });
     }
 
@@ -1764,6 +1781,18 @@ router.get('/crm/people', async (req, res) => {
     const priorityMax = req.query.priority_max;
     const tag = req.query.tag;
     const hasEmail = req.query.has_email === '1';
+    const view = req.query.view;           // 'stale' | 'replied' — Today chips
+
+    // Resolve the Today-chip views to the EXACT person-id set behind their
+    // count, so clicking a chip returns the same population the number reflects.
+    let viewIds = null;
+    if (view === 'stale' || view === 'replied') {
+      const fn = view === 'stale' ? 'crm_stale_person_ids' : 'crm_replied_person_ids';
+      const { data: idRows, error: viewErr } = await deps.nportClient.rpc(fn);
+      if (viewErr) throw viewErr;
+      viewIds = (idRows || []).map(r => r.person_id);
+      if (!viewIds.length) return res.json({ total: 0, limit, offset, rows: [] });
+    }
 
     let q = deps.nportClient.from('crm_person')
       .select('person_id,firm_id,full_name,title,role,email,linkedin_url,twitter_handle,phone,engagement_status,priority,tags,do_not_contact,added_via,added_for_companies,updated_at,created_at', { count: 'exact' })
@@ -1775,6 +1804,7 @@ router.get('/crm/people', async (req, res) => {
     if (priorityMax) q = q.lte('priority', parseInt(priorityMax, 10));
     if (tag) q = q.contains('tags', [tag]);
     if (hasEmail) q = q.not('email', 'is', null);
+    if (viewIds) q = q.in('person_id', viewIds);
 
     const { data: people, count, error } = await q;
     if (error) throw error;
@@ -1790,11 +1820,39 @@ router.get('/crm/people', async (req, res) => {
       firmsById = Object.fromEntries((firms || []).map(f => [f.firm_id, f]));
     }
 
+    // last_contacted_at = MAX(interaction.occurred_at) per person, via RPC.
+    // Grouped aggregate returns one row per person, so it is immune to the
+    // ~1000-row PostgREST cap a client-side reduce over crm_interaction would
+    // silently hit for high-volume contacts.
+    const personIds = (people || []).map(p => p.person_id);
+    let lastById = {};
+    if (personIds.length) {
+      const { data: lc, error: lcErr } = await deps.nportClient
+        .rpc('crm_last_contacted', { p_ids: personIds });
+      if (!lcErr) lastById = Object.fromEntries((lc || []).map(r => [r.person_id, r.last_contacted_at]));
+    }
+
     const rows = (people || []).map(p => ({
       ...p,
       firm: p.firm_id ? firmsById[p.firm_id] : null,
+      last_contacted_at: lastById[p.person_id] || null,
     }));
     return res.json({ total: count, limit, offset, rows });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- GET /api/intel/crm/today -----------------------------------------------
+// Daily-use summary card: overdue followups, recent inbound replies, and
+// truly-stale outreach. Counts computed in SQL (crm_today_summary RPC) so
+// "stale" reflects real contact recency, not crm_person.updated_at edits.
+router.get('/crm/today', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const { data, error } = await deps.nportClient.rpc('crm_today_summary');
+    if (error) throw error;
+    return res.json(data || { overdue_followups: 0, recent_replies: 0, stale_contacts: 0 });
   } catch (err) {
     return serverError(res, err);
   }
@@ -1858,6 +1916,16 @@ router.post('/crm/people', async (req, res) => {
       added_via: 'manual',
       notes: b.notes || null,
     };
+    // Dedup on email BEFORE insert. The partial unique index
+    // (firm_id, lower(email)) treats NULL firm_id as distinct, so it can't
+    // catch a new no-firm contact added twice — enforce it here.
+    if (payload.email) {
+      const { data: dupe } = await deps.nportClient
+        .from('crm_person').select('person_id,full_name').eq('email', payload.email).limit(1);
+      if (dupe && dupe.length) {
+        return res.status(409).json({ error: 'a person with this email already exists', person_id: dupe[0].person_id, full_name: dupe[0].full_name });
+      }
+    }
     const { data, error } = await deps.nportClient
       .from('crm_person').insert(payload).select().maybeSingle();
     if (error) throw error;
@@ -2059,12 +2127,13 @@ router.get('/crm/deal-interests', async (req, res) => {
   try {
     const company = req.query.company;
     const state = req.query.state;
+    const allStates = req.query.all_states === '1';  // kanban wants closed cols too
     let q = deps.nportClient.from('crm_deal_interest')
       .select('*,crm_person(person_id,full_name,email,linkedin_url,firm_id),crm_firm:firm_id(display_name)')
       .order('side').order('price_per_share_max', { ascending: false });
     if (company) q = q.eq('company_slug', company);
     if (state) q = q.eq('state', state);
-    else q = q.in('state', ['open', 'soft', 'firm', 'negotiating']);
+    else if (!allStates) q = q.in('state', ['open', 'soft', 'firm', 'negotiating']);
 
     const { data, error } = await q.limit(500);
     if (error) throw error;
@@ -2136,11 +2205,34 @@ router.get('/crm/followups', async (req, res) => {
   }
 });
 
+// --- GET /api/intel/crm/firms/search?q= -------------------------------------
+// MUST be declared before /crm/firms/:id so 'search' isn't captured as :id.
+// Firm autocomplete source for the Add-person modal.
+router.get('/crm/firms/search', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) return res.json({ rows: [] });
+    const like = `%${q.replace(/[%_\\]/g, m => '\\' + m)}%`;
+    const { data, error } = await deps.nportClient
+      .from('crm_firm')
+      .select('firm_id,display_name,website_url')
+      .ilike('display_name', like)
+      .order('display_name', { ascending: true })
+      .limit(10);
+    if (error) throw error;
+    return res.json({ rows: data || [] });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
 // --- GET /api/intel/crm/firms/:id -------------------------------------------
 router.get('/crm/firms/:id', async (req, res) => {
   if (!configGuard(res)) return;
   try {
     const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
     const { data: firm } = await deps.nportClient
       .from('crm_firm').select('*').eq('firm_id', id).maybeSingle();
     if (!firm) return notFound(res, 'firm not found', 'CRM_FIRM_NOT_FOUND');
