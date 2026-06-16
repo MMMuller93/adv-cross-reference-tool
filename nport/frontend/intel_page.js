@@ -3445,6 +3445,123 @@ function CmdKPalette() {
   );
 }
 
+// Autocomplete over the 841 tracked companies — replaces free-text slug entry.
+function CompanyPicker({ value, onChange, placeholder }) {
+  const [q, setQ] = React.useState(value || '');
+  const [opts, setOpts] = React.useState([]);
+  const [open, setOpen] = React.useState(false);
+  React.useEffect(() => { setQ(value || ''); }, [value]);
+  React.useEffect(() => {
+    if (!open || q.trim().length < 1) { setOpts([]); return; }
+    let alive = true;
+    const t = setTimeout(() => {
+      fetch(`/api/intel/crm/companies/search?q=${encodeURIComponent(q.trim())}`)
+        .then(r => r.json()).then(d => { if (alive) setOpts(d.rows || []); }).catch(() => {});
+    }, 150);
+    return () => { alive = false; clearTimeout(t); };
+  }, [q, open]);
+  return (
+    <div className="relative">
+      <input value={q} placeholder={placeholder || 'search tracked companies'}
+        className="w-full border border-slate-300 rounded px-2 py-1 text-sm"
+        onFocus={() => setOpen(true)}
+        onChange={e => { setQ(e.target.value); setOpen(true); onChange(e.target.value); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)} />
+      {open && opts.length > 0 && (
+        <div className="absolute z-20 left-0 right-0 bg-white border border-slate-200 rounded mt-0.5 max-h-44 overflow-y-auto text-sm shadow">
+          {opts.map(o => (
+            <button key={o.slug} type="button"
+              onClick={() => { onChange(o.slug); setQ(o.slug); setOpen(false); }}
+              className="block w-full text-left px-2 py-1 hover:bg-slate-100">
+              <span className="font-medium text-slate-800">{o.display_name}</span> <span className="text-slate-400 text-xs">{o.slug}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Per-company exposure drill-down for a firm (which tracked cos it holds + $).
+function FirmExposureList({ firmId }) {
+  const [rows, setRows] = React.useState(null);
+  const [showAll, setShowAll] = React.useState(false);
+  React.useEffect(() => {
+    if (!firmId) { setRows([]); return; }
+    fetch(`/api/intel/crm/firms/${firmId}/exposure`).then(r => r.json())
+      .then(d => setRows(d.rows || [])).catch(() => setRows([]));
+  }, [firmId]);
+  if (rows === null) return <div className="text-xs text-slate-400 mt-2">Loading exposure…</div>;
+  if (!rows.length) return <div className="text-xs text-slate-400 mt-2">No tracked-company exposure.</div>;
+  const shown = showAll ? rows : rows.slice(0, 8);
+  return (
+    <div className="mt-2">
+      <div className="text-xs font-semibold text-slate-500 mb-1">Holds {rows.length} tracked {rows.length === 1 ? 'company' : 'companies'}</div>
+      <table className="w-full text-xs">
+        <tbody>
+          {shown.map(r => (
+            <tr key={r.company_slug} className="border-t border-slate-100">
+              <td className="py-1"><a href={`/intel/crm/company/${r.company_slug}`} className="text-blue-700 hover:underline">{r.display_name || r.company_slug}</a></td>
+              <td className="py-1 text-right text-slate-600">
+                {r.nport_usd ? fmtUsd(r.nport_usd) : ''}{r.formd_usd ? `${r.nport_usd ? ' + ' : ''}${fmtUsd(r.formd_usd)} FD` : ''}
+              </td>
+              <td className="py-1 text-right text-slate-400 w-8">{r.positions}×</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {rows.length > 8 && <button onClick={() => setShowAll(s => !s)} className="text-xs text-blue-700 hover:underline mt-1">{showAll ? 'show less' : `show all ${rows.length}`}</button>}
+    </div>
+  );
+}
+
+// Portco view: which CRM firms (and their people) hold a tracked company.
+function CrmCompanyPage({ slug }) {
+  const [data, setData] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  React.useEffect(() => {
+    fetch(`/api/intel/crm/company/${encodeURIComponent(slug)}/holders`).then(r => r.json())
+      .then(setData).catch(e => setError(String(e)));
+  }, [slug]);
+  if (error) return <div className="p-6 text-rose-600">Error: {error}</div>;
+  if (!data) return <div className="min-h-screen bg-slate-50"><div className="p-6 text-slate-500">Loading…</div></div>;
+  const c = data.company || { slug };
+  const firms = data.firms || [];
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <CmdKPalette />
+      <div className="max-w-5xl mx-auto px-4 py-6">
+        <a href="/intel/crm" className="text-sm text-slate-500 hover:text-slate-700">← All people</a>
+        <div className="mt-3 flex items-baseline justify-between">
+          <h1 className="text-2xl font-semibold text-slate-900">{c.display_name || c.slug}</h1>
+          <a href={`/intel/${c.slug}`} className="text-sm text-blue-700 hover:underline" target="_blank" rel="noreferrer noopener">company intel ↗</a>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">CRM firms holding this company ({firms.length})</p>
+        {!firms.length && <div className="text-slate-500">No CRM firms hold this company yet.</div>}
+        {firms.map(f => (
+          <div key={f.firm_id} className="bg-white border border-slate-200 rounded mb-3 p-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="font-semibold text-slate-900">{f.display_name}</h2>
+              <span className="text-sm text-slate-600 shrink-0">{f.nport_usd ? `${fmtUsd(f.nport_usd)} N-PORT` : ''}{f.formd_usd ? ` · ${fmtUsd(f.formd_usd)} Form D` : ''} · {f.positions}×</span>
+            </div>
+            {(f.people || []).length > 0 ? (
+              <ul className="mt-2 text-sm flex flex-wrap gap-x-4 gap-y-1">
+                {f.people.map(p => (
+                  <li key={p.person_id} className="flex items-center gap-1">
+                    <PersonAvatar name={p.full_name} email={p.email} size={18} />
+                    <a href={`/intel/crm/person/${p.person_id}`} className="text-blue-700 hover:underline">{p.full_name || p.email}</a>
+                    {p.title && <span className="text-slate-400">· {p.title}</span>}
+                  </li>
+                ))}
+              </ul>
+            ) : <div className="text-xs text-slate-400 mt-1">No CRM contacts at this firm yet.</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CrmPersonDetailPage({ id }) {
   const [data, setData] = React.useState(null);
   const [error, setError] = React.useState(null);
@@ -3491,6 +3608,7 @@ function CrmPersonDetailPage({ id }) {
                 {f.website_url && <a href={f.website_url} target="_blank" rel="noreferrer noopener" className="block text-blue-700 hover:underline truncate">{f.website_url}</a>}
                 {f.linkedin_company_url && <a href={f.linkedin_company_url} target="_blank" rel="noreferrer noopener" className="block text-blue-700 hover:underline truncate">{f.linkedin_company_url}</a>}
                 <div className="text-slate-500 mt-1">{f.exposure_company_count || 0} tracked cos · {fmtUsd(f.exposure_total_nport_usd)} N-PORT · {fmtUsd(f.exposure_total_formd_usd)} Form D</div>
+                <FirmExposureList firmId={f.firm_id} />
               </div>
             ) : <div className="text-slate-400 text-sm">No firm</div>}
           </section>
@@ -3607,7 +3725,9 @@ function InteractionModal({ personId, onClose, onSaved }) {
       <Field label="Body"><textarea value={form.body} onChange={e => setForm({...form, body: e.target.value})} rows={4} /></Field>
       <Field label="Outcome"><Select v={form.outcome} on={v => setForm({...form, outcome: v})} opts={['','sent','replied','no_reply','meeting_booked','interested','not_interested','out_of_scope','wrong_person']} /></Field>
       <Field label="Sentiment"><Select v={form.sentiment} on={v => setForm({...form, sentiment: v})} opts={['','positive','neutral','negative','no_signal']} /></Field>
-      <Field label="Re: company (slug)"><input value={form.related_company_slug} onChange={e => setForm({...form, related_company_slug: e.target.value})} placeholder="anthropic" /></Field>
+      <label className="block text-sm"><span className="block text-xs text-slate-500 mb-0.5">Re: company</span>
+        <CompanyPicker value={form.related_company_slug} onChange={v => setForm({...form, related_company_slug: v})} placeholder="optional — search tracked companies" />
+      </label>
     </Modal>
   );
 }
@@ -3630,7 +3750,9 @@ function DealInterestModal({ personId, onClose, onSaved }) {
   };
   return (
     <Modal title="Log deal interest" onClose={onClose} onSubmit={submit}>
-      <Field label="Company slug *"><input value={form.company_slug} onChange={e => setForm({...form, company_slug: e.target.value})} placeholder="anthropic" required /></Field>
+      <label className="block text-sm"><span className="block text-xs text-slate-500 mb-0.5">Company *</span>
+        <CompanyPicker value={form.company_slug} onChange={v => setForm({...form, company_slug: v})} placeholder="search tracked companies" />
+      </label>
       <Field label="Side"><Select v={form.side} on={v => setForm({...form, side: v})} opts={['buy','sell','either']} /></Field>
       <Field label="State"><Select v={form.state} on={v => setForm({...form, state: v})} opts={['open','soft','firm','matched','negotiating','passed','stale','compliance_review']} /></Field>
       <Field label="Security type"><input value={form.security_type} onChange={e => setForm({...form, security_type: e.target.value})} placeholder="common / preferred / SAFE / LP_interest" /></Field>
@@ -3680,6 +3802,7 @@ function CrmDealsPage() {
   const [error, setError] = React.useState(null);
   const params = new URLSearchParams(window.location.search);
   const companyFilter = params.get('company') || '';
+  const [mode, setMode] = React.useState('bidask');  // 'bidask' | 'pipeline'
   const [reloadKey, setReloadKey] = React.useState(0);
   const reload = () => setReloadKey(k => k + 1);
   React.useEffect(() => {
@@ -3690,42 +3813,85 @@ function CrmDealsPage() {
       .catch(e => setError(String(e)));
   }, [companyFilter, reloadKey]);
 
-  // Group by company, then bucket each company's deals into the 5 state columns.
   const byCompany = {};
   for (const r of rows) {
     if (!byCompany[r.company_slug]) byCompany[r.company_slug] = [];
     byCompany[r.company_slug].push(r);
   }
   const colOf = (state) => (DEAL_COLUMNS.find(c => c.states.includes(state)) || DEAL_COLUMNS[DEAL_COLUMNS.length - 1]).key;
+  const num = (v) => (v == null || v === '' ? null : +v);
 
   return (
     <div className="min-h-screen bg-slate-50">
       <CmdKPalette />
       <div className="max-w-7xl mx-auto px-4 py-6">
         <a href="/intel/crm" className="text-sm text-slate-500 hover:text-slate-700">← All people</a>
-        <h1 className="text-2xl font-semibold text-slate-900 mt-3 mb-4">CRM — Deal pipeline{companyFilter ? ` · ${companyFilter}` : ''}</h1>
+        <div className="flex items-center justify-between mt-3 mb-4">
+          <h1 className="text-2xl font-semibold text-slate-900">CRM — Deals{companyFilter ? ` · ${companyFilter}` : ''}</h1>
+          <div className="flex text-sm border border-slate-200 rounded overflow-hidden">
+            <button onClick={() => setMode('bidask')} className={`px-3 py-1 ${mode === 'bidask' ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}>Bid / Ask</button>
+            <button onClick={() => setMode('pipeline')} className={`px-3 py-1 ${mode === 'pipeline' ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}>Pipeline</button>
+          </div>
+        </div>
         {error && <div className="text-rose-600 text-sm">Error: {error}</div>}
         {Object.entries(byCompany).map(([slug, deals]) => {
-          const buckets = {}; DEAL_COLUMNS.forEach(c => buckets[c.key] = []);
-          deals.forEach(d => buckets[colOf(d.state)].push(d));
+          if (mode === 'pipeline') {
+            const buckets = {}; DEAL_COLUMNS.forEach(c => buckets[c.key] = []);
+            deals.forEach(d => buckets[colOf(d.state)].push(d));
+            return (
+              <div key={slug} className="bg-white border border-slate-200 rounded mb-4 p-4">
+                <h2 className="font-semibold text-slate-900 mb-3"><a href={`/intel/crm/company/${slug}`} className="hover:underline">{slug}</a> <span className="text-slate-400 text-sm font-normal">· {deals.length}</span></h2>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  {DEAL_COLUMNS.map(col => {
+                    const list = buckets[col.key];
+                    const total = list.reduce((s, d) => s + (+d.size_usd || 0), 0);
+                    return (
+                      <div key={col.key} className="bg-slate-50 rounded p-2 min-w-0">
+                        <div className="flex items-baseline justify-between mb-2">
+                          <span className="text-xs font-semibold uppercase tracking-wide text-slate-600">{col.label} ({list.length})</span>
+                          {total > 0 && <span className="text-xs text-slate-500">{fmtUsd(total)}</span>}
+                        </div>
+                        {list.map(d => <DealCard key={d.deal_interest_id} d={d} onChanged={reload} />)}
+                        {!list.length && <div className="text-xs text-slate-300">—</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          }
+          // Bid/Ask: buy column (price desc) vs sell column (price asc). 'either'
+          // deals show on BOTH sides (they're open to either) with a ↔ badge.
+          const buys = deals.filter(d => d.side === 'buy' || d.side === 'either')
+            .sort((a, b) => (num(b.price_per_share_max) || num(b.price_per_share_min) || 0) - (num(a.price_per_share_max) || num(a.price_per_share_min) || 0));
+          const sells = deals.filter(d => d.side === 'sell' || d.side === 'either')
+            .sort((a, b) => (num(a.price_per_share_min) || num(a.price_per_share_max) || 9e15) - (num(b.price_per_share_min) || num(b.price_per_share_max) || 9e15));
+          const bestBid = buys.map(d => num(d.price_per_share_max) || num(d.price_per_share_min)).filter(x => x != null)[0];
+          const bestAsk = sells.map(d => num(d.price_per_share_min) || num(d.price_per_share_max)).filter(x => x != null)[0];
+          const buyTotal = buys.reduce((s, d) => s + (+d.size_usd || 0), 0);
+          const sellTotal = sells.reduce((s, d) => s + (+d.size_usd || 0), 0);
           return (
             <div key={slug} className="bg-white border border-slate-200 rounded mb-4 p-4">
-              <h2 className="font-semibold text-slate-900 mb-3"><a href={`/intel/${slug}`} className="hover:underline">{slug}</a> <span className="text-slate-400 text-sm font-normal">· {deals.length}</span></h2>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                {DEAL_COLUMNS.map(col => {
-                  const list = buckets[col.key];
-                  const total = list.reduce((s, d) => s + (+d.size_usd || 0), 0);
-                  return (
-                    <div key={col.key} className="bg-slate-50 rounded p-2 min-w-0">
-                      <div className="flex items-baseline justify-between mb-2">
-                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-600">{col.label} ({list.length})</span>
-                        {total > 0 && <span className="text-xs text-slate-500">{fmtUsd(total)}</span>}
-                      </div>
-                      {list.map(d => <DealCard key={d.deal_interest_id} d={d} onChanged={reload} />)}
-                      {!list.length && <div className="text-xs text-slate-300">—</div>}
-                    </div>
-                  );
-                })}
+              <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+                <h2 className="font-semibold text-slate-900"><a href={`/intel/crm/company/${slug}`} className="hover:underline">{slug}</a></h2>
+                <div className="text-xs text-slate-500">
+                  {bestBid != null && <>best bid <span className="text-emerald-700 font-semibold">${bestBid}</span></>}
+                  {bestBid != null && bestAsk != null && ' · '}
+                  {bestAsk != null && <>best ask <span className="text-rose-700 font-semibold">${bestAsk}</span></>}
+                  {bestBid != null && bestAsk != null && <> · spread <span className="font-semibold">${(bestAsk - bestBid).toFixed(2)}</span></>}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-emerald-700 mb-1 flex justify-between"><span>Buy ({buys.length})</span>{buyTotal > 0 && <span className="text-slate-500">{fmtUsd(buyTotal)}</span>}</div>
+                  {buys.map(d => <DealCard key={'b' + d.deal_interest_id} d={d} onChanged={reload} />)}
+                  {!buys.length && <div className="text-xs text-slate-300">no buy interest</div>}
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-rose-700 mb-1 flex justify-between"><span>Sell ({sells.length})</span>{sellTotal > 0 && <span className="text-slate-500">{fmtUsd(sellTotal)}</span>}</div>
+                  {sells.map(d => <DealCard key={'s' + d.deal_interest_id} d={d} onChanged={reload} />)}
+                  {!sells.length && <div className="text-xs text-slate-300">no sell interest</div>}
+                </div>
               </div>
             </div>
           );
@@ -3888,6 +4054,7 @@ window.mountIntelRouter = function () {
     // CRM routes (more-specific than the generic /intel/<slug>)
     { match: /^\/intel\/crm\/?$/, render: () => <CrmPersonListPage /> },
     { match: /^\/intel\/crm\/deals\/?$/, render: () => <CrmDealsPage /> },
+    { match: /^\/intel\/crm\/company\/([^\/]+)/, render: (m) => <CrmCompanyPage slug={decodeURIComponent(m[1])} /> },
     { match: /^\/intel\/crm\/person\/([^\/]+)/, render: (m) => <CrmPersonDetailPage id={decodeURIComponent(m[1])} /> },
     { match: /^\/intel\/fund\/([^\/]+)/, render: (m) => <FundPage accession={decodeURIComponent(m[1])} /> },
     { match: /^\/intel\/adviser\/([^\/]+)/, render: (m) => <AdviserPage crd={decodeURIComponent(m[1])} /> },

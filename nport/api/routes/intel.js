@@ -2270,6 +2270,74 @@ router.post('/crm/firms/:id/refresh-exposure', async (req, res) => {
   }
 });
 
+// --- GET /api/intel/crm/firms/:id/exposure ----------------------------------
+// Per-company exposure drill-down for a firm (which tracked companies it holds
+// and how much). Distinct path from /crm/firms/:id (extra segment).
+router.get('/crm/firms/:id/exposure', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
+    const { data, error } = await deps.nportClient.rpc('crm_firm_company_exposure', { p_firm_id: id });
+    if (error) throw error;
+    return res.json({ rows: data || [] });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- GET /api/intel/crm/companies/search?q= ---------------------------------
+// Picker source: tracked companies by slug/display_name (replaces free text).
+router.get('/crm/companies/search', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const q = String(req.query.q || '').trim();
+    if (q.length < 1) return res.json({ rows: [] });
+    const like = `%${q.replace(/[%_\\]/g, m => '\\' + m)}%`;
+    const { data, error } = await deps.nportClient
+      .from('private_companies')
+      .select('slug,display_name,sector,lifecycle_status')
+      .or(`display_name.ilike.${like},slug.ilike.${like}`)
+      .order('display_name', { ascending: true })
+      .limit(12);
+    if (error) throw error;
+    return res.json({ rows: data || [] });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
+// --- GET /api/intel/crm/company/:slug/holders -------------------------------
+// Portco view: which CRM firms (and their people) hold this tracked company.
+router.get('/crm/company/:slug/holders', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const slug = String(req.params.slug || '').trim();
+    if (!slug) return res.status(400).json({ error: 'slug required' });
+    const { data: firms, error } = await deps.nportClient
+      .rpc('crm_company_holder_firms', { p_slug: slug });
+    if (error) throw error;
+    const firmIds = (firms || []).map(f => f.firm_id);
+    let peopleByFirm = {};
+    if (firmIds.length) {
+      const { data: people } = await deps.nportClient
+        .from('crm_person')
+        .select('person_id,firm_id,full_name,title,email,linkedin_url,engagement_status,priority')
+        .in('firm_id', firmIds)
+        .order('priority').order('full_name');
+      for (const p of (people || [])) {
+        (peopleByFirm[p.firm_id] = peopleByFirm[p.firm_id] || []).push(p);
+      }
+    }
+    const { data: company } = await deps.nportClient
+      .from('private_companies').select('slug,display_name,sector,lifecycle_status').eq('slug', slug).maybeSingle();
+    const rows = (firms || []).map(f => ({ ...f, people: peopleByFirm[f.firm_id] || [] }));
+    return res.json({ company: company || { slug }, firms: rows });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
 // --- POST /api/intel/crm/add-by-company ------------------------------------
 // Triggers the Python seed script in fund-holders-intel worktree.
 // Default dry-run (preview); pass execute=true to write.
