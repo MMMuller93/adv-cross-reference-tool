@@ -1734,6 +1734,11 @@ const CRM_PERSON_PATCHABLE = new Set([
   'notes', 'title', 'role', 'email', 'linkedin_url', 'twitter_handle', 'phone',
 ]);
 
+// Fields safe to SET across MANY people at once. Deliberately NARROW — never
+// reuse CRM_PERSON_PATCHABLE here, or a bulk call could fan one email/phone/
+// name across hundreds of rows. Matches what the bulk UI actually exposes.
+const CRM_PERSON_BULK_SETTABLE = new Set(['engagement_status', 'priority']);
+
 // Enum validation sets (must mirror migration 010_crm_schema.sql CHECK constraints).
 // Used to reject invalid values at the API layer with 400, instead of letting
 // the DB throw a CHECK violation that becomes a 500. (Verifier bug A7/E5)
@@ -1782,6 +1787,7 @@ router.get('/crm/people', async (req, res) => {
     const tag = req.query.tag;
     const hasEmail = req.query.has_email === '1';
     const view = req.query.view;           // 'stale' | 'replied' — Today chips
+    const company = req.query.company;     // filter: people whose firm holds this tracked company
 
     // Resolve the Today-chip views to the EXACT person-id set behind their
     // count, so clicking a chip returns the same population the number reflects.
@@ -1792,6 +1798,17 @@ router.get('/crm/people', async (req, res) => {
       if (viewErr) throw viewErr;
       viewIds = (idRows || []).map(r => r.person_id);
       if (!viewIds.length) return res.json({ total: 0, limit, offset, rows: [] });
+    }
+
+    // Company-exposure filter: restrict to people whose firm holds `company`
+    // (reuses crm_company_holder_firms — the same firms shown on the portco view).
+    let companyFirmIds = null;
+    if (company) {
+      const { data: cf, error: cfErr } = await deps.nportClient
+        .rpc('crm_company_holder_firms', { p_slug: company });
+      if (cfErr) throw cfErr;
+      companyFirmIds = (cf || []).map(f => f.firm_id);
+      if (!companyFirmIds.length) return res.json({ total: 0, limit, offset, rows: [] });
     }
 
     let q = deps.nportClient.from('crm_person')
@@ -1805,6 +1822,7 @@ router.get('/crm/people', async (req, res) => {
     if (tag) q = q.contains('tags', [tag]);
     if (hasEmail) q = q.not('email', 'is', null);
     if (viewIds) q = q.in('person_id', viewIds);
+    if (companyFirmIds) q = q.in('firm_id', companyFirmIds);
 
     const { data: people, count, error } = await q;
     if (error) throw error;
@@ -1974,7 +1992,7 @@ router.post('/crm/people/bulk', async (req, res) => {
     const ids = Array.isArray(b.ids) ? b.ids.map(n => parseInt(n, 10)).filter(Number.isFinite) : [];
     if (!ids.length) return res.status(400).json({ error: 'ids required' });
     if (ids.length > 500) return res.status(400).json({ error: 'too many ids (max 500)' });
-    const updates = pickAllowedFields(b.updates || {}, CRM_PERSON_PATCHABLE);
+    const updates = pickAllowedFields(b.updates || {}, CRM_PERSON_BULK_SETTABLE);
     if (updates.engagement_status && !CRM_ENGAGEMENT_STATUSES.has(updates.engagement_status))
       return badRequest(res, `invalid engagement_status: ${updates.engagement_status}`);
     if (updates.priority !== undefined) {
@@ -1991,6 +2009,7 @@ router.post('/crm/people/bulk', async (req, res) => {
     }
     const addTag = String(b.add_tag || '').trim();
     let tagged = 0;
+    const failed = [];
     if (addTag) {
       const { data: cur } = await deps.nportClient
         .from('crm_person').select('person_id,tags').in('person_id', ids);
@@ -1999,8 +2018,11 @@ router.post('/crm/people/bulk', async (req, res) => {
         if (tags.includes(addTag)) continue;
         const { error: e } = await deps.nportClient
           .from('crm_person').update({ tags: [...tags, addTag] }).eq('person_id', p.person_id);
-        if (!e) tagged++;
+        if (e) failed.push(p.person_id); else tagged++;
       }
+    }
+    if (failed.length) {
+      return res.status(500).json({ error: 'some tag writes failed', updated, tagged, failed });
     }
     return res.json({ updated, tagged });
   } catch (err) {

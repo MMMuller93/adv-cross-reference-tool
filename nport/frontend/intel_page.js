@@ -3172,7 +3172,7 @@ function CrmPersonListPage() {
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
-  const [filters, setFilters] = React.useState({ status: '', priorityMax: '', tag: '', hasEmail: false, view: '' });
+  const [filters, setFilters] = React.useState({ status: '', priorityMax: '', tag: '', hasEmail: false, view: '', company: '' });
   const [showAdd, setShowAdd] = React.useState(false);
   const [today, setToday] = React.useState(null);
   const [sort, setSort] = React.useState({ key: 'priority', dir: 'asc' });
@@ -3188,6 +3188,7 @@ function CrmPersonListPage() {
     if (filters.tag) p.set('tag', filters.tag);
     if (filters.hasEmail) p.set('has_email', '1');
     if (filters.view) p.set('view', filters.view);
+    if (filters.company) p.set('company', filters.company);
     setLoading(true);
     fetch(`/api/intel/crm/people?${p.toString()}`)
       .then(r => r.json())
@@ -3215,11 +3216,13 @@ function CrmPersonListPage() {
   // Snooze hides rows from the default view until their snooze expires (client-side).
   const snoozedCount = sortedRows.filter(r => crmIsSnoozed(r.person_id)).length;
   const visibleRows = showSnoozed ? sortedRows : sortedRows.filter(r => !crmIsSnoozed(r.person_id));
+  const visibleIds = new Set(visibleRows.map(r => r.person_id));
+  const selectedVisibleCount = visibleRows.reduce((n, r) => n + (selected.has(r.person_id) ? 1 : 0), 0);
   const allSelected = visibleRows.length > 0 && visibleRows.every(r => selected.has(r.person_id));
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(visibleRows.map(r => r.person_id)));
   const toggleOne = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   async function bulkApply(body) {
-    const ids = [...selected];
+    const ids = [...selected].filter(id => visibleIds.has(id));  // never act on hidden rows
     if (!ids.length) return;
     if (body.__snooze) {  // client-side snooze
       const iso = new Date(Date.now() + body.__snooze * 86400000).toISOString();
@@ -3269,7 +3272,7 @@ function CrmPersonListPage() {
           <span className="text-slate-400 text-xs">Saved views:</span>
           {savedViews.map(v => (
             <span key={v.name} className="inline-flex items-center gap-1 px-2 py-0.5 bg-white border border-slate-200 rounded hover:bg-slate-100">
-              <button onClick={() => setFilters({ status: '', priorityMax: '', tag: '', hasEmail: false, view: '', ...v.filters })}>{v.name}</button>
+              <button onClick={() => setFilters({ status: '', priorityMax: '', tag: '', hasEmail: false, view: '', company: '', ...v.filters })}>{v.name}</button>
               <button onClick={() => { crmDeleteView(v.name); setSavedViews(crmGetSavedViews()); }} className="text-slate-300 hover:text-rose-600" title="delete view">×</button>
             </span>
           ))}
@@ -3289,9 +3292,12 @@ function CrmPersonListPage() {
               {CRM_PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </label>
+          <label className="flex items-center gap-1">Company:
+            <span className="inline-block w-48"><CompanyPicker value={filters.company} onChange={v => setFilters({ ...filters, company: v })} placeholder="e.g. anthropic — by exposure" /></span>
+          </label>
           <label>Tag:&nbsp;
-            <input type="text" value={filters.tag} onChange={e => setFilters({...filters, tag: e.target.value})} placeholder="e.g. anthropic"
-                   className="border border-slate-300 rounded px-2 py-0.5 w-28" />
+            <input type="text" value={filters.tag} onChange={e => setFilters({...filters, tag: e.target.value})} placeholder="your label"
+                   className="border border-slate-300 rounded px-2 py-0.5 w-24" />
           </label>
           <label className="flex items-center gap-1">
             <input type="checkbox" checked={filters.hasEmail} onChange={e => setFilters({...filters, hasEmail: e.target.checked})} />
@@ -3305,9 +3311,9 @@ function CrmPersonListPage() {
           )}
           <span className="ml-auto text-slate-500">{visibleRows.length}{visibleRows.length !== total ? ` / ${total}` : ''} {total === 1 ? 'person' : 'people'}</span>
         </div>
-        {selected.size > 0 && (
+        {selectedVisibleCount > 0 && (
           <div className="flex flex-wrap items-center gap-2 mb-2 p-2 bg-slate-900 text-white rounded text-sm">
-            <span className="font-semibold">{selected.size} selected</span>
+            <span className="font-semibold">{selectedVisibleCount} selected</span>
             <select value="" onChange={e => { if (e.target.value) bulkApply({ updates: { engagement_status: e.target.value } }); }} className="text-slate-900 rounded px-1 py-0.5">
               <option value="">set status…</option>{CRM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -3535,6 +3541,45 @@ function CompanyPicker({ value, onChange, placeholder }) {
               onClick={() => { onChange(o.slug); setQ(o.slug); setOpen(false); }}
               className="block w-full text-left px-2 py-1 hover:bg-slate-100">
               <span className="font-medium text-slate-800">{o.display_name}</span> <span className="text-slate-400 text-xs">{o.slug}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Autocomplete over existing CRM people (via /api/intel/search). Manages its
+// own text; calls onChange(personId) on select and onChange(null) while typing
+// (so a stale selection isn't submitted after the text is edited).
+function PersonPicker({ onChange, placeholder }) {
+  const [q, setQ] = React.useState('');
+  const [opts, setOpts] = React.useState([]);
+  const [open, setOpen] = React.useState(false);
+  React.useEffect(() => {
+    if (!open || q.trim().length < 2) { setOpts([]); return; }
+    let alive = true;
+    const t = setTimeout(() => {
+      fetch(`/api/intel/search?q=${encodeURIComponent(q.trim())}`)
+        .then(r => r.json())
+        .then(d => { if (alive) setOpts((d.results || []).filter(x => x.type === 'crm_person').slice(0, 8)); })
+        .catch(() => {});
+    }, 150);
+    return () => { alive = false; clearTimeout(t); };
+  }, [q, open]);
+  return (
+    <div className="relative">
+      <input value={q} placeholder={placeholder || 'search CRM people'}
+        className="w-full border border-slate-300 rounded px-2 py-1 text-sm"
+        onFocus={() => setOpen(true)}
+        onChange={e => { setQ(e.target.value); setOpen(true); onChange(null); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)} />
+      {open && opts.length > 0 && (
+        <div className="absolute z-20 left-0 right-0 bg-white border border-slate-200 rounded mt-0.5 max-h-44 overflow-y-auto text-sm shadow">
+          {opts.map(o => (
+            <button key={o.id} type="button" onClick={() => { onChange(o.id); setQ(o.label); setOpen(false); }}
+              className="block w-full text-left px-2 py-1 hover:bg-slate-100">
+              <span className="font-medium text-slate-800">{o.label}</span> {o.sublabel && <span className="text-slate-400 text-xs">{o.sublabel}</span>}
             </button>
           ))}
         </div>
@@ -3863,6 +3908,7 @@ function InteractionModal({ personId, onClose, onSaved, prefill }) {
 }
 
 function DealInterestModal({ personId, onClose, onSaved }) {
+  const [pickedId, setPickedId] = React.useState(personId || null);
   const [form, setForm] = React.useState({
     company_slug: '', side: 'buy', state: 'open',
     security_type: '', share_class: '', structure: '',
@@ -3870,9 +3916,12 @@ function DealInterestModal({ personId, onClose, onSaved }) {
     size_usd: '', conditions: '', notes: '',
   });
   const submit = async () => {
+    const pid = personId || pickedId;
+    if (!pid) { alert('Pick a person first'); return; }
+    if (!form.company_slug) { alert('Pick a company first'); return; }
     const payload = { ...form };
     Object.keys(payload).forEach(k => { if (payload[k] === '') delete payload[k]; });
-    const r = await fetch(`/api/intel/crm/people/${personId}/deal-interests`, {
+    const r = await fetch(`/api/intel/crm/people/${pid}/deal-interests`, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
     });
     if (!r.ok) { alert(`Error: ${await r.text()}`); return; }
@@ -3880,6 +3929,11 @@ function DealInterestModal({ personId, onClose, onSaved }) {
   };
   return (
     <Modal title="Log deal interest" onClose={onClose} onSubmit={submit}>
+      {!personId && (
+        <label className="block text-sm"><span className="block text-xs text-slate-500 mb-0.5">Person *</span>
+          <PersonPicker onChange={setPickedId} placeholder="search CRM people" />
+        </label>
+      )}
       <label className="block text-sm"><span className="block text-xs text-slate-500 mb-0.5">Company *</span>
         <CompanyPicker value={form.company_slug} onChange={v => setForm({...form, company_slug: v})} placeholder="search tracked companies" />
       </label>
@@ -3934,6 +3988,7 @@ function CrmDealsPage() {
   const companyFilter = params.get('company') || '';
   const [mode, setMode] = React.useState('bidask');  // 'bidask' | 'pipeline'
   const [reloadKey, setReloadKey] = React.useState(0);
+  const [showAdd, setShowAdd] = React.useState(false);
   const reload = () => setReloadKey(k => k + 1);
   React.useEffect(() => {
     const p = new URLSearchParams({ all_states: '1' });
@@ -3958,9 +4013,12 @@ function CrmDealsPage() {
         <a href="/intel/crm" className="text-sm text-slate-500 hover:text-slate-700">← All people</a>
         <div className="flex items-center justify-between mt-3 mb-4">
           <h1 className="text-2xl font-semibold text-slate-900">CRM — Deals{companyFilter ? ` · ${companyFilter}` : ''}</h1>
-          <div className="flex text-sm border border-slate-200 rounded overflow-hidden">
-            <button onClick={() => setMode('bidask')} className={`px-3 py-1 ${mode === 'bidask' ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}>Bid / Ask</button>
-            <button onClick={() => setMode('pipeline')} className={`px-3 py-1 ${mode === 'pipeline' ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}>Pipeline</button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowAdd(true)} className="px-3 py-1 text-sm bg-slate-900 text-white rounded hover:bg-slate-800">+ Add interest</button>
+            <div className="flex text-sm border border-slate-200 rounded overflow-hidden">
+              <button onClick={() => setMode('bidask')} className={`px-3 py-1 ${mode === 'bidask' ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}>Bid / Ask</button>
+              <button onClick={() => setMode('pipeline')} className={`px-3 py-1 ${mode === 'pipeline' ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}>Pipeline</button>
+            </div>
           </div>
         </div>
         {error && <div className="text-rose-600 text-sm">Error: {error}</div>}
@@ -4026,8 +4084,9 @@ function CrmDealsPage() {
             </div>
           );
         })}
-        {!Object.keys(byCompany).length && <div className="text-slate-500">No deal interests logged yet.</div>}
+        {!Object.keys(byCompany).length && <div className="text-slate-500">No deal interests logged yet. Click <span className="font-medium">+ Add interest</span> to log one.</div>}
       </div>
+      {showAdd && <DealInterestModal personId={null} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); reload(); }} />}
     </div>
   );
 }
@@ -4178,6 +4237,7 @@ function TagEditor({ personId, tags, onChanged }) {
   const [list, setList] = React.useState(Array.isArray(tags) ? tags : []);
   const [input, setInput] = React.useState('');
   const [busy, setBusy] = React.useState(false);
+  React.useEffect(() => { setList(Array.isArray(tags) ? tags : []); }, [tags]);
   async function save(next) {
     setBusy(true);
     try {
