@@ -3176,6 +3176,10 @@ function CrmPersonListPage() {
   const [showAdd, setShowAdd] = React.useState(false);
   const [today, setToday] = React.useState(null);
   const [sort, setSort] = React.useState({ key: 'priority', dir: 'asc' });
+  const [selected, setSelected] = React.useState(() => new Set());
+  const [showSnoozed, setShowSnoozed] = React.useState(false);
+  const [savedViews, setSavedViews] = React.useState(() => crmGetSavedViews());
+  const [snoozeTick, setSnoozeTick] = React.useState(0);
 
   React.useEffect(() => {
     const p = new URLSearchParams({ limit: '500' });
@@ -3208,6 +3212,30 @@ function CrmPersonListPage() {
     return { key: 'priority', dir: 'asc' };  // third click → back to default order
   });
 
+  // Snooze hides rows from the default view until their snooze expires (client-side).
+  const snoozedCount = sortedRows.filter(r => crmIsSnoozed(r.person_id)).length;
+  const visibleRows = showSnoozed ? sortedRows : sortedRows.filter(r => !crmIsSnoozed(r.person_id));
+  const allSelected = visibleRows.length > 0 && visibleRows.every(r => selected.has(r.person_id));
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(visibleRows.map(r => r.person_id)));
+  const toggleOne = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  async function bulkApply(body) {
+    const ids = [...selected];
+    if (!ids.length) return;
+    if (body.__snooze) {  // client-side snooze
+      const iso = new Date(Date.now() + body.__snooze * 86400000).toISOString();
+      ids.forEach(id => crmSetSnooze(id, iso));
+      setSelected(new Set()); setSnoozeTick(t => t + 1); return;
+    }
+    try {
+      const r = await fetch('/api/intel/crm/people/bulk', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, ...body }),
+      });
+      if (!r.ok) { alert(`Error: ${await r.text()}`); return; }
+      setSelected(new Set()); setFilters(f => ({ ...f }));  // refetch
+    } catch (e) { alert(String(e)); }
+  }
+  void snoozeTick;  // referenced so snooze changes force a re-render
+
   return (
     <div className="min-h-screen bg-slate-50">
       <CmdKPalette />
@@ -3237,6 +3265,17 @@ function CrmPersonListPage() {
             {filters.view && <button onClick={() => setFilters(f => ({ ...f, view: '' }))} className="px-2 py-2 text-xs text-slate-500 hover:text-slate-800 underline">clear view</button>}
           </div>
         )}
+        <div className="flex flex-wrap items-center gap-2 mb-2 text-sm">
+          <span className="text-slate-400 text-xs">Saved views:</span>
+          {savedViews.map(v => (
+            <span key={v.name} className="inline-flex items-center gap-1 px-2 py-0.5 bg-white border border-slate-200 rounded hover:bg-slate-100">
+              <button onClick={() => setFilters({ status: '', priorityMax: '', tag: '', hasEmail: false, view: '', ...v.filters })}>{v.name}</button>
+              <button onClick={() => { crmDeleteView(v.name); setSavedViews(crmGetSavedViews()); }} className="text-slate-300 hover:text-rose-600" title="delete view">×</button>
+            </span>
+          ))}
+          {!savedViews.length && <span className="text-slate-300 text-xs">none yet</span>}
+          <button onClick={() => { const n = prompt('Save current filters as a view named:'); if (n && n.trim()) { crmSaveView(n.trim(), filters); setSavedViews(crmGetSavedViews()); } }} className="text-xs text-blue-700 hover:underline">+ save current</button>
+        </div>
         <div className="bg-white border border-slate-200 rounded p-3 mb-4 flex flex-wrap gap-3 text-sm">
           <label>Status:&nbsp;
             <select value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} className="border border-slate-300 rounded px-2 py-0.5">
@@ -3258,8 +3297,28 @@ function CrmPersonListPage() {
             <input type="checkbox" checked={filters.hasEmail} onChange={e => setFilters({...filters, hasEmail: e.target.checked})} />
             has email
           </label>
-          <span className="ml-auto text-slate-500">{total} {total === 1 ? 'person' : 'people'}</span>
+          {snoozedCount > 0 && (
+            <label className="flex items-center gap-1 text-amber-700">
+              <input type="checkbox" checked={showSnoozed} onChange={e => setShowSnoozed(e.target.checked)} />
+              show snoozed ({snoozedCount})
+            </label>
+          )}
+          <span className="ml-auto text-slate-500">{visibleRows.length}{visibleRows.length !== total ? ` / ${total}` : ''} {total === 1 ? 'person' : 'people'}</span>
         </div>
+        {selected.size > 0 && (
+          <div className="flex flex-wrap items-center gap-2 mb-2 p-2 bg-slate-900 text-white rounded text-sm">
+            <span className="font-semibold">{selected.size} selected</span>
+            <select value="" onChange={e => { if (e.target.value) bulkApply({ updates: { engagement_status: e.target.value } }); }} className="text-slate-900 rounded px-1 py-0.5">
+              <option value="">set status…</option>{CRM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select value="" onChange={e => { if (e.target.value) bulkApply({ updates: { priority: e.target.value } }); }} className="text-slate-900 rounded px-1 py-0.5">
+              <option value="">set priority…</option>{CRM_PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <button onClick={() => { const t = prompt('Add tag to selected:'); if (t && t.trim()) bulkApply({ add_tag: t.trim() }); }} className="px-2 py-0.5 bg-white text-slate-900 rounded hover:bg-slate-100">+ tag</button>
+            <button onClick={() => bulkApply({ __snooze: 30 })} className="px-2 py-0.5 bg-white text-slate-900 rounded hover:bg-slate-100">snooze 30d</button>
+            <button onClick={() => setSelected(new Set())} className="ml-auto text-slate-300 hover:text-white">clear</button>
+          </div>
+        )}
         {loading && <div className="text-slate-500 text-sm">Loading…</div>}
         {error && <div className="text-rose-600 text-sm">Error: {error}</div>}
         {!loading && !error && (
@@ -3267,6 +3326,7 @@ function CrmPersonListPage() {
             <table className="w-full text-sm">
               <thead className="bg-slate-100 text-slate-700">
                 <tr>
+                  <th className="px-3 py-2 w-8"><input type="checkbox" checked={allSelected} onChange={toggleAll} title="select all" /></th>
                   <th className="text-left px-3 py-2">Person</th>
                   <th className="text-left px-3 py-2">Title</th>
                   <th className="text-left px-3 py-2">Firm</th>
@@ -3280,8 +3340,9 @@ function CrmPersonListPage() {
                 </tr>
               </thead>
               <tbody>
-                {sortedRows.map(r => (
-                  <tr key={r.person_id} className="border-t border-slate-100 hover:bg-slate-50">
+                {visibleRows.map(r => (
+                  <tr key={r.person_id} className={`border-t border-slate-100 hover:bg-slate-50 ${selected.has(r.person_id) ? 'bg-blue-50' : ''}`}>
+                    <td className="px-3 py-2"><input type="checkbox" checked={selected.has(r.person_id)} onChange={() => toggleOne(r.person_id)} /></td>
                     <td className="px-3 py-2">
                       <span className="flex items-center gap-2">
                         <PersonAvatar name={r.full_name} email={r.email} size={24} />
@@ -3319,7 +3380,7 @@ function CrmPersonListPage() {
                   </tr>
                 ))}
                 {!rows.length && (
-                  <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-500">No people in CRM yet. Click <span className="font-medium">+ Add person</span> to get started, or run python intelligence/crm/add_by_tracked_company.py --company &lt;slug&gt; --execute</td></tr>
+                  <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-500">No people in CRM yet. Click <span className="font-medium">+ Add person</span> to get started, or run python intelligence/crm/add_by_tracked_company.py --company &lt;slug&gt; --execute</td></tr>
                 )}
               </tbody>
             </table>
@@ -3620,8 +3681,10 @@ function CrmPersonDetailPage({ id }) {
   const [data, setData] = React.useState(null);
   const [error, setError] = React.useState(null);
   const [showInteraction, setShowInteraction] = React.useState(false);
+  const [interactionPrefill, setInteractionPrefill] = React.useState(null);
   const [showDeal, setShowDeal] = React.useState(false);
   const [showFollowup, setShowFollowup] = React.useState(false);
+  const [snoozeNonce, setSnoozeNonce] = React.useState(0);
   const reload = React.useCallback(() => {
     fetch(`/api/intel/crm/people/${id}`).then(r => r.json()).then(setData).catch(e => setError(String(e)));
   }, [id]);
@@ -3680,12 +3743,24 @@ function CrmPersonDetailPage({ id }) {
             <span>Added via: <span className="text-slate-600">{p.added_via}</span></span>
             {(p.added_for_companies || []).length > 0 && <span>For: {(p.added_for_companies || []).map(s => <a key={s} href={`/intel/${s}`} className="ml-1 text-blue-700 hover:underline">{s}</a>)}</span>}
           </div>
+          <div className="text-sm flex flex-wrap gap-3 items-center mt-2 pt-2 border-t border-slate-100">
+            <span className="text-slate-500">Tags:</span>
+            <TagEditor personId={p.person_id} tags={p.tags} onChanged={reload} />
+            <span className="text-slate-500 ml-2">Snooze:</span>
+            {crmIsSnoozed(p.person_id)
+              ? <span className="text-amber-700">until {fmtDate(crmGetSnoozes()[p.person_id])} <button onClick={() => { crmSetSnooze(p.person_id, null); setSnoozeNonce(n => n + 1); }} className="text-blue-700 hover:underline ml-1">un-snooze</button></span>
+              : [7, 30, 90].map(d => <button key={d} onClick={() => { crmSetSnooze(p.person_id, new Date(Date.now() + d * 86400000).toISOString()); setSnoozeNonce(n => n + 1); }} className="text-blue-700 hover:underline">{d}d</button>)
+            }
+          </div>
         </section>
 
         <section className="mt-4 bg-white border border-slate-200 rounded p-4">
           <div className="flex justify-between items-center mb-2">
             <h2 className="text-sm font-semibold text-slate-700">Timeline ({(data.interactions || []).length})</h2>
-            <button onClick={() => setShowInteraction(true)} className="text-xs px-2 py-1 bg-slate-900 text-white rounded hover:bg-slate-800">+ Log event</button>
+            <div className="flex gap-1">
+              <button onClick={() => { setInteractionPrefill({ channel: 'email', type: 'response', direction: 'inbound' }); setShowInteraction(true); }} className="text-xs px-2 py-1 bg-white border border-slate-200 rounded hover:bg-slate-100">✉ Log email</button>
+              <button onClick={() => { setInteractionPrefill(null); setShowInteraction(true); }} className="text-xs px-2 py-1 bg-slate-900 text-white rounded hover:bg-slate-800">+ Log event</button>
+            </div>
           </div>
           {(data.interactions || []).length === 0 && <div className="text-slate-400 text-sm">No interactions yet.</div>}
           <ul className="text-sm space-y-2">
@@ -3745,7 +3820,7 @@ function CrmPersonDetailPage({ id }) {
           </ul>
         </section>
 
-        {showInteraction && <InteractionModal personId={id} onClose={() => setShowInteraction(false)} onSaved={() => { setShowInteraction(false); reload(); }} />}
+        {showInteraction && <InteractionModal personId={id} prefill={interactionPrefill} onClose={() => setShowInteraction(false)} onSaved={() => { setShowInteraction(false); reload(); }} />}
         {showDeal && <DealInterestModal personId={id} onClose={() => setShowDeal(false)} onSaved={() => { setShowDeal(false); reload(); }} />}
         {showFollowup && <FollowupModal personId={id} onClose={() => setShowFollowup(false)} onSaved={() => { setShowFollowup(false); reload(); }} />}
       </div>
@@ -3753,11 +3828,12 @@ function CrmPersonDetailPage({ id }) {
   );
 }
 
-function InteractionModal({ personId, onClose, onSaved }) {
+function InteractionModal({ personId, onClose, onSaved, prefill }) {
   const [form, setForm] = React.useState({
     occurred_at: new Date().toISOString().slice(0, 16),
     direction: 'outbound', channel: 'email', type: 'intro',
     subject: '', body: '', outcome: '', sentiment: '', related_company_slug: '',
+    ...(prefill || {}),
   });
   const submit = async () => {
     const payload = { ...form };
@@ -4081,6 +4157,55 @@ function useModalKeys(onClose) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+}
+
+// --- localStorage-backed view prefs (single-user local CRM) -----------------
+// Snooze + saved views are personal view preferences; they live client-side
+// (no schema change). If the CRM ever goes multi-device, move these server-side.
+const CRM_LS = {
+  get(key, fb) { try { const v = localStorage.getItem('crm.' + key); return v == null ? fb : JSON.parse(v); } catch (e) { return fb; } },
+  set(key, val) { try { localStorage.setItem('crm.' + key, JSON.stringify(val)); } catch (e) {} },
+};
+function crmGetSnoozes() { return CRM_LS.get('snoozes', {}); }
+function crmSetSnooze(id, iso) { const s = crmGetSnoozes(); if (iso) s[id] = iso; else delete s[id]; CRM_LS.set('snoozes', s); }
+function crmIsSnoozed(id) { const iso = crmGetSnoozes()[id]; return !!(iso && new Date(iso).getTime() > Date.now()); }
+function crmGetSavedViews() { return CRM_LS.get('views', []); }
+function crmSaveView(name, filters) { const v = crmGetSavedViews().filter(x => x.name !== name); v.push({ name, filters }); CRM_LS.set('views', v); }
+function crmDeleteView(name) { CRM_LS.set('views', crmGetSavedViews().filter(x => x.name !== name)); }
+
+// Inline tag editor — chips with remove + add input. PATCHes crm_person.tags.
+function TagEditor({ personId, tags, onChanged }) {
+  const [list, setList] = React.useState(Array.isArray(tags) ? tags : []);
+  const [input, setInput] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  async function save(next) {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/intel/crm/people/${personId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tags: next }),
+      });
+      if (!r.ok) { alert(`Error: ${await r.text()}`); setBusy(false); return; }
+      setList(next); setBusy(false); onChanged && onChanged(next);
+    } catch (e) { alert(String(e)); setBusy(false); }
+  }
+  function add() {
+    const t = input.trim();
+    if (!t || list.includes(t)) { setInput(''); return; }
+    save([...list, t]); setInput('');
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {list.map(t => (
+        <span key={t} className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 bg-slate-100 rounded">
+          {t}
+          <button onClick={() => save(list.filter(x => x !== t))} disabled={busy} className="text-slate-400 hover:text-rose-600" title="remove">×</button>
+        </span>
+      ))}
+      <input value={input} onChange={e => setInput(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+        placeholder="+ tag" className="text-xs border border-slate-200 rounded px-1.5 py-0.5 w-20" />
+    </div>
+  );
 }
 
 // --- bootstrap --------------------------------------------------------------

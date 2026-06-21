@@ -1962,6 +1962,52 @@ router.patch('/crm/people/:id', async (req, res) => {
   }
 });
 
+// --- POST /api/intel/crm/people/bulk ---------------------------------------
+// Multi-select bulk actions: scalar SET (engagement_status, priority,
+// do_not_contact, ...) applied to all ids, plus add_tag which APPENDS one tag
+// to each person's existing tags (dedup). Writes run through the server's
+// service client.
+router.post('/crm/people/bulk', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const b = req.body || {};
+    const ids = Array.isArray(b.ids) ? b.ids.map(n => parseInt(n, 10)).filter(Number.isFinite) : [];
+    if (!ids.length) return res.status(400).json({ error: 'ids required' });
+    if (ids.length > 500) return res.status(400).json({ error: 'too many ids (max 500)' });
+    const updates = pickAllowedFields(b.updates || {}, CRM_PERSON_PATCHABLE);
+    if (updates.engagement_status && !CRM_ENGAGEMENT_STATUSES.has(updates.engagement_status))
+      return badRequest(res, `invalid engagement_status: ${updates.engagement_status}`);
+    if (updates.priority !== undefined) {
+      const p = parseInt(updates.priority, 10);
+      if (!Number.isInteger(p) || p < 1 || p > 5) return badRequest(res, 'priority must be 1..5');
+      updates.priority = p;
+    }
+    let updated = 0;
+    if (Object.keys(updates).length) {
+      const { data, error } = await deps.nportClient
+        .from('crm_person').update(updates).in('person_id', ids).select('person_id');
+      if (error) throw error;
+      updated = (data || []).length;
+    }
+    const addTag = String(b.add_tag || '').trim();
+    let tagged = 0;
+    if (addTag) {
+      const { data: cur } = await deps.nportClient
+        .from('crm_person').select('person_id,tags').in('person_id', ids);
+      for (const p of (cur || [])) {
+        const tags = Array.isArray(p.tags) ? p.tags : [];
+        if (tags.includes(addTag)) continue;
+        const { error: e } = await deps.nportClient
+          .from('crm_person').update({ tags: [...tags, addTag] }).eq('person_id', p.person_id);
+        if (!e) tagged++;
+      }
+    }
+    return res.json({ updated, tagged });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
 // --- DELETE /api/intel/crm/people/:id --------------------------------------
 router.delete('/crm/people/:id', async (req, res) => {
   if (!configGuard(res)) return;
