@@ -229,13 +229,11 @@ async function save(seriesMasterLlc, decisions, identity, opts = {}) {
     // v3 columns
     field_evidence: fieldEvidence,
     candidates: Object.keys(candidates).length > 0 ? candidates : null,
-    verified_anchor: verifiedAnchor.length > 0 ? verifiedAnchor : null,
+    // verified_anchor moved to conditional-add (promote-only) below
     last_retry_at: now,
     // Legacy columns (only when verified)
-    website_url: legacyWebsite,
-    linkedin_company_url: legacyLinkedIn,
-    primary_contact_email: legacyEmail,
-    team_members: legacyTeam.length > 0 ? legacyTeam : [],
+    // Legacy flat columns are added BELOW the payload object via conditional adds
+    // (promote-only pattern). See bug-fix incident note 2026-05-25.
     // Status + metadata
     enrichment_status: deriveLegacyEnrichmentStatus(decisions),
     v3_status: enrichmentStatus,
@@ -243,9 +241,39 @@ async function save(seriesMasterLlc, decisions, identity, opts = {}) {
     enrichment_source: 'automated_v3',
     enrichment_date: now,
     last_updated: now,
-    // CRD if resolved
-    linked_crd: identity?.crd || null,
+    // linked_crd moved to conditional-add (promote-only) below
   };
+
+  // ── PROMOTE-ONLY LEGACY COLUMNS ─────────────────────────────────────────────
+  // BUG FIX 2026-05-25 — Extended 2026-05-25 (Option B):
+  // Incident: 83 rows of v2 team data destroyed because payload sent `[]` when
+  // v3 found nothing, overwriting prior v2 values via Postgres UPDATE.
+  // Same risk existed on website_url / linkedin_company_url / primary_contact_email
+  // (all sent `null` when v3 didn't verify).
+  //
+  // FIX: Default re-enrichment is PROMOTE-ONLY. Write a legacy flat column only
+  // when v3 has positive verified evidence to write. Omit otherwise so Postgres
+  // UPDATE skips the column and the prior value is retained.
+  //
+  // Clearing bad v2 data must be a SEPARATE destructive repair flow (forthcoming
+  // `allowDestructiveClear` flag + `clearReason`), NOT a side-effect of an
+  // unverified re-enrichment run.
+  //
+  // See: .llm/ENRICHMENT_REBUILD_DESIGN.md §1 "No overwrite of verified data"
+  // See: Codex GPT-5.5 xhigh review 2026-05-25 (task b62zvddau)
+  if (legacyWebsite) payload.website_url = legacyWebsite;
+  if (legacyLinkedIn) payload.linkedin_company_url = legacyLinkedIn;
+  if (legacyEmail) payload.primary_contact_email = legacyEmail;
+  if (legacyTeam.length > 0) payload.team_members = legacyTeam;
+  if (identity?.crd) payload.linked_crd = identity.crd;
+  if (Array.isArray(verifiedAnchor) && verifiedAnchor.length > 0) payload.verified_anchor = verifiedAnchor;
+
+  // NOTE: field_evidence, candidates, confidence_score still use full-overwrite
+  // semantics. Codex GPT-5.5 xhigh review flagged these as needing PROPER MERGE
+  // (existing JSONB + new) rather than simple conditional-add. Deferred to its
+  // own task — requires reading the existing row's field_evidence/candidates and
+  // implementing mergeEvidencePromoteOnly + mergeCandidatesUnlessVerified.
+  // For now: less common loss path because these objects rarely become exactly empty.
 
   // Check for existing record
   try {

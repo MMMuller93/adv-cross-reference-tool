@@ -1,0 +1,74 @@
+# Nightly Enrichment Retry (v3)
+# Re-attempts managers that the v3 anchor gate left below-bar
+# (candidates_only / partial / no_data). The retry queue uses a
+# 7/14/30/60/90-day backoff (next_retry_at), so this claws coverage back over
+# time as sources improve, without re-touching verified rows.
+#
+# Runs an hour ahead of the main Daily Enrichment (09:00 UTC) so the two never
+# overlap on the shared Brave/Serper/OpenAI quota. Engine = v3 (same as the
+# main job). Safe to run manually via workflow_dispatch.
+
+name: Nightly Enrichment Retry
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 6am UTC (before the 9am enrich)
+  workflow_dispatch:  # Manual trigger from GitHub UI
+    inputs:
+      limit:
+        description: 'Managers to retry this run'
+        required: false
+        default: '200'
+      dry_run:
+        description: 'Dry run (no DB writes)'
+        required: false
+        default: 'false'
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Retry below-bar managers (v3)
+        run: |
+          echo "=== ENRICHMENT RETRY v3 ==="
+          DRY=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then DRY="--dry-run"; fi
+          node enrichment/v3/retry_runner.js --limit ${{ github.event.inputs.limit || '200' }} $DRY
+        env:
+          # Engine selector — v3 modular pipeline (promote-only writes, anchor gate)
+          ENRICHMENT_V3_ENABLED: "true"
+          # ADV Database (enriched advisers/funds)
+          ADV_URL: https://ezuqwwffjgfzymqxsctq.supabase.co
+          ADV_SERVICE_KEY: ${{ secrets.ADV_SERVICE_KEY }}
+          # Form D Database (enriched_managers, retry queue)
+          FORMD_URL: https://ltdalxkhbbhmkimmogyq.supabase.co
+          FORMD_SERVICE_KEY: ${{ secrets.FORMD_SERVICE_KEY }}
+          # Search API (manager websites/contact info)
+          BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+          # Backup search providers (fall back if Brave rate limited)
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GOOGLE_CX: ${{ secrets.GOOGLE_CX }}
+          # AI classification (validation and parsing)
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Report summary
+        if: always()
+        run: |
+          echo ""
+          echo "=== RETRY COMPLETE ==="
+          echo "Timestamp: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
