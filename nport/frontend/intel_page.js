@@ -3669,6 +3669,34 @@ function CrmCompanyPage({ slug }) {
 }
 
 // Firm-centric page: the firm's CRM people + its full tracked-company holdings.
+// Auto-enriched intel from the manager-enrichment corpus (web search / LinkedIn).
+// UNVERIFIED — v2 is known to mis-attribute some LinkedIn rows, so this is
+// surfaced clearly labeled with its confidence and an explicit "verify" caveat,
+// never as ground truth. Amber styling signals "treat with caution". Team is
+// intentionally not shown until v3 rebuilds it from verified sources.
+function FirmEnrichedPanel({ e }) {
+  const hasAny = e.website_url || e.linkedin_company_url || e.twitter_handle || e.primary_contact_email;
+  if (!hasAny) return null;
+  const conf = e.confidence == null ? null : Math.round(e.confidence <= 1 ? e.confidence * 100 : e.confidence);
+  return (
+    <section className="mt-4 bg-amber-50 border border-amber-200 rounded p-4">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <h2 className="text-sm font-semibold text-amber-900">Auto-enriched intel</h2>
+        <span className="text-[11px] px-1.5 py-0.5 bg-amber-200 text-amber-900 rounded font-medium uppercase tracking-wide">unverified</span>
+        {e.status && <span className="text-[11px] px-1.5 py-0.5 bg-white border border-amber-200 text-amber-800 rounded">{e.status}</span>}
+        {conf != null && <span className="text-[11px] text-amber-700">confidence {conf}%</span>}
+      </div>
+      <div className="text-xs text-amber-700 mb-3">From web search on the SEC-registered name — may be mismatched to the wrong firm. Verify before relying on it.</div>
+      <dl className="text-sm space-y-1">
+        {e.website_url && <div className="flex gap-2"><dt className="text-amber-700 w-20 shrink-0">website:</dt><dd className="truncate"><a href={e.website_url} target="_blank" rel="noreferrer noopener" className="text-blue-700 hover:underline">{e.website_url}</a></dd></div>}
+        {e.linkedin_company_url && <div className="flex gap-2"><dt className="text-amber-700 w-20 shrink-0">linkedin:</dt><dd className="truncate"><a href={e.linkedin_company_url} target="_blank" rel="noreferrer noopener" className="text-blue-700 hover:underline">{e.linkedin_company_url}</a></dd></div>}
+        {e.twitter_handle && <div className="flex gap-2"><dt className="text-amber-700 w-20 shrink-0">twitter:</dt><dd><a href={`https://twitter.com/${String(e.twitter_handle).replace(/^@/,'')}`} target="_blank" rel="noreferrer noopener" className="text-blue-700 hover:underline">{e.twitter_handle}</a></dd></div>}
+        {e.primary_contact_email && <div className="flex gap-2"><dt className="text-amber-700 w-20 shrink-0">email:</dt><dd><a href={`mailto:${e.primary_contact_email}`} className="text-blue-700 hover:underline">{e.primary_contact_email}</a><CopyButton text={e.primary_contact_email} /></dd></div>}
+      </dl>
+    </section>
+  );
+}
+
 function CrmFirmPage({ id }) {
   const [data, setData] = React.useState(null);
   const [error, setError] = React.useState(null);
@@ -3696,6 +3724,7 @@ function CrmFirmPage({ id }) {
         <div className="text-sm text-slate-500 mt-1">
           {f.exposure_company_count || 0} tracked cos · {fmtUsd(f.exposure_total_nport_usd)} N-PORT · {fmtUsd(f.exposure_total_formd_usd)} Form D
         </div>
+        {data.enriched && <FirmEnrichedPanel e={data.enriched} />}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
           <section className="bg-white border border-slate-200 rounded p-4">
             <h2 className="text-sm font-semibold text-slate-700 mb-2">People ({people.length})</h2>

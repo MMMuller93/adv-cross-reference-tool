@@ -2312,7 +2312,37 @@ router.get('/crm/firms/:id', async (req, res) => {
       .order('priority').order('full_name');
     const { data: summary } = await deps.nportClient
       .from('crm_firm_exposure_summary').select('*').eq('firm_id', id).maybeSingle();
-    return res.json({ firm, identities: identities || [], people: people || [], exposure: summary || null });
+
+    // Auto-enriched intel from the manager-enrichment corpus (web search /
+    // LinkedIn). UNVERIFIED — v2 is known to mis-attribute some LinkedIn rows
+    // (e.g. Starbridge→linkedin/wix-com), so the UI surfaces this clearly
+    // labeled with its confidence, never as ground truth. Picks the
+    // highest-confidence row (with a site/LinkedIn) for any of the firm's CRDs.
+    // Team is deliberately NOT surfaced yet: the v2-era team_members column
+    // contains known hallucinations (literal "John Doe / Jane Smith"
+    // placeholders) that v3's anchor gate hasn't scrubbed on partial rows.
+    // Re-enable team once the v3 cron has rebuilt it from verified sources.
+    let enriched = null;
+    const crds = Array.from(new Set((identities || []).map(i => i.adviser_crd).filter(Boolean)));
+    if (crds.length && deps.formdClient) {
+      const { data: em } = await deps.formdClient
+        .from('enriched_managers')
+        .select('linked_crd,website_url,linkedin_company_url,twitter_handle,primary_contact_email,enrichment_status,v3_status,confidence_score')
+        .in('linked_crd', crds)
+        .order('confidence_score', { ascending: false });
+      const best = (em || []).find(r => r.website_url || r.linkedin_company_url) || (em || [])[0];
+      if (best && (best.website_url || best.linkedin_company_url)) {
+        enriched = {
+          website_url: best.website_url || null,
+          linkedin_company_url: best.linkedin_company_url || null,
+          twitter_handle: best.twitter_handle || null,
+          primary_contact_email: best.primary_contact_email || null,
+          confidence: best.confidence_score != null ? Number(best.confidence_score) : null,
+          status: best.v3_status || best.enrichment_status || null,
+        };
+      }
+    }
+    return res.json({ firm, identities: identities || [], people: people || [], exposure: summary || null, enriched });
   } catch (err) {
     return serverError(res, err);
   }
