@@ -11,11 +11,13 @@
 #      below-bar rows is taken anyway (per ETL hygiene).
 #
 # Usage:
-#   bash enrichment/v3/run_retry_overnight.sh [BATCHES] [PER_BATCH]
-#     BATCHES    number of retry batches to run   (default 8)
-#     PER_BATCH  managers per batch               (default 200)
-#   Defaults => 1600 managers/night (~9h at ~20s each). Re-run nightly until the
-#   "due for retry now" count in the coverage report hits ~0.
+#   bash enrichment/v3/run_retry_overnight.sh [BATCHES] [PER_BATCH] [CONCURRENCY]
+#     BATCHES      number of retry batches          (default 4)
+#     PER_BATCH    managers per batch (Supabase cap) (default 1000)
+#     CONCURRENCY  parallel workers per batch        (default 10)
+#   Defaults => up to 4000 managers at ~14/min (~5h for the full ~3.2k backlog).
+#   Work is I/O-bound, so concurrency 10 is ~5x faster than sequential with no
+#   measured API rate-limiting. Re-run until "due for retry now" hits ~0.
 #
 # Requires .env with FORMD_SERVICE_KEY, ADV_SERVICE_KEY, BRAVE_SEARCH_API_KEY,
 # OPENAI_API_KEY (the engine loads it automatically).
@@ -23,8 +25,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."   # repo root
 
-BATCHES="${1:-8}"
-PER_BATCH="${2:-200}"
+BATCHES="${1:-4}"
+PER_BATCH="${2:-1000}"
+CONCURRENCY="${3:-10}"
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p .llm/backups logs
 LOG="logs/retry-${TS}.log"
@@ -36,11 +39,11 @@ node enrichment/v3/coverage.js 2>&1 | tee -a "$LOG"
 echo "=== pre-run backup ===" | tee -a "$LOG"
 node enrichment/v3/backup_below_bar.js "$BACKUP" 2>&1 | tee -a "$LOG"
 
-echo "=== retry pass: ${BATCHES} batches x ${PER_BATCH} (keeping Mac awake) ===" | tee -a "$LOG"
+echo "=== retry pass: ${BATCHES} batches x ${PER_BATCH} @ concurrency ${CONCURRENCY} (keeping Mac awake) ===" | tee -a "$LOG"
 for i in $(seq 1 "$BATCHES"); do
   echo "--- batch ${i}/${BATCHES} ---" | tee -a "$LOG"
   # caffeinate -i prevents idle sleep for the duration of each batch.
-  caffeinate -i node enrichment/v3/retry_runner.js --limit "$PER_BATCH" 2>&1 | tee -a "$LOG"
+  caffeinate -i node enrichment/v3/retry_runner.js --limit "$PER_BATCH" --concurrency "$CONCURRENCY" --delay 0 2>&1 | tee -a "$LOG"
 done
 
 echo "=== coverage AFTER ===" | tee -a "$LOG"
