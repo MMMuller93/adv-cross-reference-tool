@@ -3252,6 +3252,11 @@ function CrmPersonListPage() {
             <button onClick={() => setShowAdd(true)} className="px-3 py-1 bg-slate-900 text-white rounded hover:bg-slate-800">+ Add person</button>
           </div>
         </div>
+        <div className="bg-white border border-blue-200 rounded p-3 mb-4 flex items-center gap-2 text-sm">
+          <span className="font-medium text-slate-700 shrink-0">Who holds a company?</span>
+          <span className="inline-block w-72"><CompanyPicker onSelect={slug => { window.location.href = `/intel/crm/company/${slug}`; }} placeholder="search a company → see every holder" /></span>
+          <span className="text-slate-400 text-xs hidden sm:inline">→ opens the holders / deal view for that company</span>
+        </div>
         {today && (
           <div className="flex flex-wrap gap-2 mb-4">
             <div className="px-3 py-2 bg-white border border-slate-200 rounded text-sm">
@@ -3513,7 +3518,7 @@ function CmdKPalette() {
 }
 
 // Autocomplete over the 841 tracked companies — replaces free-text slug entry.
-function CompanyPicker({ value, onChange, placeholder }) {
+function CompanyPicker({ value, onChange, onSelect, placeholder }) {
   const [q, setQ] = React.useState(value || '');
   const [opts, setOpts] = React.useState([]);
   const [open, setOpen] = React.useState(false);
@@ -3532,13 +3537,13 @@ function CompanyPicker({ value, onChange, placeholder }) {
       <input value={q} placeholder={placeholder || 'search tracked companies'}
         className="w-full border border-slate-300 rounded px-2 py-1 text-sm"
         onFocus={() => setOpen(true)}
-        onChange={e => { setQ(e.target.value); setOpen(true); onChange(e.target.value); }}
+        onChange={e => { setQ(e.target.value); setOpen(true); onChange && onChange(e.target.value); }}
         onBlur={() => setTimeout(() => setOpen(false), 150)} />
       {open && opts.length > 0 && (
         <div className="absolute z-20 left-0 right-0 bg-white border border-slate-200 rounded mt-0.5 max-h-44 overflow-y-auto text-sm shadow">
           {opts.map(o => (
             <button key={o.slug} type="button"
-              onClick={() => { onChange(o.slug); setQ(o.slug); setOpen(false); }}
+              onClick={() => { onChange && onChange(o.slug); onSelect && onSelect(o.slug); setQ(o.slug); setOpen(false); }}
               className="block w-full text-left px-2 py-1 hover:bg-slate-100">
               <span className="font-medium text-slate-800">{o.display_name}</span> <span className="text-slate-400 text-xs">{o.slug}</span>
             </button>
