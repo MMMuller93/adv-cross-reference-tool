@@ -1795,48 +1795,154 @@ function DashboardPage() {
   );
 }
 
-function AllCompaniesPage() {
+// --- Reusable sortable/filterable list table for the intel browse modules ---
+// columns: [{ key, label, num?, fmt?(val,row)->node, href?(row)->url }]
+function IntelListTable({ rows, columns, initialSort, searchKeys }) {
+  const [sort, setSort] = React.useState(initialSort || { key: columns[0].key, dir: 'asc' });
+  const [q, setQ] = React.useState('');
+  const filtered = React.useMemo(() => {
+    let r = rows;
+    if (q.trim() && searchKeys && searchKeys.length) {
+      const n = q.trim().toLowerCase();
+      r = r.filter(row => searchKeys.some(k => String(row[k] ?? '').toLowerCase().includes(n)));
+    }
+    const col = columns.find(c => c.key === sort.key) || {};
+    return [...r].sort((a, b) => {
+      let av = a[sort.key], bv = b[sort.key];
+      if (col.num) { av = Number(av) || 0; bv = Number(bv) || 0; return sort.dir === 'asc' ? av - bv : bv - av; }
+      av = String(av ?? '').toLowerCase(); bv = String(bv ?? '').toLowerCase();
+      return sort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    });
+  }, [rows, q, sort, columns, searchKeys]);
+  const toggle = k => setSort(s => (s.key === k ? { key: k, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key: k, dir: 'desc' }));
   return (
-    <AppShell activeModule="companies" breadcrumb={[{ label: 'All companies' }]}>
+    <div className="mt-3">
+      <div className="flex items-center gap-2 mb-2">
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="filter…"
+          className="border border-slate-300 rounded px-2 py-1 text-sm w-64" />
+        <span className="text-xs text-slate-500">{filtered.length}{filtered.length !== rows.length ? ` / ${rows.length}` : ''}</span>
+      </div>
+      <div className="overflow-x-auto border border-slate-200 rounded bg-white">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-slate-600">
+            <tr>{columns.map(c => (
+              <th key={c.key} onClick={() => toggle(c.key)}
+                className={`px-3 py-2 font-medium cursor-pointer select-none whitespace-nowrap hover:bg-slate-100 ${c.num ? 'text-right' : 'text-left'}`}>
+                {c.label}{sort.key === c.key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+              </th>))}</tr>
+          </thead>
+          <tbody>
+            {filtered.slice(0, 1000).map((row, i) => (
+              <tr key={i} className="border-t border-slate-100 hover:bg-slate-50">
+                {columns.map(c => {
+                  const raw = row[c.key];
+                  const val = c.fmt ? c.fmt(raw, row) : (raw ?? '—');
+                  const href = c.href ? c.href(row) : null;
+                  return (
+                    <td key={c.key} className={`px-3 py-1.5 whitespace-nowrap ${c.num ? 'text-right tabular-nums' : ''}`}>
+                      {href ? <a href={href} className="text-blue-700 hover:underline">{val}</a> : val}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {filtered.length > 1000 && <div className="text-xs text-slate-400 mt-1">showing first 1,000 of {filtered.length} — filter to narrow</div>}
+    </div>
+  );
+}
+
+function IntelListPage({ module, title, subtitle, url, columns, initialSort, searchKeys }) {
+  const [rows, setRows] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+  React.useEffect(() => {
+    let alive = true;
+    fetch(url).then(r => r.json())
+      .then(d => { if (alive) setRows(Array.isArray(d) ? d : (d.rows || d.companies || d.managers || d.funds || d.spvs || d.items || [])); })
+      .catch(e => { if (alive) setErr(String(e)); });
+    return () => { alive = false; };
+  }, [url]);
+  return (
+    <AppShell activeModule={module} breadcrumb={[{ label: title }]}>
       <div className="intel-page">
-        <h1 className="font-serif text-[26px] font-bold tracking-tight">All companies</h1>
-        <p className="text-[12px] text-slate-500 mt-1">Sortable list of every tracked company — coming next session. For now, click a watchlist item.</p>
+        <h1 className="font-serif text-[26px] font-bold tracking-tight">{title}</h1>
+        <p className="text-[12px] text-slate-500 mt-1">{subtitle}</p>
+        {err && <div className="text-rose-600 text-sm mt-3">Error: {err}</div>}
+        {!rows && !err && <div className="text-slate-400 text-sm mt-3">Loading…</div>}
+        {rows && <IntelListTable rows={rows} columns={columns} initialSort={initialSort} searchKeys={searchKeys} />}
       </div>
     </AppShell>
   );
+}
+
+const _usd = v => (v ? fmtUsdShort(v) : '—');
+
+function AllCompaniesPage() {
+  return <IntelListPage module="companies" title="All companies"
+    subtitle="Every tracked company. Click a company to see its holders."
+    url="/api/intel/companies"
+    initialSort={{ key: 'total_held_usd', dir: 'desc' }}
+    searchKeys={['display_name', 'slug', 'sector']}
+    columns={[
+      { key: 'display_name', label: 'Company', href: r => `/intel/${r.slug}` },
+      { key: 'sector', label: 'Sector' },
+      { key: 'lifecycle_status', label: 'Status' },
+      { key: 'latest_known_valuation_usd', label: 'Valuation', num: true, fmt: _usd },
+      { key: 'nport_count', label: 'N-PORT', num: true },
+      { key: 'formd_count', label: 'Form D', num: true },
+      { key: 'distinct_advisers', label: 'Managers', num: true },
+      { key: 'total_held_usd', label: 'Total held', num: true, fmt: _usd },
+    ]} />;
 }
 
 function AllManagersPage() {
-  return (
-    <AppShell activeModule="managers" breadcrumb={[{ label: 'All managers' }]}>
-      <div className="intel-page">
-        <h1 className="font-serif text-[26px] font-bold tracking-tight">All managers</h1>
-        <p className="text-[12px] text-slate-500 mt-1">Cross-cutting view across all tracked companies — coming next session.</p>
-      </div>
-    </AppShell>
-  );
+  return <IntelListPage module="managers" title="All managers"
+    subtitle="Every adviser/manager holding a tracked company, by total exposure."
+    url="/api/intel/managers-rollup"
+    initialSort={{ key: 'total_held_usd', dir: 'desc' }}
+    searchKeys={['name', 'crd', 'top_company_name']}
+    columns={[
+      { key: 'name', label: 'Manager' },
+      { key: 'crd', label: 'CRD' },
+      { key: 'company_count', label: 'Cos', num: true },
+      { key: 'filing_count', label: 'Filings', num: true },
+      { key: 'total_aum', label: 'AUM', num: true, fmt: _usd },
+      { key: 'total_held_usd', label: 'Held (tracked)', num: true, fmt: _usd },
+      { key: 'top_company_name', label: 'Top holding', href: r => (r.top_company_slug ? `/intel/${r.top_company_slug}` : null) },
+    ]} />;
 }
 
 function AllFundsPage() {
-  return (
-    <AppShell activeModule="funds" breadcrumb={[{ label: 'All funds' }]}>
-      <div className="intel-page">
-        <h1 className="font-serif text-[26px] font-bold tracking-tight">All funds</h1>
-        <p className="text-[12px] text-slate-500 mt-1">All N-PORT mutual fund holdings of tracked companies — coming next session.</p>
-      </div>
-    </AppShell>
-  );
+  return <IntelListPage module="funds" title="All funds"
+    subtitle="N-PORT registered funds with holdings in tracked companies."
+    url="/api/intel/funds-rollup"
+    initialSort={{ key: 'total_held_usd', dir: 'desc' }}
+    searchKeys={['adviser_name', 'series_id', 'cik', 'adviser_crd']}
+    columns={[
+      { key: 'adviser_name', label: 'Fund / adviser', fmt: (v, r) => v || `Series ${r.series_id || '—'}` },
+      { key: 'cik', label: 'CIK' },
+      { key: 'series_id', label: 'Series' },
+      { key: 'company_count', label: 'Cos', num: true },
+      { key: 'position_count', label: 'Positions', num: true },
+      { key: 'total_held_usd', label: 'Total held', num: true, fmt: _usd },
+    ]} />;
 }
 
 function AllSpvsPage() {
-  return (
-    <AppShell activeModule="spvs" breadcrumb={[{ label: 'All SPVs' }]}>
-      <div className="intel-page">
-        <h1 className="font-serif text-[26px] font-bold tracking-tight">All SPVs</h1>
-        <p className="text-[12px] text-slate-500 mt-1">All Form D pooled-vehicle offerings of tracked companies — coming next session.</p>
-      </div>
-    </AppShell>
-  );
+  return <IntelListPage module="spvs" title="All SPVs"
+    subtitle="Form D pooled-vehicle offerings (SPVs) that invested in tracked companies."
+    url="/api/intel/spvs-rollup"
+    initialSort={{ key: 'offering_usd', dir: 'desc' }}
+    searchKeys={['filer_entityname', 'company_name']}
+    columns={[
+      { key: 'filer_entityname', label: 'SPV / vehicle' },
+      { key: 'company_name', label: 'Company', href: r => (r.company_slug ? `/intel/${r.company_slug}` : null) },
+      { key: 'filing_date', label: 'Filed', fmt: v => (v ? fmtDate(v) : '—') },
+      { key: 'offering_usd', label: 'Offering', num: true, fmt: _usd },
+      { key: 'filer_cik', label: 'CIK' },
+    ]} />;
 }
 
 function PeoplePage() {
