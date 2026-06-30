@@ -1860,7 +1860,7 @@ function IntelListPage({ module, title, subtitle, url, columns, initialSort, sea
   React.useEffect(() => {
     let alive = true;
     fetch(url).then(r => r.json())
-      .then(d => { if (alive) setRows(Array.isArray(d) ? d : (d.rows || d.companies || d.managers || d.funds || d.spvs || d.items || [])); })
+      .then(d => { if (alive) setRows(Array.isArray(d) ? d : (d.rows || d.companies || d.managers || d.funds || d.spvs || d.people || d.events || d.items || [])); })
       .catch(e => { if (alive) setErr(String(e)); });
     return () => { alive = false; };
   }, [url]);
@@ -1946,25 +1946,34 @@ function AllSpvsPage() {
 }
 
 function PeoplePage() {
-  return (
-    <AppShell activeModule="people" breadcrumb={[{ label: 'People' }]}>
-      <div className="intel-page">
-        <h1 className="font-serif text-[26px] font-bold tracking-tight">People</h1>
-        <p className="text-[12px] text-slate-500 mt-1">Signatories, CCOs, principals, and team members across all entities — coming next session.</p>
-      </div>
-    </AppShell>
-  );
+  return <IntelListPage module="people" title="People"
+    subtitle="CCOs & authorized signatories at the firms holding tracked companies."
+    url="/api/intel/people"
+    initialSort={{ key: 'firm', dir: 'asc' }}
+    searchKeys={['name', 'firm', 'role', 'crd']}
+    columns={[
+      { key: 'name', label: 'Name' },
+      { key: 'role', label: 'Role' },
+      { key: 'title', label: 'Title' },
+      { key: 'firm', label: 'Firm' },
+      { key: 'crd', label: 'CRD' },
+      { key: 'email', label: 'Email', fmt: v => (v ? <a href={`mailto:${v}`} className="text-blue-700 hover:underline">{v}</a> : '—') },
+    ]} />;
 }
 
 function TimelinePage() {
-  return (
-    <AppShell activeModule="timeline" breadcrumb={[{ label: 'Timeline' }]}>
-      <div className="intel-page">
-        <h1 className="font-serif text-[26px] font-bold tracking-tight">Timeline</h1>
-        <p className="text-[12px] text-slate-500 mt-1">Recent lifecycle events + filings across all tracked companies — coming next session.</p>
-      </div>
-    </AppShell>
-  );
+  return <IntelListPage module="timeline" title="Timeline"
+    subtitle="Lifecycle events (IPOs, acquisitions, status changes) across tracked companies."
+    url="/api/intel/timeline"
+    initialSort={{ key: 'event_date', dir: 'desc' }}
+    searchKeys={['company_name', 'event_type', 'source_name']}
+    columns={[
+      { key: 'event_date', label: 'Date', fmt: v => (v ? fmtDate(v) : '—') },
+      { key: 'event_type', label: 'Event' },
+      { key: 'company_name', label: 'Company', href: r => (r.company_slug ? `/intel/${r.company_slug}` : null) },
+      { key: 'status_after', label: 'Status after' },
+      { key: 'source_name', label: 'Source' },
+    ]} />;
 }
 
 // --- main page --------------------------------------------------------------

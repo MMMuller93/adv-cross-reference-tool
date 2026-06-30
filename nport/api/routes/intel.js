@@ -628,7 +628,7 @@ router.get('/managers-rollup', async (req, res) => {
       const topEntry = Object.entries(r.perCompany).sort((a, b) => b[1] - a[1])[0] || [null, 0];
       return {
         crd,
-        name: adv.name || `(CRD ${crd})`,
+        name: adv.adviser_name || `(CRD ${crd})`,
         total_aum: adv.total_aum ? parseFloat(adv.total_aum) : null,
         total_held_usd: r.totalUsd,
         company_count: r.companies.size,
@@ -763,6 +763,66 @@ router.get('/funds-rollup', async (req, res) => {
 // ----------------------------------------------------------------------------
 // GET /api/intel/companies/:slug/holders
 // ----------------------------------------------------------------------------
+
+// --- GET /api/intel/timeline — recent company lifecycle events --------------
+router.get('/timeline', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const { data: events, error } = await deps.nportClient
+      .from('company_lifecycle_events')
+      .select('event_date,event_type,status_after,company_slug,source_name,source_url')
+      .order('event_date', { ascending: false })
+      .limit(500);
+    if (error) throw error;
+    const slugs = Array.from(new Set((events || []).map(e => e.company_slug).filter(Boolean)));
+    const nameBySlug = {};
+    for (let i = 0; i < slugs.length; i += 200) {
+      const { data } = await deps.nportClient
+        .from('private_companies').select('slug,display_name').in('slug', slugs.slice(i, i + 200));
+      for (const c of (data || [])) nameBySlug[c.slug] = c.display_name;
+    }
+    const rows = (events || []).map(e => ({ ...e, company_name: nameBySlug[e.company_slug] || e.company_slug }));
+    return res.json({ total: rows.length, events: rows });
+  } catch (err) { return serverError(res, err); }
+});
+
+// --- GET /api/intel/people — CCOs/signatories at firms holding tracked cos --
+router.get('/people', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const crdSet = new Set();
+    let pageStart = 0;
+    while (true) {
+      const { data, error } = await deps.nportClient
+        .from('v_intel_company_holders')
+        .select('adviser_crd,evidence_id')
+        .not('adviser_crd', 'is', null)
+        .gt('evidence_id', pageStart)
+        .order('evidence_id')
+        .limit(1000);
+      if (error) throw error;
+      const batch = data || [];
+      if (!batch.length) break;
+      for (const r of batch) crdSet.add(String(r.adviser_crd));
+      pageStart = parseInt(batch[batch.length - 1].evidence_id, 10);
+      if (batch.length < 1000) break;
+    }
+    const crds = Array.from(crdSet);
+    const details = await fetchAdviserDetails(deps.advClient, crds);
+    const people = [];
+    const seen = new Set();
+    for (const crd of crds) {
+      const adv = details[crd] || {};
+      const firm = adv.adviser_name || `(CRD ${crd})`;
+      const cco = normalizeName(adv.cco_name);
+      const sig = normalizeName(adv.signatory_name);
+      if (cco) { const k = `${cco}|${crd}|CCO`; if (!seen.has(k)) { seen.add(k); people.push({ name: cco, role: 'CCO', firm, crd, email: adv.cco_email || null, title: 'Chief Compliance Officer' }); } }
+      if (sig && sig !== cco) { const k = `${sig}|${crd}|SIG`; if (!seen.has(k)) { seen.add(k); people.push({ name: sig, role: 'Signatory', firm, crd, email: null, title: adv.signatory_title || null }); } }
+    }
+    people.sort((a, b) => String(a.firm).localeCompare(String(b.firm)) || String(a.name).localeCompare(String(b.name)));
+    return res.json({ total: people.length, people });
+  } catch (err) { return serverError(res, err); }
+});
 
 router.get('/companies/:slug/holders', async (req, res) => {
   if (!configGuard(res)) return;
