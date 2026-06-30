@@ -22,9 +22,8 @@ const { createClient } = require('@supabase/supabase-js');
 
 const NPORT_URL = process.env.SUPABASE_URL_NPORT;
 const NPORT_KEY = process.env.SUPABASE_SERVICE_KEY_NPORT;
-const G_KEY = process.env.GOOGLE_API_KEY, G_CX = process.env.GOOGLE_CX;
+const G_KEY = process.env.GOOGLE_API_KEY, G_CX = process.env.GOOGLE_CX;  // optional CSE fallback
 if (!NPORT_URL || !NPORT_KEY) { console.error('FATAL: SUPABASE_URL_NPORT / SUPABASE_SERVICE_KEY_NPORT required'); process.exit(2); }
-if (!G_KEY || !G_CX) { console.error('FATAL: GOOGLE_API_KEY / GOOGLE_CX required (Brave + Serper are quota-exhausted)'); process.exit(2); }
 const db = createClient(NPORT_URL, NPORT_KEY);
 
 const args = process.argv.slice(2);
@@ -41,15 +40,43 @@ const firmTokens = (firm) => (firm || '').toLowerCase().replace(/[^a-z0-9 ]/g, '
   .split(/\s+/).filter(t => t.length > 2 && !STOP.has(t));
 const tiesToFirm = (text, tokens) => { const t = (text || '').toLowerCase(); return tokens.some(tok => t.includes(tok)); };
 
-// Google Custom Search (Brave + Serper are quota-exhausted as of 2026-06).
-// Returns [{ link, title, snippet }]. Free tier = 100 queries/day.
-async function search(q) {
+const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
+const clean = (s) => (s || '').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'").trim();
+
+// DuckDuckGo HTML — free, no API key, no daily quota (Brave + Serper are
+// quota-exhausted as of 2026-06). Parses {link,title,snippet} from result blocks.
+async function ddg(q) {
+  try {
+    const r = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q), { headers: { 'User-Agent': UA } });
+    if (!r.ok) return [];
+    const html = await r.text();
+    const out = []; const re = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g; let m;
+    while ((m = re.exec(html))) {
+      const tm = m[1].match(/uddg=([^&]+)/); const link = tm ? decodeURIComponent(tm[1]) : m[1];
+      out.push({ link, title: clean(m[2]), snippet: '' });
+    }
+    const sr = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g; const sn = []; let s;
+    while ((s = sr.exec(html))) sn.push(clean(s[1]));
+    out.forEach((x, i) => { x.snippet = sn[i] || ''; });
+    return out;
+  } catch { return []; }
+}
+
+// Google CSE fallback (only if DDG returns nothing — rate-limited/blocked).
+async function googleCSE(q) {
+  if (!G_KEY || !G_CX) return [];
   try {
     const r = await fetch(`https://www.googleapis.com/customsearch/v1?key=${G_KEY}&cx=${G_CX}&q=${encodeURIComponent(q)}`);
     if (!r.ok) return [];
     const j = await r.json();
     return (j.items || []).map(it => ({ link: it.link, title: it.title, snippet: it.snippet }));
   } catch { return []; }
+}
+
+async function search(q) {
+  const d = await ddg(q);
+  if (d.length) return d;
+  return googleCSE(q);
 }
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
