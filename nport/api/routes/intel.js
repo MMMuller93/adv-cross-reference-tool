@@ -2444,6 +2444,51 @@ router.get('/crm/firms/:id/exposure', async (req, res) => {
   }
 });
 
+// --- GET /api/intel/crm/firms/:id/company/:slug/vehicles --------------------
+// Drill-down: the individual SPV/fund vehicles a firm holds a company through
+// (the "15×" detail). Reads per-evidence rows from crm_holder_exposure_v1 via
+// the firm's identities (adviser CRD and/or discovered manager).
+router.get('/crm/firms/:id/company/:slug/vehicles', async (req, res) => {
+  if (!configGuard(res)) return;
+  try {
+    const id = parseInt(req.params.id, 10);
+    const slug = String(req.params.slug || '').trim();
+    if (!Number.isFinite(id) || !slug) return res.status(400).json({ error: 'firm id + slug required' });
+    const { data: idents } = await deps.nportClient
+      .from('crm_firm_identity').select('adviser_crd,enriched_manager_id').eq('firm_id', id);
+    const crds = Array.from(new Set((idents || []).map(i => i.adviser_crd).filter(Boolean)));
+    const mgrs = Array.from(new Set((idents || []).map(i => i.enriched_manager_id).filter(Boolean)));
+    if (!crds.length && !mgrs.length) return res.json({ firm_id: id, company_slug: slug, vehicles: [] });
+
+    const cols = 'evidence_id,evidence_label,source_type,nport_value_usd,formd_offering_amount,evidence_date,accession_number';
+    const byId = new Map();
+    const collect = (rows) => { for (const r of (rows || [])) byId.set(r.evidence_id, r); };
+    if (crds.length) {
+      const { data, error } = await deps.nportClient.from('crm_holder_exposure_v1')
+        .select(cols).eq('company_slug', slug).in('adviser_crd', crds);
+      if (error) throw error;
+      collect(data);
+    }
+    if (mgrs.length) {
+      const { data, error } = await deps.nportClient.from('crm_holder_exposure_v1')
+        .select(cols).eq('company_slug', slug).in('discovered_manager_id', mgrs);
+      if (error) throw error;
+      collect(data);
+    }
+    const vehicles = Array.from(byId.values()).map(r => ({
+      vehicle: r.evidence_label,
+      is_formd: r.source_type === 'formd_pooled_vehicle',
+      amount_usd: r.nport_value_usd != null ? Number(r.nport_value_usd)
+        : (r.formd_offering_amount != null ? Number(r.formd_offering_amount) : null),
+      evidence_date: r.evidence_date,
+      accession_number: r.accession_number,
+    })).sort((a, b) => (b.amount_usd || 0) - (a.amount_usd || 0));
+    return res.json({ firm_id: id, company_slug: slug, count: vehicles.length, vehicles });
+  } catch (err) {
+    return serverError(res, err);
+  }
+});
+
 // --- GET /api/intel/crm/companies/search?q= ---------------------------------
 // Picker source: tracked companies by slug/display_name (replaces free text).
 router.get('/crm/companies/search', async (req, res) => {

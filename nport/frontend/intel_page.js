@@ -3712,27 +3712,61 @@ function PersonPicker({ onChange, placeholder }) {
 function FirmExposureList({ firmId }) {
   const [rows, setRows] = React.useState(null);
   const [showAll, setShowAll] = React.useState(false);
+  const [open, setOpen] = React.useState({});   // slug -> bool
+  const [veh, setVeh] = React.useState({});      // slug -> { loading, list }
   React.useEffect(() => {
     if (!firmId) { setRows([]); return; }
     fetch(`/api/intel/crm/firms/${firmId}/exposure`).then(r => r.json())
       .then(d => setRows(d.rows || [])).catch(() => setRows([]));
   }, [firmId]);
+  const toggle = (slug) => {
+    setOpen(o => ({ ...o, [slug]: !o[slug] }));
+    if (!veh[slug]) {
+      setVeh(v => ({ ...v, [slug]: { loading: true, list: [] } }));
+      fetch(`/api/intel/crm/firms/${firmId}/company/${encodeURIComponent(slug)}/vehicles`).then(r => r.json())
+        .then(d => setVeh(v => ({ ...v, [slug]: { loading: false, list: d.vehicles || [] } })))
+        .catch(() => setVeh(v => ({ ...v, [slug]: { loading: false, list: [] } })));
+    }
+  };
   if (rows === null) return <div className="text-xs text-slate-400 mt-2">Loading exposure…</div>;
   if (!rows.length) return <div className="text-xs text-slate-400 mt-2">No tracked-company exposure.</div>;
   const shown = showAll ? rows : rows.slice(0, 8);
   return (
     <div className="mt-2">
-      <div className="text-xs font-semibold text-slate-500 mb-1">Holds {rows.length} tracked {rows.length === 1 ? 'company' : 'companies'}</div>
+      <div className="text-xs font-semibold text-slate-500 mb-1">Holds {rows.length} tracked {rows.length === 1 ? 'company' : 'companies'} <span className="font-normal text-slate-400">— click a count to see vehicles</span></div>
       <table className="w-full text-xs">
         <tbody>
           {shown.map(r => (
-            <tr key={r.company_slug} className="border-t border-slate-100">
-              <td className="py-1"><a href={`/intel/crm/company/${r.company_slug}`} className="text-blue-700 hover:underline">{r.display_name || r.company_slug}</a></td>
-              <td className="py-1 text-right text-slate-600">
-                {r.nport_usd ? fmtUsd(r.nport_usd) : ''}{r.formd_usd ? `${r.nport_usd ? ' + ' : ''}${fmtUsd(r.formd_usd)} FD` : ''}
-              </td>
-              <td className="py-1 text-right text-slate-400 w-8">{r.positions}×</td>
-            </tr>
+            <React.Fragment key={r.company_slug}>
+              <tr className="border-t border-slate-100">
+                <td className="py-1"><a href={`/intel/crm/company/${r.company_slug}`} className="text-blue-700 hover:underline">{r.display_name || r.company_slug}</a></td>
+                <td className="py-1 text-right text-slate-600">
+                  {r.nport_usd ? fmtUsd(r.nport_usd) : ''}{r.formd_usd ? `${r.nport_usd ? ' + ' : ''}${fmtUsd(r.formd_usd)} FD` : ''}
+                </td>
+                <td className="py-1 text-right w-12">
+                  <button onClick={() => toggle(r.company_slug)} className="text-slate-500 hover:text-blue-700 tabular-nums" title="show vehicles">
+                    {r.positions}× {open[r.company_slug] ? '▾' : '▸'}
+                  </button>
+                </td>
+              </tr>
+              {open[r.company_slug] && (
+                <tr><td colSpan={3} className="pb-1.5">
+                  {(!veh[r.company_slug] || veh[r.company_slug].loading)
+                    ? <div className="text-slate-400 pl-3">loading vehicles…</div>
+                    : (
+                      <ul className="pl-3 border-l-2 border-slate-200 ml-1 space-y-0.5">
+                        {veh[r.company_slug].list.map((x, i) => (
+                          <li key={i} className="flex justify-between gap-2">
+                            <span className="truncate text-slate-700" title={x.vehicle}>{x.vehicle}</span>
+                            <span className="shrink-0 text-slate-500">{x.amount_usd ? fmtUsd(x.amount_usd) : '—'}{x.is_formd ? ' FD' : ''}{x.evidence_date ? ` · ${x.evidence_date}` : ''}</span>
+                          </li>
+                        ))}
+                        {!veh[r.company_slug].list.length && <li className="text-slate-400">no vehicle detail</li>}
+                      </ul>
+                    )}
+                </td></tr>
+              )}
+            </React.Fragment>
           ))}
         </tbody>
       </table>
