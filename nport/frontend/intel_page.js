@@ -1859,7 +1859,7 @@ function IntelListPage({ module, title, subtitle, url, columns, initialSort, sea
   const [err, setErr] = React.useState(null);
   React.useEffect(() => {
     let alive = true;
-    fetch(url).then(r => r.json())
+    fetch(url).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(d => { if (alive) setRows(Array.isArray(d) ? d : (d.rows || d.companies || d.managers || d.funds || d.spvs || d.people || d.events || d.items || [])); })
       .catch(e => { if (alive) setErr(String(e)); });
     return () => { alive = false; };

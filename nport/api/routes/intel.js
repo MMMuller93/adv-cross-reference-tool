@@ -2462,7 +2462,10 @@ router.get('/crm/firms/:id/company/:slug/vehicles', async (req, res) => {
 
     const cols = 'evidence_id,evidence_label,source_type,nport_value_usd,formd_offering_amount,evidence_date,accession_number';
     const byId = new Map();
-    const collect = (rows) => { for (const r of (rows || [])) byId.set(r.evidence_id, r); };
+    // evidence_id is source-LOCAL (position_id for N-PORT, offering_id for Form D),
+    // so dedup on a composite key — otherwise an N-PORT id and a Form D id that
+    // happen to be equal would collide and drop a real vehicle.
+    const collect = (rows) => { for (const r of (rows || [])) byId.set(`${r.source_type}:${r.evidence_id}`, r); };
     if (crds.length) {
       const { data, error } = await deps.nportClient.from('crm_holder_exposure_v1')
         .select(cols).eq('company_slug', slug).in('adviser_crd', crds);
@@ -2475,14 +2478,20 @@ router.get('/crm/firms/:id/company/:slug/vehicles', async (req, res) => {
       if (error) throw error;
       collect(data);
     }
-    const vehicles = Array.from(byId.values()).map(r => ({
+    const vehicles = Array.from(byId.values()).map(r => {
+      const isFormd = r.source_type === 'formd_pooled_vehicle';
+      return {
       vehicle: r.evidence_label,
-      is_formd: r.source_type === 'formd_pooled_vehicle',
+      is_formd: isFormd,
+      // N-PORT value is a holding fair-value MARK; Form D is the vehicle's OFFERING
+      // size — not comparable. Labeled by kind; sorted within source, never mixed.
+      amount_kind: isFormd ? 'formd_offering' : 'nport_mark',
       amount_usd: r.nport_value_usd != null ? Number(r.nport_value_usd)
         : (r.formd_offering_amount != null ? Number(r.formd_offering_amount) : null),
       evidence_date: r.evidence_date,
       accession_number: r.accession_number,
-    })).sort((a, b) => (b.amount_usd || 0) - (a.amount_usd || 0));
+      };
+    }).sort((a, b) => (Number(a.is_formd) - Number(b.is_formd)) || (b.amount_usd || 0) - (a.amount_usd || 0));
     return res.json({ firm_id: id, company_slug: slug, count: vehicles.length, vehicles });
   } catch (err) {
     return serverError(res, err);

@@ -42,24 +42,32 @@ const firmTokens = (firm) => (firm || '').toLowerCase().replace(/[^a-z0-9 ]/g, '
 const tiesToFirm = (text, tokens) => { const t = (text || '').toLowerCase(); return tokens.some(tok => t.includes(tok)); };
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
-const clean = (s) => (s || '').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'").trim();
+const clean = (s) => (s || '').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').trim();
+const safeDecode = (u) => { try { return decodeURIComponent(u); } catch { return u; } };
 
 // DuckDuckGo HTML — free, no API key, no daily quota (Brave + Serper are
-// quota-exhausted as of 2026-06). Parses {link,title,snippet} from result blocks.
+// quota-exhausted as of 2026-06). Pairs each result anchor with the snippet in
+// the SAME result block (first snippet between this anchor and the next) — NOT
+// by array index, which desyncs when a result lacks a snippet and would let a
+// profile inherit a different result's firm text (false-positive risk).
 async function ddg(q) {
   try {
     const r = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q), { headers: { 'User-Agent': UA } });
     if (!r.ok) return [];
     const html = await r.text();
-    const out = []; const re = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g; let m;
-    while ((m = re.exec(html))) {
-      const tm = m[1].match(/uddg=([^&]+)/); const link = tm ? decodeURIComponent(tm[1]) : m[1];
-      out.push({ link, title: clean(m[2]), snippet: '' });
+    if (html.length > 3000000) return [];
+    const anchors = []; const are = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g; let m;
+    while ((m = are.exec(html))) {
+      const tm = m[1].match(/uddg=([^&"]+)/);
+      anchors.push({ at: m.index, link: tm ? safeDecode(tm[1]) : m[1], title: clean(m[2]) });
     }
-    const sr = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g; const sn = []; let s;
-    while ((s = sr.exec(html))) sn.push(clean(s[1]));
-    out.forEach((x, i) => { x.snippet = sn[i] || ''; });
-    return out;
+    const snips = []; const sre = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g; let s;
+    while ((s = sre.exec(html))) snips.push({ at: s.index, text: clean(s[1]) });
+    return anchors.map((a, i) => {
+      const hi = i + 1 < anchors.length ? anchors[i + 1].at : Infinity;
+      const sn = snips.find(x => x.at > a.at && x.at < hi);
+      return { link: a.link, title: a.title, snippet: sn ? sn.text : '' };
+    });
   } catch { return []; }
 }
 
@@ -101,9 +109,11 @@ async function enrichPeople() {
     // >=1 independent firm token so the firm match is real, not a name coincidence.
     const nameTokens = new Set((p.full_name || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean));
     const tokens = firmTokens(firm).filter(t => !nameTokens.has(t));
-    // Name guard: the result must also be THIS person (last name in title or slug).
-    const lastName = ((p.full_name || '').trim().split(/\s+/).filter(Boolean).pop() || '').toLowerCase().replace(/[^a-z]/g, '');
-    const nameOk = (o) => lastName.length < 3 || (o.title || '').toLowerCase().includes(lastName) || (o.link || '').toLowerCase().includes(lastName);
+    // Name guard: require BOTH first and last name in the title or slug — last-
+    // name-only let "Jane Smith" satisfy a "John Smith" search at the same firm.
+    const np = (p.full_name || '').toLowerCase().replace(/[^a-z ]/g, ' ').split(/\s+/).filter(t => t.length > 1);
+    const first = np[0] || '', last = np[np.length - 1] || '';
+    const nameOk = (o) => { const h = `${o.title || ''} ${o.link || ''}`.toLowerCase(); return (last.length < 3 || h.includes(last)) && (first.length < 2 || h.includes(first)); };
     const results = await search(`${p.full_name} ${firm} linkedin`);
     const hit = results.find(o => /linkedin\.com\/in\//i.test(o.link || '') && nameOk(o) && tokens.length &&
       (tiesToFirm(o.title, tokens) || tiesToFirm(o.snippet, tokens)));
