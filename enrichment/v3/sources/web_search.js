@@ -126,8 +126,33 @@ async function serperSearch(query) {
   } catch (_) { return null; }
 }
 
+// DuckDuckGo HTML — free, no API key, no quota. Last-resort fallback so the
+// engine still finds results when Brave/Google/Serper are exhausted or
+// rate-limited. Caveat: it is HTML scraping, so it rate-limits under heavy bulk
+// (a full nightly drain) — reliable for moderate volume, a stopgap not a
+// replacement for a paid provider.
+async function ddgSearch(query) {
+  try {
+    const res = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query), {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36' },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const strip = (s) => (s || '').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'").trim();
+    const out = []; const re = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g; let m;
+    while ((m = re.exec(html))) {
+      const tm = m[1].match(/uddg=([^&]+)/); const url = tm ? decodeURIComponent(tm[1]) : m[1];
+      out.push({ title: strip(m[2]), url, description: '' });
+    }
+    const sr = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g; const sn = []; let s;
+    while ((s = sr.exec(html))) sn.push(strip(s[1]));
+    out.forEach((x, i) => { x.description = sn[i] || ''; });
+    return { web: { results: out } };
+  } catch (_) { return null; }
+}
+
 /**
- * Unified search with Brave → Google → Serper fallback chain.
+ * Unified search with Brave → Google → Serper → DuckDuckGo fallback chain.
  */
 async function search(query) {
   if (BRAVE_API_KEY) {
@@ -140,6 +165,12 @@ async function search(query) {
   }
   if (SERPER_API_KEY && serperFailures < SERPER_MAX_FAILURES) {
     const r = await serperSearch(query);
+    if (r?.web?.results?.length > 0) return r;
+  }
+  // Free, keyless last resort — keeps the engine producing when the paid
+  // providers are exhausted (e.g. after a big nightly drain burns the quotas).
+  {
+    const r = await ddgSearch(query);
     if (r?.web?.results?.length > 0) return r;
   }
   return null;
