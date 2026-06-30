@@ -34,8 +34,9 @@ const execute = args.includes('--execute');
 
 // Generic words that must NOT count as a firm-identity match.
 const STOP = new Set(['llc', 'lp', 'inc', 'ltd', 'llp', 'capital', 'ventures', 'venture', 'partners',
-  'management', 'advisors', 'advisers', 'fund', 'funds', 'group', 'holdings', 'company', 'co', 'the',
-  'and', 'asset', 'investment', 'investments', 'global', 'securities', 'financial']);
+  'management', 'advisors', 'advisers', 'advisor', 'adviser', 'fund', 'funds', 'group', 'holdings',
+  'company', 'co', 'the', 'and', 'asset', 'investment', 'investments', 'global', 'securities',
+  'financial', 'research', 'enterprise', 'associates']);
 const firmTokens = (firm) => (firm || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ')
   .split(/\s+/).filter(t => t.length > 2 && !STOP.has(t));
 const tiesToFirm = (text, tokens) => { const t = (text || '').toLowerCase(); return tokens.some(tok => t.includes(tok)); };
@@ -131,9 +132,15 @@ async function enrichFirms() {
   let matched = 0;
   for (const f of sample) {
     const tokens = firmTokens(f.display_name);
+    // Require a distinctive firm token in the company SLUG itself — stronger than
+    // a mere description mention (stops "Capital Research" -> "research-capital",
+    // "ID Funds Advisor" -> "dimensional-fund-advisors"). Namesake firms sharing a
+    // distinctive word (e.g. two "Scenic" cos) remain genuinely ambiguous → skipped
+    // unless their slug carries the firm's distinctive token.
+    const slugWords = (url) => { const m = (url || '').match(/\/company\/([^/?#]+)/i); return m ? m[1].toLowerCase().replace(/[-_]/g, ' ') : ''; };
     const results = await search(`${f.display_name} linkedin company`);
-    const hit = results.find(o => /linkedin\.com\/company\//i.test(o.link || '') &&
-      (tiesToFirm(o.title, tokens) || tiesToFirm(o.snippet, tokens)));
+    const hit = results.find(o => /linkedin\.com\/company\//i.test(o.link || '') && tokens.length &&
+      tiesToFirm(slugWords(o.link), tokens));
     if (hit) {
       matched++;
       console.log(`  OK  ${f.display_name}\n        -> ${hit.link}`);
